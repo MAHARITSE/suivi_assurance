@@ -1,14 +1,14 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  FileText, 
-  CreditCard, 
-  FileSpreadsheet, 
-  History, 
-  Building, 
-  Users, 
-  Layers, 
-  Printer
+import {
+  LayoutDashboard,
+  FileText,
+  CreditCard,
+  FileUp,
+  History,
+  Building,
+  Users,
+  Layers,
+  Printer,
 } from 'lucide-react';
 import { ActiveTab } from '../types';
 
@@ -18,42 +18,55 @@ interface NavigationProps {
 }
 
 export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }) => {
-  const navItems: { id: ActiveTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
+  const navItems: {
+    id: ActiveTab;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    startsGroup?: boolean;
+  }[] = [
+    { id: 'dashboard', label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: 'prestations', label: 'Prestations', icon: FileText },
-    { id: 'paiements', label: 'Saisie & Règlements', icon: CreditCard },
-    { id: 'importation', label: 'Importation PDF & Excel', icon: FileSpreadsheet },
+    { id: 'paiements', label: 'Règlements', icon: CreditCard },
+    { id: 'importation', label: 'Importer', icon: FileUp },
     { id: 'historique', label: 'Historique', icon: History },
-    { id: 'societes', label: 'Sociétés', icon: Building },
-    { id: 'personnes', label: 'Adhérents / Assurés', icon: Users },
-    { id: 'familles', label: 'Actes & Familles', icon: Layers },
-    { id: 'etats', label: 'États & Rapports', icon: Printer },
+    { id: 'societes', label: 'Sociétés', icon: Building, startsGroup: true },
+    { id: 'personnes', label: 'Assurés', icon: Users },
+    { id: 'familles', label: 'Actes', icon: Layers },
+    { id: 'etats', label: 'Rapports', icon: Printer },
   ];
 
   return (
-    <nav id="primary-navigation" className="bg-white border-b border-slate-200 sticky top-16 z-30 shadow-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex space-x-1 sm:space-x-2 overflow-x-auto py-2.5 scrollbar-none">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
+    <nav
+      id="primary-navigation"
+      aria-label="Navigation principale"
+      className="sticky top-16 z-30 border-b border-slate-200 bg-white"
+    >
+      <div className="scrollbar-none flex w-full items-center overflow-x-auto px-4 sm:px-6 lg:px-8">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+
+          return (
+            <React.Fragment key={item.id}>
+              {item.startsGroup && (
+                <span aria-hidden="true" className="mx-2 h-5 w-px shrink-0 bg-slate-200 lg:mx-3" />
+              )}
               <button
-                key={item.id}
                 id={`nav-tab-${item.id}`}
                 onClick={() => onTabChange(item.id)}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                aria-current={isActive ? 'page' : undefined}
+                className={`relative flex h-12 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium whitespace-nowrap transition-colors ${
                   isActive
-                    ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    ? 'border-indigo-600 text-indigo-700'
+                    : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-900'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                <Icon className={`h-4 w-4 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
                 <span>{item.label}</span>
               </button>
-            );
-          })}
-        </div>
+            </React.Fragment>
+          );
+        })}
       </div>
     </nav>
   );

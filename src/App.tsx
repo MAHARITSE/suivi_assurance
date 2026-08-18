@@ -201,25 +201,21 @@ export function App() {
     a.click();
   };
 
-  const totalMontantPaye = paiements.reduce((sum, p) => sum + (p.totalPaye || 0), 0);
-
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col antialiased">
+    <div className="flex min-h-screen flex-col bg-slate-50 antialiased">
       {/* Top Header */}
       <Header
         societes={societes}
         selectedSocieteId={selectedSocieteId}
         onSelectSociete={setSelectedSocieteId}
-        totalPrestationsCount={prestations.length}
-        totalMontantPaye={totalMontantPaye}
         onExportBackup={handleExportBackup}
       />
 
       {/* Navigation Tab Bar */}
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      {/* Main Content Area — volontairement fluide pour exploiter toute la largeur disponible */}
+      <main className="w-full min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
         {activeTab === 'dashboard' && (
           <Dashboard
             prestations={prestations}
@@ -328,10 +324,6 @@ export function App() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-400 no-print">
-        SUIVI ASSURANCE SANTÉ & PRESTATIONS • Système de Gestion et de Rapprochement d'Assurance
-      </footer>
     </div>
   );
 }
