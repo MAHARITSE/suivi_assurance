@@ -9,8 +9,7 @@ import {
   Clock, 
   Plus, 
   FileSpreadsheet,
-  ArrowRight,
-  ShieldCheck
+  ArrowRight
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Famille, Personne, ActiveTab } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
@@ -81,44 +80,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div id="dashboard-view" className="space-y-6">
-      {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            <h2 className="text-xl font-bold">Suivi et Rapprochement des Assurances Santé</h2>
-          </div>
-          <p className="text-slate-300 text-sm max-w-2xl">
-            Système centralisé de traitement des dossiers de soins, contrôle des franchises et calcul des bordereaux de règlement assurance.
-          </p>
+      {/* En-tête volontairement concis : les actions utiles restent accessibles sans bannière dense. */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <h2 className="text-xl font-bold text-slate-950">Vue d'ensemble</h2>
+          <p className="mt-0.5 text-sm text-slate-500">Les indicateurs essentiels de votre activité.</p>
         </div>
 
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             id="btn-quick-new-prestation"
             onClick={onOpenNewPrestation}
-            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow transition"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            <Plus className="w-4 h-4" />
-            <span>Nouvelle Prestation</span>
+            <Plus className="h-4 w-4" />
+            <span>Prestation</span>
           </button>
 
           <button
             id="btn-quick-new-paiement"
             onClick={onOpenNewPaiement}
-            className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow transition"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            <Receipt className="w-4 h-4" />
-            <span>Saisie Règlement</span>
+            <Receipt className="h-4 w-4" />
+            <span>Règlement</span>
           </button>
 
           <button
             id="btn-quick-import"
             onClick={() => onNavigate('importation')}
-            className="flex items-center space-x-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-sm font-semibold px-4 py-2 rounded-xl border border-indigo-400/30 transition"
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
           >
-            <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
-            <span>Importer PDF / Excel</span>
+            <FileSpreadsheet className="h-4 w-4" />
+            <span>Importer</span>
           </button>
         </div>
       </div>

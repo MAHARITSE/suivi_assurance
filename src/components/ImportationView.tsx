@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   FileSpreadsheet, 
   Upload, 
@@ -269,15 +269,6 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
       setIsProcessing(false);
     }, 200);
   };
-
-  // Automatically adapt and load the BSA invoice on initial visit
-  useEffect(() => {
-    if (!parsedInvoice) {
-      const enriched = enrichParsedInvoice(salfaSampleInvoice);
-      setParsedInvoice(enriched);
-      setFileName('FACTURE_SALFA_TOLIARA_MAI_2026.pdf');
-    }
-  }, []);
 
   // Upload handler for PDF or Excel
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -743,132 +734,112 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
     : [];
 
   return (
-    <div id="importation-view" className="space-y-6">
-      {/* Top Banner & Fast Actions */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center space-x-1">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>MCI CARE • ASCOMA • BSA • SALFA</span>
-              </span>
-              <span className="text-xs text-slate-400 font-medium">Décomptes, factures & sous-sociétés</span>
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mt-1">
-              Importation Automatisée des Décomptes & Factures Médicales
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5 max-w-3xl leading-relaxed">
-              Prise en charge intégrale des états de décomptes tiers payant pour vos principaux clients d'assurance (<strong>MCI CARE</strong>, <strong>ASCOMA / Gras Savoye</strong>, <strong>BSA / ASK GS</strong>). Les informations entre parenthèses sont automatiquement rattachées en sous-sociétés (ex: BFV Employés, Retraités, Telma) et vous pouvez relier tout acte inconnu en 1 clic.
-            </p>
-          </div>
+    <div id="importation-view" className="space-y-5">
+      {/* Un titre court et une seule action secondaire gardent l’écran lisible. */}
+      <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <h2 className="text-xl font-bold text-slate-950">Importer un document</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Ajoutez un décompte ou une facture, puis contrôlez les données extraites.
+          </p>
+        </div>
+        <button
+          onClick={() => handleDownloadSampleExcel('facture')}
+          className="inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+        >
+          <Download className="h-4 w-4 text-slate-500" />
+          <span>Télécharger le modèle Excel</span>
+        </button>
+      </section>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleDownloadSampleExcel('facture')}
-              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 shadow-xs"
-            >
-              <Download className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Modèle Excel (.xlsx)</span>
-            </button>
-          </div>
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        {/* Choix du format */}
+        <div className="flex items-center gap-1 p-1.5">
+          <button
+            onClick={() => setActiveSourceType('pdf')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
+              activeSourceType === 'pdf'
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+            }`}
+          >
+            <FileText className="h-4 w-4" />
+            <span>PDF ou image</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSourceType('excel')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
+              activeSourceType === 'excel'
+                ? 'bg-emerald-50 text-emerald-700'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+            }`}
+          >
+            <ExcelIcon className="h-4 w-4" />
+            <span>Excel ou CSV</span>
+          </button>
         </div>
 
-        {/* Predefined Test Buttons for MCI, ASCOMA, BSA */}
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center space-x-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Charger un exemple d'état de décompte reçu :</span>
-            </span>
-          </div>
+        {/* Les jeux de démonstration restent disponibles, mais ne chargent plus l’écran par défaut. */}
+        <details className="group border-t border-slate-100">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-800">
+            <Sparkles className="h-4 w-4 text-indigo-500" />
+            <span>Essayer avec un exemple</span>
+            <span className="hidden font-normal text-slate-400 sm:inline">ASCOMA, MCI CARE, BSA ou SALFA</span>
+            <span className="ml-auto text-slate-400 transition group-open:rotate-90">›</span>
+          </summary>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-1 gap-2 border-t border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-4">
             <button
               id="btn-load-ascoma-sample"
               onClick={() => handleLoadPredefinedSample('ascoma')}
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white hover:bg-indigo-50 text-indigo-900 border border-indigo-200 shadow-xs transition text-left group"
+              className="group/example flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-indigo-200 hover:bg-indigo-50"
             >
               <div>
-                <div className="font-bold text-indigo-700 flex items-center space-x-1">
-                  <span>ASCOMA Tiers Payant</span>
-                </div>
-                <div className="text-[11px] text-slate-500 font-normal">Réf 69235 (23 actes • 1 344 683 Ar)</div>
+                <div className="text-xs font-semibold text-slate-800">ASCOMA</div>
+                <div className="text-[11px] text-slate-500">23 actes · 1 344 683 Ar</div>
               </div>
-              <ArrowRight className="w-3.5 h-3.5 text-indigo-400 group-hover:translate-x-0.5 transition" />
+              <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover/example:translate-x-0.5" />
             </button>
 
             <button
               id="btn-load-mci-sample"
               onClick={() => handleLoadPredefinedSample('mci')}
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white hover:bg-blue-50 text-blue-900 border border-blue-200 shadow-xs transition text-left group"
+              className="group/example flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-indigo-200 hover:bg-indigo-50"
             >
               <div>
-                <div className="font-bold text-blue-700 flex items-center space-x-1">
-                  <span>MCI CARE (GROUPE AXIAN)</span>
-                </div>
-                <div className="text-[11px] text-slate-500 font-normal">Pharmacie & Sous-factures (474 600 Ar)</div>
+                <div className="text-xs font-semibold text-slate-800">MCI CARE</div>
+                <div className="text-[11px] text-slate-500">Pharmacie · 474 600 Ar</div>
               </div>
-              <ArrowRight className="w-3.5 h-3.5 text-blue-400 group-hover:translate-x-0.5 transition" />
+              <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover/example:translate-x-0.5" />
             </button>
 
             <button
               id="btn-load-bsa-sample"
               onClick={() => handleLoadPredefinedSample('bsa')}
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-200 shadow-xs transition text-left group"
+              className="group/example flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-indigo-200 hover:bg-indigo-50"
             >
               <div>
-                <div className="font-bold text-emerald-700 flex items-center space-x-1">
-                  <span>BSA / ASK GS (Relevé Virement)</span>
-                </div>
-                <div className="text-[11px] text-slate-500 font-normal">Lot 890621 (45 actes • 761 150 Ar)</div>
+                <div className="text-xs font-semibold text-slate-800">BSA / ASK GS</div>
+                <div className="text-[11px] text-slate-500">45 actes · 761 150 Ar</div>
               </div>
-              <ArrowRight className="w-3.5 h-3.5 text-emerald-400 group-hover:translate-x-0.5 transition" />
+              <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover/example:translate-x-0.5" />
             </button>
 
             <button
               id="btn-load-salfa-sample"
               onClick={() => handleLoadPredefinedSample('salfa')}
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 shadow-xs transition text-left group"
+              className="group/example flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-indigo-200 hover:bg-indigo-50"
             >
               <div>
-                <div className="font-bold text-slate-900 flex items-center space-x-1">
-                  <span>SALFA Facture Hôpital</span>
-                </div>
-                <div className="text-[11px] text-slate-500 font-normal">FA-05/BSA (25 lignes • 2 216 700 Ar)</div>
+                <div className="text-xs font-semibold text-slate-800">SALFA</div>
+                <div className="text-[11px] text-slate-500">25 lignes · 2 216 700 Ar</div>
               </div>
-              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition" />
+              <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover/example:translate-x-0.5" />
             </button>
           </div>
-        </div>
-
-        {/* Source Tab Selector */}
-        <div className="flex border-b border-slate-200 pt-2 space-x-6">
-          <button
-            onClick={() => setActiveSourceType('pdf')}
-            className={`pb-3 text-xs font-bold flex items-center space-x-2 border-b-2 transition ${
-              activeSourceType === 'pdf'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Décompte / Facture PDF ou Image (MCI, ASCOMA, BSA, SALFA)</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSourceType('excel')}
-            className={`pb-3 text-xs font-bold flex items-center space-x-2 border-b-2 transition ${
-              activeSourceType === 'excel'
-                ? 'border-emerald-600 text-emerald-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <ExcelIcon className="w-4 h-4" />
-            <span>Fichier Excel / CSV (.xlsx, .csv)</span>
-          </button>
-        </div>
-      </div>
+        </details>
+      </section>
 
       {/* Notifications */}
       {importSuccessMsg && (
@@ -897,33 +868,29 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
 
       {/* Drop Zone Box */}
       {!parsedInvoice && excelRows.length === 0 && (
-        <div 
+        <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          className="bg-white rounded-2xl border-2 border-dashed border-slate-300 hover:border-indigo-500 p-10 text-center transition flex flex-col items-center justify-center space-y-4 shadow-xs"
+          className="flex min-h-64 flex-col items-center justify-center space-y-4 rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center transition hover:border-indigo-400 hover:bg-indigo-50/20"
         >
-          <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+          <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${activeSourceType === 'pdf' ? 'bg-indigo-50 text-indigo-600' : 'bg-emerald-50 text-emerald-600'}`}>
             {isProcessing ? (
-              <RefreshCw className="w-8 h-8 animate-spin" />
+              <RefreshCw className="h-6 w-6 animate-spin" />
             ) : activeSourceType === 'pdf' ? (
-              <FileText className="w-8 h-8" />
+              <FileText className="h-6 w-6" />
             ) : (
-              <ExcelIcon className="w-8 h-8 text-emerald-600" />
+              <ExcelIcon className="h-6 w-6" />
             )}
           </div>
 
-          <div className="space-y-1 max-w-md">
-            <h3 className="text-base font-bold text-slate-800">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">
               {isProcessing
-                ? 'Extraction intelligente du décompte en cours...'
-                : activeSourceType === 'pdf'
-                ? 'Glissez-déposez le PDF de décompte ou facture ici'
-                : 'Glissez-déposez votre fichier Excel / CSV ici'}
+                ? 'Analyse du document…'
+                : 'Déposez votre fichier ici'}
             </h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              {activeSourceType === 'pdf'
-                ? 'Reconnaît automatiquement les décomptes ASCOMA, MCI CARE, BSA, SALFA ainsi que les codes actes (DC, DK, PHSB, PH, CG, EB, SI, etc.) et extrait toutes les sous-sociétés entre parenthèses.'
-                : 'Lit et associe automatiquement les colonnes de règlements et factures de soins.'}
+            <p className="mt-1 text-xs text-slate-500">
+              {activeSourceType === 'pdf' ? 'PDF, JPG ou PNG' : 'XLSX, XLS ou CSV'} · 25 Mo maximum
             </p>
           </div>
 
@@ -935,15 +902,13 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
             className="hidden"
           />
 
-          <div className="flex items-center space-x-3 pt-2">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition"
-            >
-              Sélectionner un document ({activeSourceType === 'pdf' ? 'PDF ou Image' : 'Excel .xlsx'})
-            </button>
-          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessing}
+            className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
+          >
+            Parcourir les fichiers
+          </button>
         </div>
       )}
 
@@ -1068,68 +1033,64 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
               </div>
             )}
 
-            {/* Ingestion Settings & Options */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                Options d'Intégration et de Rapprochement Automatique
-              </h4>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                {/* Target Mode Selection */}
-                <div className="space-y-2">
-                  <span className="font-semibold text-slate-700 block">Mode de destination :</span>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="importTargetMode"
-                        checked={importTargetMode === 'prestations'}
-                        onChange={() => setImportTargetMode('prestations')}
-                        className="text-indigo-600"
-                      />
-                      <span>Enregistrer les {parsedInvoice.lignes.length} dossiers de soins / prestations</span>
-                    </label>
+            {/* Les réglages avancés sont repliés pour préserver une lecture simple du document. */}
+            <details className="group overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-semibold text-slate-700">
+                <span>Options d’intégration</span>
+                <span className="font-normal text-slate-400">
+                  · {importTargetMode === 'prestations' ? `${parsedInvoice.lignes.length} prestations` : '1 bordereau'}
+                </span>
+                <span className="ml-auto text-slate-400 transition group-open:rotate-90">›</span>
+              </summary>
 
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="importTargetMode"
-                        checked={importTargetMode === 'paiements'}
-                        onChange={() => setImportTargetMode('paiements')}
-                        className="text-emerald-600"
-                      />
-                      <span>Créer le bordereau de règlement global ({formatMoney(parsedInvoice.totalNetAPayer)})</span>
-                    </label>
-                  </div>
+              <div className="grid grid-cols-1 gap-5 border-t border-slate-200 bg-white p-4 text-xs md:grid-cols-2">
+                <div className="space-y-2.5">
+                  <span className="block font-semibold text-slate-700">Destination</span>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="importTargetMode"
+                      checked={importTargetMode === 'prestations'}
+                      onChange={() => setImportTargetMode('prestations')}
+                      className="text-indigo-600"
+                    />
+                    <span>Créer {parsedInvoice.lignes.length} prestations</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="importTargetMode"
+                      checked={importTargetMode === 'paiements'}
+                      onChange={() => setImportTargetMode('paiements')}
+                      className="text-emerald-600"
+                    />
+                    <span>Créer un bordereau de {formatMoney(parsedInvoice.totalNetAPayer)}</span>
+                  </label>
                 </div>
 
-                {/* Auto Creation Options */}
-                <div className="space-y-2">
-                  <span className="font-semibold text-slate-700 block">Automatisation des fiches et sous-sociétés :</span>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={autoCreateMissingPersonnes}
-                        onChange={(e) => setAutoCreateMissingPersonnes(e.target.checked)}
-                        className="rounded text-indigo-600"
-                      />
-                      <span>Créer automatiquement les assurés / ayants droit</span>
-                    </label>
-
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={autoCreateMissingSocietes}
-                        onChange={(e) => setAutoCreateMissingSocietes(e.target.checked)}
-                        className="rounded text-indigo-600"
-                      />
-                      <span>Créer automatiquement les sous-sociétés entre parenthèses</span>
-                    </label>
-                  </div>
+                <div className="space-y-2.5">
+                  <span className="block font-semibold text-slate-700">Création automatique</span>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoCreateMissingPersonnes}
+                      onChange={(e) => setAutoCreateMissingPersonnes(e.target.checked)}
+                      className="rounded text-indigo-600"
+                    />
+                    <span>Assurés et ayants droit manquants</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoCreateMissingSocietes}
+                      onChange={(e) => setAutoCreateMissingSocietes(e.target.checked)}
+                      className="rounded text-indigo-600"
+                    />
+                    <span>Sous-sociétés manquantes</span>
+                  </label>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
 
           {/* Table Filters & Toolbar */}

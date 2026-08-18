@@ -1,14 +1,11 @@
 import React from 'react';
-import { Shield, Building2, UserCheck, Receipt, Download } from 'lucide-react';
+import { ShieldCheck, Building2, Download } from 'lucide-react';
 import { Societe } from '../types';
-import { formatMoney } from '../utils/formatters';
 
 interface HeaderProps {
   societes: Societe[];
   selectedSocieteId: string;
   onSelectSociete: (id: string) => void;
-  totalPrestationsCount: number;
-  totalMontantPaye: number;
   onExportBackup: () => void;
 }
 
@@ -16,73 +13,59 @@ export const Header: React.FC<HeaderProps> = ({
   societes,
   selectedSocieteId,
   onSelectSociete,
-  totalPrestationsCount,
-  totalMontantPaye,
   onExportBackup,
 }) => {
   return (
-    <header id="main-header" className="bg-slate-900 text-white border-b border-slate-800 shadow-sm sticky top-0 z-40">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo & Title */}
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center shadow-inner text-white">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-lg font-bold tracking-tight text-white">SUIVI ASSURANCE</h1>
-                <span className="bg-indigo-500/20 text-indigo-300 text-xs font-semibold px-2 py-0.5 rounded border border-indigo-500/30">
-                  v2.0 Web Edition
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">Gestion des Prestations, Règlements & Rapprochements</p>
-            </div>
+    <header
+      id="main-header"
+      className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur"
+    >
+      <div className="flex h-16 w-full items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-200">
+            <ShieldCheck className="h-5 w-5" />
           </div>
-
-          {/* Center Quick Stats */}
-          <div className="hidden md:flex items-center space-x-6 text-sm">
-            <div className="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-              <Receipt className="w-4 h-4 text-emerald-400" />
-              <span className="text-slate-400 text-xs">Total Règlements:</span>
-              <span className="font-semibold text-emerald-400">{formatMoney(totalMontantPaye)}</span>
-            </div>
-
-            <div className="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-              <UserCheck className="w-4 h-4 text-sky-400" />
-              <span className="text-slate-400 text-xs">Prestations:</span>
-              <span className="font-semibold text-sky-400">{totalPrestationsCount}</span>
-            </div>
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-bold tracking-tight text-slate-950 sm:text-base">
+              Suivi Assurance
+            </h1>
+            <p className="hidden text-xs text-slate-500 sm:block">Gestion des prestations santé</p>
           </div>
+        </div>
 
-          {/* Right Controls: Company filter & Data actions */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2 bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700">
-              <Building2 className="w-4 h-4 text-indigo-400" />
-              <select
-                id="header-societe-selector"
-                value={selectedSocieteId}
-                onChange={(e) => onSelectSociete(e.target.value)}
-                className="bg-transparent text-xs sm:text-sm text-slate-200 focus:outline-none border-none cursor-pointer pr-2"
-              >
-                <option value="ALL" className="bg-slate-900 text-white">Toutes les Sociétés</option>
-                {societes.map((s) => (
-                  <option key={s.id} value={s.id} className="bg-slate-900 text-white">
-                    {s.nom} ({s.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              id="btn-backup-export"
-              onClick={onExportBackup}
-              title="Exporter les données (JSON de sauvegarde)"
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <label
+            htmlFor="header-societe-selector"
+            className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-slate-600 transition focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100"
+          >
+            <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="hidden text-xs font-medium lg:inline">Périmètre</span>
+            <select
+              id="header-societe-selector"
+              aria-label="Filtrer par société"
+              value={selectedSocieteId}
+              onChange={(e) => onSelectSociete(e.target.value)}
+              className="max-w-40 min-w-0 cursor-pointer border-0 bg-transparent text-xs font-semibold text-slate-800 outline-none sm:max-w-56"
             >
-              <Download className="w-4 h-4" />
-            </button>
-          </div>
+              <option value="ALL">Toutes les sociétés</option>
+              {societes.map((societe) => (
+                <option key={societe.id} value={societe.id}>
+                  {societe.nom} ({societe.code})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            id="btn-backup-export"
+            onClick={onExportBackup}
+            title="Télécharger une sauvegarde des données"
+            aria-label="Télécharger une sauvegarde"
+            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden xl:inline">Sauvegarder</span>
+          </button>
         </div>
       </div>
     </header>
