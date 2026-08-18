@@ -16,10 +16,12 @@ import {
   X,
   User,
   Building,
-  Calendar
+  Calendar,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Prestation, LignePrestation, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { SalfaImportModal } from './SalfaImportModal';
 import * as XLSX from 'xlsx';
 
 interface PrestationsViewProps {
@@ -30,6 +32,7 @@ interface PrestationsViewProps {
   selectedSocieteId: string;
   onSavePrestation: (prestation: Prestation) => void;
   onDeletePrestation: (id: string) => void;
+  onImportPrestations?: (newPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
   isCreateModalOpen: boolean;
   setIsCreateModalOpen: (open: boolean) => void;
 }
@@ -42,6 +45,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   selectedSocieteId,
   onSavePrestation,
   onDeletePrestation,
+  onImportPrestations,
   isCreateModalOpen,
   setIsCreateModalOpen,
 }) => {
@@ -50,6 +54,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [viewingPrestation, setViewingPrestation] = useState<Prestation | null>(null);
   const [editingPrestation, setEditingPrestation] = useState<Prestation | null>(null);
+  const [isSalfaModalOpen, setIsSalfaModalOpen] = useState<boolean>(false);
 
   // Form State for Create/Edit Modal
   const [formData, setFormData] = useState<Partial<Prestation>>({
@@ -245,6 +250,15 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            id="btn-import-salfa"
+            onClick={() => setIsSalfaModalOpen(true)}
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 shadow-xs transition"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Importer Facture SALFA</span>
+          </button>
+
           <button
             id="btn-export-prestations-xlsx"
             onClick={handleExportExcel}
@@ -776,6 +790,22 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Salfa Import Modal */}
+      <SalfaImportModal
+        isOpen={isSalfaModalOpen}
+        onClose={() => setIsSalfaModalOpen(false)}
+        societes={societes}
+        personnes={personnes}
+        familles={familles}
+        onImportPrestations={(newPrests, newSocs, newPers) => {
+          if (onImportPrestations) {
+            onImportPrestations(newPrests, newSocs, newPers);
+          } else {
+            newPrests.forEach(p => onSavePrestation(p));
+          }
+        }}
+      />
     </div>
   );
 };

@@ -13,10 +13,12 @@ import {
   Calendar,
   AlertCircle,
   FileCheck2,
-  Printer
+  Printer,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { DecompteImportModal } from './DecompteImportModal';
 import * as XLSX from 'xlsx';
 
 interface PaiementsViewProps {
@@ -28,6 +30,7 @@ interface PaiementsViewProps {
   selectedSocieteId: string;
   onSavePaiement: (paiement: Paiement, updatedPrestations: Prestation[]) => void;
   onDeletePaiement: (id: string) => void;
+  onImportPaiements?: (newPaiement: Paiement, updatedPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
   isCreateModalOpen: boolean;
   setIsCreateModalOpen: (open: boolean) => void;
 }
@@ -41,11 +44,13 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   selectedSocieteId,
   onSavePaiement,
   onDeletePaiement,
+  onImportPaiements,
   isCreateModalOpen,
   setIsCreateModalOpen,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewingPaiement, setViewingPaiement] = useState<Paiement | null>(null);
+  const [isDecompteModalOpen, setIsDecompteModalOpen] = useState<boolean>(false);
 
   // Form State for Saisie de Paiement
   const [targetSocieteId, setTargetSocieteId] = useState<string>(
@@ -282,6 +287,15 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            id="btn-import-decompte"
+            onClick={() => setIsDecompteModalOpen(true)}
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-xs transition"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Importer Décompte (ASCOMA / MCI / BSA)</span>
+          </button>
+
           <button
             id="btn-export-paiements-xlsx"
             onClick={handleExportExcel}
@@ -762,6 +776,23 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Decompte Import Modal */}
+      <DecompteImportModal
+        isOpen={isDecompteModalOpen}
+        onClose={() => setIsDecompteModalOpen(false)}
+        societes={societes}
+        personnes={personnes}
+        prestations={prestations}
+        familles={familles}
+        onSavePaiement={(newPaiement, updatedPrestations, newSocietes, newPersonnes) => {
+          if (onImportPaiements) {
+            onImportPaiements(newPaiement, updatedPrestations, newSocietes, newPersonnes);
+          } else {
+            onSavePaiement(newPaiement, updatedPrestations);
+          }
+        }}
+      />
     </div>
   );
 };

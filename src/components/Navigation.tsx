@@ -27,7 +27,6 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }
     { id: 'dashboard', label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: 'prestations', label: 'Prestations', icon: FileText },
     { id: 'paiements', label: 'Règlements', icon: CreditCard },
-    { id: 'importation', label: 'Importer', icon: FileUp },
     { id: 'historique', label: 'Historique', icon: History },
     { id: 'societes', label: 'Sociétés', icon: Building, startsGroup: true },
     { id: 'personnes', label: 'Assurés', icon: Users },

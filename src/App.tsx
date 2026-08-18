@@ -4,7 +4,6 @@ import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
 import { PrestationsView } from './components/PrestationsView';
 import { PaiementsView } from './components/PaiementsView';
-import { ImportationView } from './components/ImportationView';
 import { HistoriqueView } from './components/HistoriqueView';
 import { SocietesView } from './components/SocietesView';
 import { PersonnesView } from './components/PersonnesView';
@@ -21,7 +20,7 @@ import {
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('importation');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('prestations');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
 
   // Persistence directly aligned and purged for BSA Invoice dataset
@@ -245,6 +244,7 @@ export function App() {
             selectedSocieteId={selectedSocieteId}
             onSavePrestation={handleSavePrestation}
             onDeletePrestation={handleDeletePrestation}
+            onImportPrestations={handleImportPrestations}
             isCreateModalOpen={isPrestationModalOpen}
             setIsCreateModalOpen={setIsPrestationModalOpen}
           />
@@ -260,20 +260,9 @@ export function App() {
             selectedSocieteId={selectedSocieteId}
             onSavePaiement={handleSavePaiement}
             onDeletePaiement={handleDeletePaiement}
+            onImportPaiements={handleImportPaiements}
             isCreateModalOpen={isPaiementModalOpen}
             setIsCreateModalOpen={setIsPaiementModalOpen}
-          />
-        )}
-
-        {activeTab === 'importation' && (
-          <ImportationView
-            societes={societes}
-            personnes={personnes}
-            prestations={prestations}
-            familles={familles}
-            onImportPrestations={handleImportPrestations}
-            onImportPaiements={handleImportPaiements}
-            onSaveFamille={handleSaveFamille}
           />
         )}
 
