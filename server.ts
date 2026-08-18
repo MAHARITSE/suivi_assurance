@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 const upload = multer({
@@ -198,10 +197,12 @@ RÈGLES CRUCIALES D'EXTRACTION :
     }
   });
 
-  // Vite integration
+  // Vite integration (dev only — chargé à la demande pour ne pas dépendre
+  // de vite en production)
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
