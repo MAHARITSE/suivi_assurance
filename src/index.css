@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* Éléments masqués à l'impression (navigation, filtres, boutons d'action) */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
