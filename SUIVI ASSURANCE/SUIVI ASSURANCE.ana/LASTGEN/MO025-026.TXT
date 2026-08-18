@@ -1,4 +1,0 @@
-//MO025-026.TXT ANA00025 TO ANA00026
-LignePaiement		TAR	339	nouvelle taille enregistrement : 339
-LignePaiement	Objet_du_paiement	RUB+		Objet_du_paiement est une nouvelle rubrique
-LignePaiement	Objet_du_paiement	RRN		

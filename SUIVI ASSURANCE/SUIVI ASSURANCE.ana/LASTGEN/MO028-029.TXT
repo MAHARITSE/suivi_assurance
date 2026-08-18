@@ -1,9 +1,0 @@
-//MO028-029.TXT ANA00028 TO ANA00029
-Paiement		TAR	50	nouvelle taille enregistrement : 50
-Paiement	Remise	RUB+		Remise est une nouvelle rubrique
-Paiement	TotalExclu	RUB+		TotalExclu est une nouvelle rubrique
-Paiement	TotalMiderateur	RUB+		TotalMiderateur est une nouvelle rubrique
-LignePaiement		TAR	296	nouvelle taille enregistrement : 296
-LignePaiement	MontantExclu	RUB+		MontantExclu est une nouvelle rubrique
-LignePaiement	TicketModerateur	RUB+		TicketModerateur est une nouvelle rubrique
-LignePaiement	Objet_du_paiement	RUB-		la rubrique Objet_du_paiement est supprimée

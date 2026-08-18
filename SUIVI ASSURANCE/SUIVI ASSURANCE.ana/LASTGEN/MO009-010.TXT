@@ -1,6 +1,0 @@
-//MO009-010.TXT ANA00009 TO ANA00010
-Prestation		TAR	111	nouvelle taille enregistrement : 111
-Prestation	IDPERSONNE	RUB+		IDPERSONNE est une nouvelle clé
-Prestation	Nom_et_Prenom	RUB-		la rubrique Nom_et_Prenom est supprimée
-PERSONNE		NFI		nouveau fichier
-Contrainte_PERSONNE_Prestation		NWL	PERSONNE (IDPERSONNE) et Prestation (IDPERSONNE)	Nouvelle liaison entre les fichiers PERSONNE (IDPERSONNE) et Prestation (IDPERSONNE)

@@ -1,6 +1,0 @@
-//MO013-014.TXT ANA00013 TO ANA00014
-Prestation		TAR	114	nouvelle taille enregistrement : 114
-Prestation	Code	RUB+		Code est une nouvelle clé
-Prestation	IDFamille	RUB-		la rubrique IDFamille est supprimée
-Contrainte_Famille_Prestation		NWL	Famille (Code) et Prestation (Code)	Nouvelle liaison entre les fichiers Famille (Code) et Prestation (Code)
-Contrainte_Famille_Prestation		DEL	Famille (IDFamille) et Prestation (IDFamille)	Liaison supprimée entre les fichiers Famille (IDFamille) et Prestation (IDFamille)

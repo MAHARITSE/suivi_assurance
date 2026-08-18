@@ -1,3 +1,0 @@
-//MO033-034.TXT ANA00033 TO ANA00034
-LignePaiement		TAR	548	nouvelle taille enregistrement : 548
-LignePaiement	Nom_Base_Assurance	RUB+		Nom_Base_Assurance est une nouvelle rubrique

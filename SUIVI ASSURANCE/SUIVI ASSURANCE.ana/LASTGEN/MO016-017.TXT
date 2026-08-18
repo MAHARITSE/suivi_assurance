@@ -1,5 +1,0 @@
-//MO016-017.TXT ANA00016 TO ANA00017
-Prestation		TAR	108	nouvelle taille enregistrement : 108
-Prestation	Montant	CNW	Entier sur 4 octets$Monétaire	la rubrique Montant a pour nouveau type Entier sur 4 octets
-Paiement		TAR	89	nouvelle taille enregistrement : 89
-Paiement	Montant_Payé	CNW	Entier sur 4 octets$Monétaire	la rubrique Montant_Payé a pour nouveau type Entier sur 4 octets

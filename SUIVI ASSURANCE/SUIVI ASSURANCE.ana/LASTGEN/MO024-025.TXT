@@ -1,2 +1,0 @@
-//MO024-025.TXT ANA00024 TO ANA00025
-LignePrestation	IDPrestationCode	RUB+		IDPrestationCode est une nouvelle clé

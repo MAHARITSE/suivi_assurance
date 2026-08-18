@@ -1,4 +1,0 @@
-//MO021-022.TXT ANA00021 TO ANA00022
-Paiement		TAR	38	nouvelle taille enregistrement : 38
-Paiement	IDPrestation	RUB-		la rubrique IDPrestation est supprimée
-Contrainte_Prestation_Paiement		DEL	Prestation (IDPrestation) et Paiement (IDPrestation)	Liaison supprimée entre les fichiers Prestation (IDPrestation) et Paiement (IDPrestation)

@@ -1,3 +1,0 @@
-//MO008-009.TXT ANA00008 TO ANA00009
-Famille		TAR	79	nouvelle taille enregistrement : 79
-Famille	Code	RUB+		Code est une nouvelle rubrique

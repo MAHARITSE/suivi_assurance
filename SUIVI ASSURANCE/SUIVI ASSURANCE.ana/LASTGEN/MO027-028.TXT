@@ -1,3 +1,0 @@
-//MO027-028.TXT ANA00027 TO ANA00028
-Prestation		TAR	101	nouvelle taille enregistrement : 101
-Prestation	ResteMontant	RUB-		la rubrique ResteMontant est supprimée

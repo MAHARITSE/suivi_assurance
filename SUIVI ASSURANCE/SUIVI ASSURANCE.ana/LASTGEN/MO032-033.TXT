@@ -1,3 +1,0 @@
-//MO032-033.TXT ANA00032 TO ANA00033
-Paiement		TAR	64	nouvelle taille enregistrement : 64
-Paiement	Date_Saisie	RUB+		Date_Saisie est une nouvelle rubrique
