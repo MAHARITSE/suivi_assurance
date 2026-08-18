@@ -6,19 +6,16 @@ import {
   AlertTriangle, 
   FileText, 
   CheckCircle2, 
-  Clock, 
   Plus, 
-  FileSpreadsheet,
   ArrowRight
 } from 'lucide-react';
-import { Prestation, Paiement, Societe, Famille, Personne, ActiveTab } from '../types';
+import { Prestation, Paiement, Societe, Personne, ActiveTab } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
 
 interface DashboardProps {
   prestations: Prestation[];
   paiements: Paiement[];
   societes: Societe[];
-  familles: Famille[];
   personnes: Personne[];
   selectedSocieteId: string;
   onNavigate: (tab: ActiveTab) => void;
@@ -30,7 +27,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   prestations,
   paiements,
   societes,
-  familles,
   personnes,
   selectedSocieteId,
   onNavigate,
@@ -52,27 +48,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalModerateur = filteredPaiements.reduce((sum, p) => sum + p.totalModerateur, 0);
   const totalExclu = filteredPaiements.reduce((sum, p) => sum + p.totalExclu, 0);
 
-  const resteARegler = Math.max(0, totalReclame - (totalPaye + totalModerateur + totalExclu));
   const tauxCouvertureGlobal = totalReclame > 0 ? Math.round((totalPaye / totalReclame) * 100) : 0;
-
-  // Breakdown by Famille / Medical Category
-  const familleBreakdown = familles.map(fam => {
-    let sumTotal = 0;
-    let sumPaye = 0;
-    filteredPrestations.forEach(p => {
-      p.lignes.forEach(l => {
-        if (l.code === fam.code) {
-          sumTotal += l.totalPrestation;
-          sumPaye += l.totalPaye;
-        }
-      });
-    });
-    return {
-      famille: fam,
-      total: sumTotal,
-      paye: sumPaye,
-    };
-  }).filter(item => item.total > 0).sort((a, b) => b.total - a.total);
 
   // Helper getters
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société Inconnue';
@@ -164,53 +140,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Middle Section: Breakdown by Category + Recent Settlements */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Breakdown by Medical Category (Familles d'actes) */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 lg:col-span-1 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-              <span>Répartition par Type de Soins</span>
-            </h3>
-            <button
-              onClick={() => onNavigate('familles')}
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center"
-            >
-              Barèmes <ArrowRight className="w-3 h-3 ml-1" />
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {familleBreakdown.length === 0 ? (
-              <p className="text-xs text-slate-400 py-4 text-center">Aucune prestation enregistrée pour cette sélection.</p>
-            ) : (
-              familleBreakdown.map(item => {
-                const percent = totalReclame > 0 ? Math.round((item.total / totalReclame) * 100) : 0;
-                return (
-                  <div key={item.famille.code} className="space-y-1">
-                    <div className="flex justify-between text-xs font-medium">
-                      <span className="text-slate-700">{item.famille.libelle} ({item.famille.code})</span>
-                      <span className="text-slate-900 font-semibold">{formatMoney(item.total)}</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-400">
-                      <span>Remboursé: {formatMoney(item.paye)}</span>
-                      <span>{percent}% du total</span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Recent Prestations Table */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 lg:col-span-2 space-y-4">
+      {/* Recent Prestations Table */}
+      <div className="grid grid-cols-1 gap-6">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="font-bold text-slate-900 text-sm">Derniers Dossiers de Prestations</h3>
             <button
@@ -234,6 +166,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {filteredPrestations.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 px-3 text-center text-slate-400">
+                      Aucune prestation enregistrée.
+                    </td>
+                  </tr>
+                )}
                 {filteredPrestations.slice(0, 5).map(prestation => (
                   <tr key={prestation.id} className="hover:bg-slate-50/80 transition">
                     <td className="py-2.5 px-3 text-slate-600">{formatDate(prestation.date)}</td>
