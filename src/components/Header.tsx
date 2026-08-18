@@ -27,9 +27,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-bold tracking-tight text-slate-950 sm:text-base">
-              Suivi Assurance
+              Suivi Assurance SALFA
             </h1>
-            <p className="hidden text-xs text-slate-500 sm:block">Gestion des prestations santé</p>
+            <p className="hidden text-xs text-slate-500 sm:block">Hôpitaly Loterana Toliary Tanambao</p>
           </div>
         </div>
 

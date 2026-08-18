@@ -14,7 +14,6 @@ import {
   initialSocietes, 
   initialPersonnes, 
   initialFamilles, 
-  initialPrestations, 
   initialPaiements 
 } from './data/initialData';
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
@@ -45,7 +44,8 @@ export function App() {
   const [prestations, setPrestations] = useState<Prestation[]>(() => {
     localStorage.removeItem('suivi_assurance_prestations');
     localStorage.removeItem('suivi_assurance_bsa_v3_prestations');
-    return initialPrestations;
+    localStorage.removeItem('suivi_assurance_bsa_clean_prestations');
+    return [];
   });
 
   const [paiements, setPaiements] = useState<Paiement[]>(() => {
@@ -220,7 +220,6 @@ export function App() {
             prestations={prestations}
             paiements={paiements}
             societes={societes}
-            familles={familles}
             personnes={personnes}
             selectedSocieteId={selectedSocieteId}
             onNavigate={(tab) => setActiveTab(tab)}
