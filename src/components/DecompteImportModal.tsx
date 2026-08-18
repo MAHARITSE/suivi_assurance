@@ -357,8 +357,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         reader.readAsArrayBuffer(file);
       } else {
         const formData = new FormData();
-        formData.append('document', file);
-        formData.append('documentType', 'decompte');
+        formData.append('file', file);
 
         const response = await fetch('/api/parse-invoice', {
           method: 'POST',
@@ -366,7 +365,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         });
 
         if (!response.ok) throw new Error(`Erreur analyse OCR : ${response.statusText}`);
-        const data: ParsedFactureAssurance = await response.json();
+        const json: any = await response.json();
+        const data: ParsedFactureAssurance = json.data || json;
+        if (!data || !data.lignes) throw new Error(json.error || 'Réponse vide du serveur');
         processLoadedDocument(data);
       }
     } catch (err: any) {
@@ -534,11 +535,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         paiementId: paymentId,
         lignePrestationId: targetLigneId,
         prestationId: targetPrestationId,
+        prestationNumero: row.matchedCandidate?.prestationNum || `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
+        dateSoins: row.dateSoins,
         immatriculation: row.matricule || '-',
         nomBaseAssurance: row.nomPrenom,
         totalPaye: row.netAPayer,
         ticketModerateur: row.participation,
         montantExclu: row.montantExclu,
+        montantReclame: row.montantBrut,
+        actesPayes: [{ code: row.actCode, libelle: row.actLibelle, montant: row.netAPayer }],
         commentaire: `Règlement ${parsedDoc.numeroBordereau || ''} - Acte ${row.actCode}`
       });
     });

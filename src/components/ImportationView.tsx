@@ -675,13 +675,17 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
       const lignesPaiement = parsedInvoice.lignes.map(l => ({
         id: generateId('lp-decompte'),
         paiementId: bordereauId,
-        lignePrestationId: generateId('lig-auto'),
-        prestationId: generateId('prest-auto'),
+        lignePrestationId: l.matchedPrestationId || generateId('lig-auto'),
+        prestationId: l.matchedPrestationId ? (prestations.find(p=>p.id===l.matchedPrestationId)?.id || generateId('prest-auto')) : generateId('prest-auto'),
+        prestationNumero: l.matchedPrestationId ? (prestations.find(p=>p.id===l.matchedPrestationId)?.numeroFacture || parsedInvoice.numeroFacture) : parsedInvoice.numeroFacture,
+        dateSoins: l.dateSoins,
         immatriculation: l.matricule,
         nomBaseAssurance: l.nomPrenom,
         totalPaye: l.netAPayer,
         ticketModerateur: l.participation,
         montantExclu: l.montantExclu || 0,
+        montantReclame: l.montantBrut,
+        actesPayes: l.actes?.map(a=>({code: a.mappedFamilleCode||a.code, libelle: a.libelle, montant: a.montant})),
         commentaire: `${l.sousSociete ? `[${l.sousSociete}] ` : ''}${l.actesTexte}`,
       }));
 

@@ -200,10 +200,12 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         };
         reader.readAsArrayBuffer(file);
       } else {
-        // PDF or image -> Send to AI OCR server endpoint
+        // PDF or image -> Send to AI OCR server endpoint (champ attendu = 'file')
         const formData = new FormData();
-        formData.append('document', file);
-        formData.append('documentType', 'facture');
+        formData.append('file', file);
+        if ((file as any).type) {
+          // hint for server prompt
+        }
 
         const response = await fetch('/api/parse-invoice', {
           method: 'POST',
@@ -214,7 +216,9 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           throw new Error(`Erreur lors du traitement : ${response.statusText}`);
         }
 
-        const data: ParsedFactureAssurance = await response.json();
+        const json: any = await response.json();
+        const data: ParsedFactureAssurance = json.data || json;
+        if (!data || !data.lignes) throw new Error(json.error || 'Réponse vide du serveur');
         setParsedInvoice(data);
         const initialSelected: Record<number, boolean> = {};
         data.lignes.forEach((_, i) => { initialSelected[i] = true; });
