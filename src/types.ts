@@ -62,9 +62,16 @@ export interface LignePaiement {
   prestationId: string;
   immatriculation: string;
   nomBaseAssurance: string;
+  // rattachement à la prescription (base 1)
+  prestationNumero?: string;
+  dateSoins?: string; // date des soins de la prestation d'origine
+  // montants
   totalPaye: number;
   ticketModerateur: number;
   montantExclu: number;
+  montantReclame?: number; // montant initial de l'acte
+  // regroupement des actes payés dans cette ligne
+  actesPayes?: { code: string; libelle: string; montant: number }[];
   commentaire?: string;
 }
 

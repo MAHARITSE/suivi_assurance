@@ -187,18 +187,25 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     }
 
     const newPaiementId = generateId('pai');
-    const newLignesPaiement: LignePaiement[] = selectedStaged.map(s => ({
-      id: generateId('lp'),
-      paiementId: newPaiementId,
-      lignePrestationId: s.lignePrestationId,
-      prestationId: s.prestationId,
-      immatriculation: s.matricule,
-      nomBaseAssurance: s.personneNom,
-      totalPaye: Number(s.totalPaye || 0),
-      ticketModerateur: Number(s.ticketModerateur || 0),
-      montantExclu: Number(s.montantExclu || 0),
-      commentaire: s.commentaire,
-    }));
+    const newLignesPaiement: LignePaiement[] = selectedStaged.map(s => {
+      const prest = prestations.find(p => p.id === s.prestationId);
+      return {
+        id: generateId('lp'),
+        paiementId: newPaiementId,
+        lignePrestationId: s.lignePrestationId,
+        prestationId: s.prestationId,
+        prestationNumero: s.factureNum,
+        dateSoins: prest?.date,
+        immatriculation: s.matricule,
+        nomBaseAssurance: s.personneNom,
+        totalPaye: Number(s.totalPaye || 0),
+        ticketModerateur: Number(s.ticketModerateur || 0),
+        montantExclu: Number(s.montantExclu || 0),
+        montantReclame: s.resteAPayer + s.dejaPaye || s.montantFacture,
+        actesPayes: [{ code: s.codeActe, libelle: s.libelleActe, montant: Number(s.totalPaye || 0) }],
+        commentaire: s.commentaire,
+      };
+    });
 
     const nouveauPaiement: Paiement = {
       id: newPaiementId,
