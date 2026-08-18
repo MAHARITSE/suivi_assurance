@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Building2, UserCheck, Receipt, Download, FileSpreadsheet } from 'lucide-react';
+import { Shield, Building2, UserCheck, Receipt, Download } from 'lucide-react';
 import { Societe } from '../types';
 import { formatMoney } from '../utils/formatters';
 

@@ -21,33 +21,38 @@ import {
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('importation');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
 
-  // Persistence in LocalStorage
+  // Persistence directly aligned and purged for BSA Invoice dataset
   const [societes, setSocietes] = useState<Societe[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_societes');
-    return saved ? JSON.parse(saved) : initialSocietes;
+    localStorage.removeItem('suivi_assurance_societes');
+    localStorage.removeItem('suivi_assurance_bsa_v3_societes');
+    return initialSocietes;
   });
 
   const [personnes, setPersonnes] = useState<Personne[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_personnes');
-    return saved ? JSON.parse(saved) : initialPersonnes;
+    localStorage.removeItem('suivi_assurance_personnes');
+    localStorage.removeItem('suivi_assurance_bsa_v3_personnes');
+    return initialPersonnes;
   });
 
   const [familles, setFamilles] = useState<Famille[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_familles');
-    return saved ? JSON.parse(saved) : initialFamilles;
+    localStorage.removeItem('suivi_assurance_familles');
+    localStorage.removeItem('suivi_assurance_bsa_v3_familles');
+    return initialFamilles;
   });
 
   const [prestations, setPrestations] = useState<Prestation[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_prestations');
-    return saved ? JSON.parse(saved) : initialPrestations;
+    localStorage.removeItem('suivi_assurance_prestations');
+    localStorage.removeItem('suivi_assurance_bsa_v3_prestations');
+    return initialPrestations;
   });
 
   const [paiements, setPaiements] = useState<Paiement[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_paiements');
-    return saved ? JSON.parse(saved) : initialPaiements;
+    localStorage.removeItem('suivi_assurance_paiements');
+    localStorage.removeItem('suivi_assurance_bsa_v3_paiements');
+    return initialPaiements;
   });
 
   // Modals quick trigger
@@ -56,23 +61,23 @@ export function App() {
 
   // Sync to localStorage
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_societes', JSON.stringify(societes));
+    localStorage.setItem('suivi_assurance_bsa_clean_societes', JSON.stringify(societes));
   }, [societes]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_personnes', JSON.stringify(personnes));
+    localStorage.setItem('suivi_assurance_bsa_clean_personnes', JSON.stringify(personnes));
   }, [personnes]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_familles', JSON.stringify(familles));
+    localStorage.setItem('suivi_assurance_bsa_clean_familles', JSON.stringify(familles));
   }, [familles]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_prestations', JSON.stringify(prestations));
+    localStorage.setItem('suivi_assurance_bsa_clean_prestations', JSON.stringify(prestations));
   }, [prestations]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_paiements', JSON.stringify(paiements));
+    localStorage.setItem('suivi_assurance_bsa_clean_paiements', JSON.stringify(paiements));
   }, [paiements]);
 
   // Handlers for Prestations
@@ -154,12 +159,33 @@ export function App() {
   };
 
   // Bulk Import Handlers
-  const handleImportPrestations = (newPrestations: Prestation[]) => {
+  const handleImportPrestations = (
+    newPrestations: Prestation[],
+    newSocietes?: Societe[],
+    newPersonnes?: Personne[]
+  ) => {
+    if (newSocietes && newSocietes.length > 0) {
+      setSocietes(prev => [...prev, ...newSocietes]);
+    }
+    if (newPersonnes && newPersonnes.length > 0) {
+      setPersonnes(prev => [...prev, ...newPersonnes]);
+    }
     setPrestations(prev => [...newPrestations, ...prev]);
     setActiveTab('prestations');
   };
 
-  const handleImportPaiements = (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
+  const handleImportPaiements = (
+    newPaiement: Paiement,
+    updatedPrestations: Prestation[],
+    newSocietes?: Societe[],
+    newPersonnes?: Personne[]
+  ) => {
+    if (newSocietes && newSocietes.length > 0) {
+      setSocietes(prev => [...prev, ...newSocietes]);
+    }
+    if (newPersonnes && newPersonnes.length > 0) {
+      setPersonnes(prev => [...prev, ...newPersonnes]);
+    }
     setPaiements(prev => [newPaiement, ...prev]);
     setPrestations(updatedPrestations);
     setActiveTab('paiements');
@@ -248,8 +274,10 @@ export function App() {
             societes={societes}
             personnes={personnes}
             prestations={prestations}
+            familles={familles}
             onImportPrestations={handleImportPrestations}
             onImportPaiements={handleImportPaiements}
+            onSaveFamille={handleSaveFamille}
           />
         )}
 

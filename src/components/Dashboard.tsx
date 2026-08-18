@@ -115,10 +115,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <button
             id="btn-quick-import"
             onClick={() => onNavigate('importation')}
-            className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold px-4 py-2 rounded-xl border border-slate-700 transition"
+            className="flex items-center space-x-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-sm font-semibold px-4 py-2 rounded-xl border border-indigo-400/30 transition"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>Importer Excel</span>
+            <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
+            <span>Importer PDF / Excel</span>
           </button>
         </div>
       </div>

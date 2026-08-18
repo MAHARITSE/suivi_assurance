@@ -22,11 +22,11 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }
     { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
     { id: 'prestations', label: 'Prestations', icon: FileText },
     { id: 'paiements', label: 'Saisie & Règlements', icon: CreditCard },
-    { id: 'importation', label: 'Importation Excel', icon: FileSpreadsheet },
+    { id: 'importation', label: 'Importation PDF & Excel', icon: FileSpreadsheet },
     { id: 'historique', label: 'Historique', icon: History },
     { id: 'societes', label: 'Sociétés', icon: Building },
     { id: 'personnes', label: 'Adhérents / Assurés', icon: Users },
-    { id: 'familles', label: 'Familles & Barèmes', icon: Layers },
+    { id: 'familles', label: 'Actes & Familles', icon: Layers },
     { id: 'etats', label: 'États & Rapports', icon: Printer },
   ];
 
