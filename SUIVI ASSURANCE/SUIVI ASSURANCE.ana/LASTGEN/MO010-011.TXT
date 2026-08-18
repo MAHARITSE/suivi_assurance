@@ -1,0 +1,3 @@
+//MO010-011.TXT ANA00010 TO ANA00011
+Personne	IDPrersonne	NNR	IDPERSONNE	ATTENTION : la clé IDPERSONNE a pour nouveau nom IDPrersonne
+Personne		FRN		

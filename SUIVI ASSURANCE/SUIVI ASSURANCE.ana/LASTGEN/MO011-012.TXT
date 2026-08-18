@@ -1,0 +1,3 @@
+//MO011-012.TXT ANA00011 TO ANA00012
+Société	Nom_du_société	CLEN*		la rubrique Nom_du_société est maintenant une clé
+Personne	Nom_et_Prenom	CLEN*		la rubrique Nom_et_Prenom est maintenant une clé

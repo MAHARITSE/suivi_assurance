@@ -1,0 +1,17 @@
+//MO005-006.TXT ANA00005 TO ANA00006
+Clients	IDSociété	RUB+		IDSociété est une nouvelle clé
+Clients	IDSociété	RUB-		la rubrique IDSociété est supprimée
+Prestation	IDClients	RUB+		IDClients est une nouvelle clé
+Prestation	IDFamille	RUB+		IDFamille est une nouvelle clé
+Prestation	IDClients	RUB-		la rubrique IDClients est supprimée
+Prestation	IDFamille	RUB-		la rubrique IDFamille est supprimée
+Paiement	IDPrestation	RUB+		IDPrestation est une nouvelle clé
+Paiement	IDPrestation_faite	RUB-		la rubrique IDPrestation_faite est supprimée
+Contrainte_Société_Clients		NWL	Société (IDSociété) et Clients (IDSociété)	Nouvelle liaison entre les fichiers Société (IDSociété) et Clients (IDSociété)
+Contrainte_Clients_Prestation		NWL	Clients (IDClients) et Prestation (IDClients)	Nouvelle liaison entre les fichiers Clients (IDClients) et Prestation (IDClients)
+Contrainte_Famille_Prestation		NWL	Famille (IDFamille) et Prestation (IDFamille)	Nouvelle liaison entre les fichiers Famille (IDFamille) et Prestation (IDFamille)
+Contrainte_Prestation_Paiement		NWL	Prestation (IDPrestation) et Paiement (IDPrestation)	Nouvelle liaison entre les fichiers Prestation (IDPrestation) et Paiement (IDPrestation)
+Contrainte_Société_Clients		DEL	Société (IDSociété) et Clients (IDSociété)	Liaison supprimée entre les fichiers Société (IDSociété) et Clients (IDSociété)
+Contrainte_Clients_Prestation_faite		DEL	Clients (IDClients) et Prestation (IDClients)	Liaison supprimée entre les fichiers Clients (IDClients) et Prestation (IDClients)
+Contrainte_Famille_Prestation		DEL	Famille (IDFamille) et Prestation (IDFamille)	Liaison supprimée entre les fichiers Famille (IDFamille) et Prestation (IDFamille)
+Contrainte_Prestation_faite_Paiement		DEL	Prestation (IDPrestation) et Paiement (IDPrestation_faite)	Liaison supprimée entre les fichiers Prestation (IDPrestation) et Paiement (IDPrestation_faite)

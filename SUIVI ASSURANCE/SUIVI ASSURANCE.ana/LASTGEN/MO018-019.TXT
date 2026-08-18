@@ -1,0 +1,3 @@
+//MO018-019.TXT ANA00018 TO ANA00019
+Contrainte_Prestation_LignePaiement		NWL	Prestation (IDPrestation) et LignePaiement (IDPrestation)	Nouvelle liaison entre les fichiers Prestation (IDPrestation) et LignePaiement (IDPrestation)
+Contrainte_Prestation_LignePaiement		DEL	Prestation (IDPrestation) et LignePaiement (IDPrestation)	Liaison supprimée entre les fichiers Prestation (IDPrestation) et LignePaiement (IDPrestation)

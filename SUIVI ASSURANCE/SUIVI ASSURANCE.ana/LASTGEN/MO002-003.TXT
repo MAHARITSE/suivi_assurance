@@ -1,0 +1,3 @@
+//MO002-003.TXT ANA00002 TO ANA00003
+Prestation_faite		TAR	52	nouvelle taille enregistrement : 52
+Prestation_faite	Montant	CNW	Monétaire$Chaîne	la rubrique Montant a pour nouveau type Monétaire

@@ -1,0 +1,11 @@
+//MO000-001.TXT ANA00000 TO ANA00001
+Société		NFI		nouveau fichier
+Clients		NFI		nouveau fichier
+Prestation		NFI		nouveau fichier
+Prestation_faite		NFI		nouveau fichier
+Paiement		NFI		nouveau fichier
+Contrainte_Société_Clients		NWL	Société (IDSociété) et Clients (IDSociété)	Nouvelle liaison entre les fichiers Société (IDSociété) et Clients (IDSociété)
+Contrainte_Clients_Prestation_faite		NWL	Clients (IDClients) et Prestation_faite (IDClients)	Nouvelle liaison entre les fichiers Clients (IDClients) et Prestation_faite (IDClients)
+Contrainte_Prestation_Prestation_faite		NWL	Prestation (IDPrestation) et Prestation_faite (IDPrestation)	Nouvelle liaison entre les fichiers Prestation (IDPrestation) et Prestation_faite (IDPrestation)
+Contrainte_Prestation_faite_Paiement		NWL	Prestation_faite (IDPrestation_faite) et Paiement (IDPrestation_faite)	Nouvelle liaison entre les fichiers Prestation_faite (IDPrestation_faite) et Paiement (IDPrestation_faite)
+MaConnexion1		CNX+		

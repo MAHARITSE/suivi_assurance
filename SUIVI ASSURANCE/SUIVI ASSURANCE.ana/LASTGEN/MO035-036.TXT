@@ -1,0 +1,14 @@
+//MO035-036.TXT ANA00035 TO ANA00036
+Prestation		TAR	109	nouvelle taille enregistrement : 109
+Prestation	Total_Prestation	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Total_Prestation a pour nouveau type Réel sur 8 octets
+Prestation	Participation	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Participation a pour nouveau type Réel sur 8 octets
+Paiement		TAR	84	nouvelle taille enregistrement : 84
+Paiement	Total_Payé	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Total_Payé a pour nouveau type Réel sur 8 octets
+Paiement	Remise	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Remise a pour nouveau type Réel sur 8 octets
+Paiement	Total_Exclu	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Total_Exclu a pour nouveau type Réel sur 8 octets
+Paiement	Total_Midérateur	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Total_Midérateur a pour nouveau type Réel sur 8 octets
+Paiement	Total_Réclamé	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Total_Réclamé a pour nouveau type Réel sur 8 octets
+LignePaiement		TAR	564	nouvelle taille enregistrement : 564
+LignePaiement	Total_Payé	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Total_Payé a pour nouveau type Réel sur 8 octets
+LignePaiement	Ticket_Moderateur	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Ticket_Moderateur a pour nouveau type Réel sur 8 octets
+LignePaiement	Montant_Exclu	CNW	Réel sur 8 octets$Entier sur 4 octets	la rubrique Montant_Exclu a pour nouveau type Réel sur 8 octets

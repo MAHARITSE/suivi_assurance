@@ -1,0 +1,3 @@
+//MO034-035.TXT ANA00034 TO ANA00035
+LignePaiement		TAR	552	nouvelle taille enregistrement : 552
+LignePaiement	Imatriculation	RUB+		Imatriculation est une nouvelle rubrique

@@ -1,0 +1,4 @@
+//MO020-021.TXT ANA00020 TO ANA00021
+Prestation		TAR	106	nouvelle taille enregistrement : 106
+Prestation	Participation	CNW	Entier sur 4 octets$Monétaire	la rubrique Participation a pour nouveau type Entier sur 4 octets
+Prestation	ResteMontant	RUB+		ResteMontant est une nouvelle rubrique

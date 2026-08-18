@@ -1,0 +1,4 @@
+//MO022-023.TXT ANA00022 TO ANA00023
+Paiement		TAR	46	nouvelle taille enregistrement : 46
+Paiement	IDPrestation	RUB+		IDPrestation est une nouvelle clé
+Contrainte_Prestation_Paiement		NWL	Prestation (IDPrestation) et Paiement (IDPrestation)	Nouvelle liaison entre les fichiers Prestation (IDPrestation) et Paiement (IDPrestation)

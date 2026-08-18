@@ -1,0 +1,6 @@
+//MO003-004.TXT ANA00003 TO ANA00004
+Famille		NNF*	Prestation	nouveau nom Famille
+Famille	IDFamille	NNR	IDPrestation	ATTENTION : la clé IDPrestation a pour nouveau nom IDFamille
+Prestation		NNF*	Prestation_faite	nouveau nom Prestation
+Famille		FRN		
+Prestation		FRN		

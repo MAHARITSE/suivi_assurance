@@ -1,0 +1,6 @@
+//MO004-005.TXT ANA00004 TO ANA00005
+Prestation	IDPrestation	NNR	IDPrestation_faite	ATTENTION : la clé IDPrestation_faite a pour nouveau nom IDPrestation
+Prestation	IDFamille	RUB+		IDFamille est une nouvelle clé
+Prestation	IDPrestation	RUB-		la rubrique IDPrestation est supprimée
+Contrainte_Famille_Prestation		NWL	Famille (IDFamille) et Prestation (IDFamille)	Nouvelle liaison entre les fichiers Famille (IDFamille) et Prestation (IDFamille)
+Contrainte_Prestation_Prestation_faite		DEL	Famille (IDFamille) et Prestation (IDPrestation)	Liaison supprimée entre les fichiers Famille (IDFamille) et Prestation (IDPrestation)
