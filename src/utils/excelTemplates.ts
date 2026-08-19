@@ -220,7 +220,7 @@ export function downloadDecomptesExcelTemplate() {
     {
       'Colonne': 'Nom_Agent',
       'Obligatoire': 'Oui',
-      'Description': 'Nom de l\'assuré/agent lié à la prescription',
+      'Description': 'Nom du patient soigné (aligné à la date du soin) ou de l\'assuré. Pour BSA, le nom aligné à la date du soin est prioritaire.',
       'Exemple': 'RABE Jean'
     },
     {

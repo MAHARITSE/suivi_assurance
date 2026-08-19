@@ -1208,7 +1208,7 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       numeroLigne: 30,
       dateSoins: '2026-05-23',
       matricule: '950195',
-      nomPrenom: 'RATSIMANDRESY TAHINA',
+      nomPrenom: 'RASAMOELINA AMBOARA FITAHIANA',
       ayantDroit: 'RASAMOELINA AMBOARA FITAHIANA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1219,13 +1219,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 20000,
       participation: 1000,
       netAPayer: 20000,
-      observations: 'TPG 1 000 Ar'
+      observations: 'Adhérent : RATSIMANDRESY TAHINA • TPG 1 000 Ar'
     },
     {
       numeroLigne: 31,
       dateSoins: '2026-05-23',
       matricule: '950195',
-      nomPrenom: 'RATSIMANDRESY TAHINA',
+      nomPrenom: 'RASAMOELINA AMBOARA FITAHIANA',
       ayantDroit: 'RASAMOELINA AMBOARA FITAHIANA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1236,13 +1236,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 8000,
       participation: 0,
       netAPayer: 8000,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : RATSIMANDRESY TAHINA • Prise en charge 100%'
     },
     {
       numeroLigne: 32,
       dateSoins: '2026-05-23',
       matricule: '950195',
-      nomPrenom: 'RATSIMANDRESY TAHINA',
+      nomPrenom: 'RASAMOELINA AMBOARA FITAHIANA',
       ayantDroit: 'RASAMOELINA AMBOARA FITAHIANA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1253,13 +1253,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 5000,
       participation: 0,
       netAPayer: 5000,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : RATSIMANDRESY TAHINA • Prise en charge 100%'
     },
     {
       numeroLigne: 33,
       dateSoins: '2026-05-23',
       matricule: '950195',
-      nomPrenom: 'RATSIMANDRESY TAHINA',
+      nomPrenom: 'RASAMOELINA AMBOARA FITAHIANA',
       ayantDroit: 'RASAMOELINA AMBOARA FITAHIANA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1270,13 +1270,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 3000,
       participation: 0,
       netAPayer: 3000,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : RATSIMANDRESY TAHINA • Prise en charge 100%'
     },
     {
       numeroLigne: 34,
       dateSoins: '2026-05-23',
       matricule: '950195',
-      nomPrenom: 'RATSIMANDRESY TAHINA',
+      nomPrenom: 'RASAMOELINA AMBOARA FITAHIANA',
       ayantDroit: 'RASAMOELINA AMBOARA FITAHIANA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1287,13 +1287,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 26400,
       participation: 0,
       netAPayer: 26400,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : RATSIMANDRESY TAHINA • Prise en charge 100%'
     },
     {
       numeroLigne: 35,
       dateSoins: '2026-05-23',
       matricule: '950195',
-      nomPrenom: 'RATSIMANDRESY TAHINA',
+      nomPrenom: 'RASAMOELINA AMBOARA FITAHIANA',
       ayantDroit: 'RASAMOELINA AMBOARA FITAHIANA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1304,13 +1304,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 5600,
       participation: 0,
       netAPayer: 5600,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : RATSIMANDRESY TAHINA • Prise en charge 100%'
     },
     {
       numeroLigne: 36,
       dateSoins: '2026-05-26',
       matricule: '950210',
-      nomPrenom: 'ALIJAONA HARILALAINA',
+      nomPrenom: 'ALIJAONA HARILALAINA TAHINA',
       ayantDroit: 'ALIJAONA HARILALAINA TAHINA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1321,13 +1321,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 15000,
       participation: 750,
       netAPayer: 15000,
-      observations: 'TPG 750 Ar'
+      observations: 'Adhérent : ALIJAONA HARILALAINA • TPG 750 Ar'
     },
     {
       numeroLigne: 37,
       dateSoins: '2026-05-26',
       matricule: '950210',
-      nomPrenom: 'ALIJAONA HARILALAINA',
+      nomPrenom: 'ALIJAONA HARILALAINA TAHINA',
       ayantDroit: 'ALIJAONA HARILALAINA TAHINA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1338,13 +1338,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 52200,
       participation: 0,
       netAPayer: 52200,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : ALIJAONA HARILALAINA • Prise en charge 100%'
     },
     {
       numeroLigne: 38,
       dateSoins: '2026-05-26',
       matricule: '950210',
-      nomPrenom: 'ALIJAONA HARILALAINA',
+      nomPrenom: 'ALIJAONA HARILALAINA TAHINA',
       ayantDroit: 'ALIJAONA HARILALAINA TAHINA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1355,13 +1355,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 12000,
       participation: 0,
       netAPayer: 12000,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : ALIJAONA HARILALAINA • Prise en charge 100%'
     },
     {
       numeroLigne: 39,
       dateSoins: '2026-05-26',
       matricule: '950210',
-      nomPrenom: 'ALIJAONA HARILALAINA',
+      nomPrenom: 'ALIJAONA HARILALAINA TAHINA',
       ayantDroit: 'ALIJAONA HARILALAINA TAHINA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1372,13 +1372,13 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 2000,
       participation: 0,
       netAPayer: 2000,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : ALIJAONA HARILALAINA • Prise en charge 100%'
     },
     {
       numeroLigne: 40,
       dateSoins: '2026-05-26',
       matricule: '950210',
-      nomPrenom: 'ALIJAONA HARILALAINA',
+      nomPrenom: 'ALIJAONA HARILALAINA TAHINA',
       ayantDroit: 'ALIJAONA HARILALAINA TAHINA',
       societeAffiliee: 'BRED MADAGASIKARA BP',
       sousSociete: 'BFV EMPLOYES',
@@ -1389,7 +1389,7 @@ export const bsaReleveSampleInvoice: ParsedFactureAssurance = {
       baseReglement: 60000,
       participation: 0,
       netAPayer: 60000,
-      observations: 'Prise en charge 100%'
+      observations: 'Adhérent : ALIJAONA HARILALAINA • Prise en charge 100%'
     },
     {
       numeroLigne: 41,

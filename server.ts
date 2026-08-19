@@ -153,7 +153,8 @@ RÈGLES CRUCIALES D'EXTRACTION :
    - "Base de Règlement / Base Décomptée" -> "baseReglement"
    - "Ticket Modérateur / Non Remb (Part Assuré)" -> "participation"
    - "Montant Réglé / Net Payé" -> "netAPayer"
-6. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
+6. Règle absolue pour BSA et Relevés Médicaux : Le vrai nom de la personne à extraire dans "nomPrenom" est TOUJOURS le nom de la personne soignée alignée à la date du soin (le Patient / Ayant-droit / Bénéficiaire / Personne soignée), et NON le nom aligné à l'adhésion/contrat si les deux diffèrent. Si l'adhérent/titulaire est différent, mentionne-le dans "observations" (ex: "Adhérent : NOM_ADHERENT").
+7. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
 
           let responseText = '';
           const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];

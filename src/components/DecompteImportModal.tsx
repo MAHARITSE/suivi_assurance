@@ -438,6 +438,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     const builtRows: SettlementRowItem[] = [];
 
     doc.lignes.forEach((l, idx) => {
+      // For BSA and healthcare statements: the true patient is the person aligned with the date of care
+      const effectiveNom = (l.ayantDroit && l.ayantDroit.trim()) ? l.ayantDroit.trim() : l.nomPrenom;
+
       // If line has multiple acts
       if (l.actes && l.actes.length > 0) {
         l.actes.forEach((act, actIdx) => {
@@ -448,7 +451,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
           const matched = autoMatchSettlementLine(
             l.matricule, 
-            l.nomPrenom, 
+            effectiveNom, 
             act.code || 'CONS', 
             l.dateSoins, 
             actMontant, 
@@ -460,7 +463,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             originalIndex: idx,
             dateSoins: l.dateSoins,
             matricule: l.matricule,
-            nomPrenom: l.nomPrenom,
+            nomPrenom: effectiveNom,
             sousSociete: l.sousSociete || '',
             actCode: act.code || 'CONS',
             actLibelle: act.libelle || act.code,
@@ -478,7 +481,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         const actCode = (l.actesTexte || 'CONS').substring(0, 6).toUpperCase();
         const matched = autoMatchSettlementLine(
           l.matricule, 
-          l.nomPrenom, 
+          effectiveNom, 
           actCode, 
           l.dateSoins, 
           l.montantBrut, 
@@ -490,7 +493,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           originalIndex: idx,
           dateSoins: l.dateSoins,
           matricule: l.matricule,
-          nomPrenom: l.nomPrenom,
+          nomPrenom: effectiveNom,
           sousSociete: l.sousSociete || '',
           actCode: actCode,
           actLibelle: l.actesTexte || 'Prestation médicale',
@@ -566,7 +569,29 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               const rawDateReg = String(getVal(['Date_Reglement', 'Date_Paiement', 'Date_Reglement_Paiement', 'Date Reglement', 'Date Paiement']) || '').trim();
               if (rawDateReg) inferredDateReglement = rawDateReg;
 
-              let rawNom = String(getVal(['Nom_Agent', 'Nom', 'Nom et Prénom', 'Adhérent', 'Patient', 'Nom Adherent', 'Assuré']) || `Patient ${idx + 1}`).trim();
+              // 1. Chercher d'abord le nom de la personne soignée / patient aligné à la date du soin
+              const nomPatientSoin = String(getVal([
+                'Patient', 'Nom_Patient', 'Nom Patient', 'Nom du Patient', 'Nom_du_Patient',
+                'Beneficiaire', 'Bénéficiaire', 'Nom_Beneficiaire', 'Nom_Bénéficiaire', 'Nom Bénéficiaire', 'Nom Beneficiaire',
+                'Ayant_Droit', 'Ayant Droit', 'AyantDroit', 'Nom_Ayant_Droit', 'Nom Ayant Droit', 'Nom_AyantDroit',
+                'Personne_Soignee', 'Personne Soignée', 'Nom_Soigne', 'Nom Soigné', 'Soigné', 'Soigne',
+                'Nom_Soin', 'Nom Soin', 'Nom_Soins', 'Nom Soins', 'Nom_Date_Soin', 'Nom Date Soin', 'Nom_Date_Soins', 'Nom Date des Soins',
+                'Malade', 'Nom_Malade', 'Nom Malade'
+              ]) || '').trim();
+
+              // 2. Chercher le nom de l'adhérent / titulaire de l'adhésion
+              const nomAdherent = String(getVal([
+                'Adherent', 'Adhérent', 'Nom_Adherent', 'Nom_Adhérent', 'Nom Adhérent', 'Nom Adherent', 'Adherent_Nom',
+                'Adhesion', 'Adhésion', 'Titulaire', 'Nom_Titulaire', 'Nom Titulaire'
+              ]) || '').trim();
+
+              // 3. Chercher les autres colonnes de nom général
+              const nomGeneral = String(getVal([
+                'Nom_Agent', 'Nom Agent', 'Nom et Prénom', 'Nom et Prenom', 'Nom_Prenom', 'Nom', 'Assuré', 'Assure', 'Nom Assuré', 'Nom Assure', 'Nom_Assure'
+              ]) || '').trim();
+
+              // Règle BSA : Pour BSA et relevés de soins, le vrai nom de la personne à importer est TOUJOURS celui aligné à la date du soin (Patient / Ayant-droit / Soigné) et non celui de l'adhésion
+              let rawNom = nomPatientSoin || (nomAdherent && !nomGeneral ? nomAdherent : nomGeneral) || nomAdherent || `Patient ${idx + 1}`;
               let sousSoc = String(getVal(['Sous_Societe', 'Sous-Société', 'Sous Societe', 'Département', 'Section', 'Service']) || '').trim();
 
               const parenMatch = rawNom.match(/^([^(]+)\s*\(([^)]+)\)$/);
@@ -586,7 +611,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               
               const actCode = String(getVal(['Code_Acte', 'Code Acte', 'Acte', 'Code']) || 'CONS').trim().toUpperCase();
               const actLibelle = String(getVal(['Libelle_Acte', 'Libellé Acte', 'Acte médicale/Prix', 'Actes Médicaux', 'Prestation', 'Libellé']) || actCode).trim();
-              const observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif', 'Motif_Observation']) || 'Import Excel').trim();
+              let observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif', 'Motif_Observation']) || 'Import Excel').trim();
+              if (nomAdherent && nomAdherent.toLowerCase() !== rawNom.toLowerCase() && !observations.toLowerCase().includes(nomAdherent.toLowerCase())) {
+                observations = observations && observations !== 'Import Excel' ? `${observations} (Adhérent: ${nomAdherent})` : `Adhérent: ${nomAdherent}`;
+              }
 
               return {
                 numeroLigne: idx + 1,
