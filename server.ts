@@ -3,7 +3,7 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
-import { ascomaSampleInvoice, mciCareSampleInvoice, bsaReleveSampleInvoice } from './src/data/insuranceSampleDocuments';
+import { ascomaSampleInvoice, mciCareSampleInvoice, mciCareFactureSampleInvoice, bsaReleveSampleInvoice } from './src/data/insuranceSampleDocuments';
 import { salfaSampleInvoice } from './src/data/salfaInvoiceSample';
 
 const upload = multer({
@@ -30,6 +30,24 @@ function getGenAI(): GoogleGenAI | null {
 
 const waitMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+function normalizeDateStr(dateStr: any): string {
+  if (!dateStr) return '';
+  const trimmed = String(dateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const dmyMatch = trimmed.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    let year = dmyMatch[3];
+    if (year.length === 2) {
+      const yr = parseInt(year, 10);
+      year = yr < 70 ? `20${year}` : `19${year}`;
+    }
+    return `${year}-${month}-${day}`;
+  }
+  return trimmed;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -51,7 +69,10 @@ async function startServer() {
   app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
     try {
       const file = req.file;
-      const { text, sampleType } = req.body;
+      const { text, sampleType, targetOrganism, docType, insuranceType } = req.body;
+
+      const chosenOrganism = (targetOrganism || insuranceType || '').trim();
+      const chosenDocType = (docType || '').trim().toLowerCase();
 
       // Case 1: Check for known sample request or fallback
       if (sampleType === 'ascoma') {
@@ -61,11 +82,18 @@ async function startServer() {
           data: getAscomaDefaultInvoice()
         });
       }
+      if (sampleType === 'mci_facture') {
+        return res.json({
+          source: 'sample_mci_facture',
+          success: true,
+          data: mciCareFactureSampleInvoice
+        });
+      }
       if (sampleType === 'mci' || sampleType === 'mcicare') {
         return res.json({
           source: 'sample_mci',
           success: true,
-          data: getMciCareDefaultInvoice()
+          data: chosenDocType === 'facture' ? mciCareFactureSampleInvoice : getMciCareDefaultInvoice()
         });
       }
       if (sampleType === 'bsa' || sampleType === 'bsa_releve') {
@@ -75,7 +103,7 @@ async function startServer() {
           data: getBsaReleveDefaultInvoice()
         });
       }
-      if (sampleType === 'salfa' || (!file && !text)) {
+      if (sampleType === 'salfa' || (!file && !text && !chosenOrganism)) {
         return res.json({
           source: 'sample_template',
           success: true,
@@ -91,7 +119,13 @@ async function startServer() {
           const mimeType = file.mimetype || (file.originalname.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
           const base64Data = file.buffer.toString('base64');
 
-          const prompt = `Tu es un expert comptable et actuaire spécialisé dans l'analyse de factures et décomptes de règlement d'assurance santé à Madagascar (spécifiquement MCI CARE, ASCOMA / Gras Savoye, BSA / ASK GS, ARO, AXA, etc.).
+          const organismGuidance = chosenOrganism
+            ? `\nORGANISME D'ASSURANCE / CLIENT SÉLECTIONNÉ PAR L'UTILISATEUR : "${chosenOrganism}".
+- Veille à assigner "clientDoit": "${chosenOrganism}" dans le résultat JSON.
+- Attention : Ne confonds JAMAIS "MCI CARE" avec "BSA" ou "ASCOMA". Si l'utilisateur ou le document mentionne MCI CARE / SANLAMALLIANZ, le clientDoit DOIT être "MCI CARE".`
+            : '';
+
+          const prompt = `Tu es un expert comptable et actuaire spécialisé dans l'analyse de factures et décomptes de règlement d'assurance santé à Madagascar (spécifiquement MCI CARE, ASCOMA / Gras Savoye, BSA / ASK GS, ARO, AXA, etc.).${organismGuidance}
 
 Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte de règlement tiers payant ou relevé de remboursements) et extrait rigoureusement TOUTES les informations et lignes de soins dans une structure JSON valide selon le schéma suivant :
 
@@ -144,17 +178,18 @@ RÈGLES CRUCIALES D'EXTRACTION :
 1. Extraction complète : Extrais TOUTES les lignes du document sans en oublier une seule (qu'il y ait 10, 25 ou 45 lignes).
 2. Colonne "Acte médicale/Prix" (Multiples Actes) : Un montant ou patient peut avoir PLUSIEURS actes médicaux sous la colonne "Acte médicale/Prix" (ex: "DENT : 50 000,00 \n MEDIC : 12 000,00" ou "CONS : 20 000,00 / MEDIC : 26 200,00 / LABO : 3 000,00"). Extrais TOUS les sous-actes distinctement dans la liste "actes", chacun avec son code (ex: CONS, MEDIC/PHAR, LABO, DENT, HOSP, SOINS, ECHO, STOCK), son libellé et son montant individuel.
 3. Analyse des parenthèses et sous-sociétés : Les mentions entre parenthèses dans la colonne client ou assuré indiquent des **sous-sociétés** (ex: "(BFV)", "(ACCES BANQUES)", "(BAOBAB BANQUE)", "(SIPEM)", "(CAISSE D'ÉPARGNE)", "(ORANGE)", "(WILDLIFE CONSERVATION)", "(ADRA MADAGASCAR)"). Place-les impérativement dans le champ "sousSociete".
-4. Codes actes :
-   - Codes standard : CONS (Consultation/Visite), MEDIC/PHAR (Pharmacie/Médicaments/PHSB/PH), LABO (Analyses/Biologie/EB/TDR), DENT (Dentaire/DC/DK), HOSP (Hospitalisation/Chirurgie/Accouchement), RADI/ECHO (Radio/Échographie), SOINS (Soins infirmiers/SI), STOCK (Matériel/Consommables/Stock).
-   - Si un acte est particulier ou inhabituel, garde son code d'origine (ex: DK, DC, EB, SI, PHSB, PH, STOCK, etc.) pour permettre à l'utilisateur de choisir la famille de rattachement.
-5. Décompte Tiers Payant :
+4. Dates : Convertis TOUTES les dates au format ISO 'YYYY-MM-DD' (ex: 21/04/2026 -> 2026-04-21, 01/04/26 -> 2026-04-01).
+5. Codes actes :
+   - Codes standard : CONS (Consultation/Visite/C/CS), MEDIC/PHAR (Pharmacie/Médicaments/PHSB/PH), LABO (Analyses/Biologie/EB/TDR), DENT (Dentaire/DC/DK/CD/DSC/DDC/DETAR), HOSP (Hospitalisation/Chirurgie/Accouchement), RADI/ECHO (Radio/Échographie), SOINS (Soins infirmiers/SI/AMI), STOCK (Matériel/Consommables/Stock).
+   - Si un acte est particulier ou inhabituel, garde son code d'origine (ex: DK, DC, EB, SI, AMI, PHSB, PH, STOCK, etc.) pour permettre à l'utilisateur de choisir la famille de rattachement.
+6. Décompte Tiers Payant :
    - "Montant Réclamé / Fr. Réels" -> "montantBrut"
    - "Montant Exclu / Non Remb." -> "montantExclu"
    - "Base de Règlement / Base Décomptée" -> "baseReglement"
    - "Ticket Modérateur / Non Remb (Part Assuré)" -> "participation"
    - "Montant Réglé / Net Payé" -> "netAPayer"
-6. Règle absolue pour BSA et Relevés Médicaux : Le vrai nom de la personne à extraire dans "nomPrenom" est TOUJOURS le nom de la personne soignée alignée à la date du soin (le Patient / Ayant-droit / Bénéficiaire / Personne soignée), et NON le nom aligné à l'adhésion/contrat si les deux diffèrent. Si l'adhérent/titulaire est différent, mentionne-le dans "observations" (ex: "Adhérent : NOM_ADHERENT").
-7. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
+7. Règle absolue pour BSA et Relevés Médicaux : Le vrai nom de la personne à extraire dans "nomPrenom" est TOUJOURS le nom de la personne soignée alignée à la date du soin (le Patient / Ayant-droit / Bénéficiaire / Personne soignée), et NON le nom aligné à l'adhésion/contrat si les deux diffèrent. Si l'adhérent/titulaire est différent, mentionne-le dans "observations" (ex: "Adhérent : NOM_ADHERENT").
+8. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
 
           let responseText = '';
           const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
@@ -182,7 +217,6 @@ RÈGLES CRUCIALES D'EXTRACTION :
               const is503 = mErr?.message?.includes('503') || mErr?.status === 'UNAVAILABLE' || mErr?.status === 503;
               console.warn(`Model ${modelName} attempt failed (503=${is503}):`, mErr?.message || mErr);
               if (is503) {
-                // Brief pause before trying next candidate to allow transient spike to pass
                 await waitMs(600);
               }
             }
@@ -208,6 +242,17 @@ RÈGLES CRUCIALES D'EXTRACTION :
             }
 
             if (parsed && Array.isArray(parsed.lignes) && parsed.lignes.length > 0) {
+              // Normalize dates in the parsed response
+              if (parsed.dateEmission) parsed.dateEmission = normalizeDateStr(parsed.dateEmission);
+              if (chosenOrganism && (!parsed.clientDoit || parsed.clientDoit === 'Organisme' || parsed.clientDoit === 'BSA' && chosenOrganism.includes('MCI'))) {
+                parsed.clientDoit = chosenOrganism;
+              }
+              parsed.lignes = parsed.lignes.map((l: any, idx: number) => ({
+                ...l,
+                numeroLigne: l.numeroLigne || idx + 1,
+                dateSoins: normalizeDateStr(l.dateSoins)
+              }));
+
               return res.json({
                 source: 'gemini_ai',
                 success: true,
@@ -220,15 +265,19 @@ RÈGLES CRUCIALES D'EXTRACTION :
         }
       }
 
-      // Fallback: If no Gemini Key or Gemini had an issue, provide local intelligent extraction based on filename or default
+      // Fallback: If no Gemini Key or Gemini had an issue, provide local intelligent extraction based on targetOrganism, filename or default
       const fname = (file?.originalname || '').toLowerCase();
+      const orgUpper = (chosenOrganism || '').toUpperCase();
+
       let fallbackData: any = getSalfaDefaultInvoice();
-      if (fname.includes('ascoma')) {
+      if (orgUpper.includes('ASCOMA') || fname.includes('ascoma')) {
         fallbackData = getAscomaDefaultInvoice();
-      } else if (fname.includes('mci') || fname.includes('care')) {
-        fallbackData = getMciCareDefaultInvoice();
-      } else if (fname.includes('bsa')) {
-        fallbackData = getBsaReleveDefaultInvoice();
+      } else if (orgUpper.includes('MCI') || fname.includes('mci') || fname.includes('care')) {
+        fallbackData = chosenDocType === 'facture' ? mciCareFactureSampleInvoice : getMciCareDefaultInvoice();
+      } else if (orgUpper.includes('BSA') || fname.includes('bsa')) {
+        fallbackData = chosenDocType === 'decompte' ? getBsaReleveDefaultInvoice() : getSalfaDefaultInvoice();
+      } else {
+        fallbackData = chosenDocType === 'facture' ? getSalfaDefaultInvoice() : getMciCareDefaultInvoice();
       }
 
       return res.json({

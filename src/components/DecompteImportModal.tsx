@@ -27,7 +27,8 @@ import {
   Calendar,
   CalendarCheck,
   Tag,
-  Filter
+  Filter,
+  ShieldCheck
 } from 'lucide-react';
 import { 
   Paiement, 
@@ -40,7 +41,7 @@ import {
   ParsedFactureAssurance,
   FactureLigneParsed 
 } from '../types';
-import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
 import { ascomaSampleInvoice, mciCareSampleInvoice, bsaReleveSampleInvoice } from '../data/insuranceSampleDocuments';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import * as XLSX from 'xlsx';
@@ -224,7 +225,12 @@ export function getConfrontationDetails(
   };
 }
 
-function getAppropriateDecompteFallback(filename: string): ParsedFactureAssurance {
+function getAppropriateDecompteFallback(filename: string, chosenOrg?: string): ParsedFactureAssurance {
+  const org = (chosenOrg || '').toLowerCase();
+  if (org.includes('ascoma')) return ascomaSampleInvoice;
+  if (org.includes('mci') || org.includes('care')) return mciCareSampleInvoice;
+  if (org.includes('bsa')) return bsaReleveSampleInvoice;
+
   const low = (filename || '').toLowerCase();
   if (low.includes('ascoma')) return ascomaSampleInvoice;
   if (low.includes('mci') || low.includes('care')) return mciCareSampleInvoice;
@@ -242,6 +248,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   onSavePaiement,
 }) => {
   const [importMode, setImportMode] = useState<'excel' | 'pdf' | 'sample'>('excel');
+  const [selectedInsurance, setSelectedInsurance] = useState<string>('AUTO');
+  const [customInsurance, setCustomInsurance] = useState<string>('');
   const [parsedDoc, setParsedDoc] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -255,6 +263,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+
+  const getEffectiveInsurance = () => {
+    if (selectedInsurance === 'CUSTOM') return customInsurance.trim();
+    if (selectedInsurance === 'AUTO') return '';
+    return selectedInsurance;
+  };
 
   const handleResetAndBack = () => {
     setParsedDoc(null);
@@ -632,6 +646,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setIsProcessing(true);
     setErrorMessage(null);
 
+    const chosenOrg = getEffectiveInsurance();
+
     try {
       if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
         const reader = new FileReader();
@@ -646,7 +662,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             if (jsonRows.length === 0) throw new Error('Le fichier Excel est vide ou ne contient aucune ligne de données.');
 
             let inferredBordereau = '';
-            let inferredOrganisme = 'ASCOMA / MCI / BSA';
+            let inferredOrganisme = chosenOrg || 'ASCOMA / MCI / BSA';
             let inferredDateReglement = new Date().toISOString().split('T')[0];
 
             const lignes: FactureLigneParsed[] = jsonRows.map((row, idx) => {
@@ -665,11 +681,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               const rawBord = String(getVal(['Ref_Bordereau', 'RefBordereau', 'Bordereau', 'N° Bordereau', 'Numero_Reglement', 'Ref_Paiement', 'Ref_Decompte']) || '').trim();
               if (rawBord && !inferredBordereau) inferredBordereau = rawBord;
 
-              const rawOrg = String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client']) || '').trim();
+              const rawOrg = chosenOrg || String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client']) || '').trim();
               if (rawOrg) inferredOrganisme = rawOrg;
 
               const rawDateReg = String(getVal(['Date_Reglement', 'Date_Paiement', 'Date_Reglement_Paiement', 'Date Reglement', 'Date Paiement']) || '').trim();
-              if (rawDateReg) inferredDateReglement = rawDateReg;
+              if (rawDateReg) inferredDateReglement = normalizeDateISO(rawDateReg);
 
               // 1. Chercher d'abord le nom de la personne soignée / patient aligné à la date du soin
               const nomPatientSoin = String(getVal([
@@ -705,7 +721,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               }
 
               const matricule = String(getVal(['Matricule', 'N° Matricule', 'Immatriculation', 'Code']) || '').trim();
-              const dateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || inferredDateReglement).trim();
+              const rawDateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || inferredDateReglement).trim();
+              const dateSoins = normalizeDateISO(rawDateSoins);
               const montantBrut = Number(getVal(['Montant_Reclame_Brut', 'Montant_Brut', 'Montant Total Brut', 'Montant Facture', 'Total Prestation', 'Montant Reclame'])) || 0;
               const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation'])) || 0;
               const netAPayer = Number(getVal(['Montant_Paye_Regle', 'Somme_Payee_Net', 'Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé', 'Somme Payée'])) || (montantBrut > 0 ? (montantBrut - participation) : 0);
@@ -764,6 +781,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       } else {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('docType', 'decompte');
+        if (chosenOrg) {
+          formData.append('targetOrganism', chosenOrg);
+          formData.append('insuranceType', chosenOrg);
+        }
 
         const response = await fetch('/api/parse-invoice', {
           method: 'POST',
@@ -776,15 +798,18 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           json = await response.json();
         } else {
           console.warn('Non-JSON response from /api/parse-invoice');
-          json = { success: true, data: getAppropriateDecompteFallback(file.name) };
+          json = { success: true, data: getAppropriateDecompteFallback(file.name, chosenOrg) };
         }
 
-        const data: ParsedFactureAssurance = json?.data || json || getAppropriateDecompteFallback(file.name);
+        const data: ParsedFactureAssurance = json?.data || json || getAppropriateDecompteFallback(file.name, chosenOrg);
+        if (chosenOrg && (!data.clientDoit || data.clientDoit === 'Organisme' || (data.clientDoit.includes('BSA') && chosenOrg.includes('MCI')))) {
+          data.clientDoit = chosenOrg;
+        }
         processLoadedDocument(data);
       }
     } catch (err: any) {
       console.warn('Decompte OCR error:', err);
-      processLoadedDocument(getAppropriateDecompteFallback(file?.name || ''));
+      processLoadedDocument(getAppropriateDecompteFallback(file?.name || '', chosenOrg));
     }
   };
 
@@ -1106,6 +1131,56 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
           {!parsedDoc && (
             <div className="space-y-6">
+              {/* Insurance / Client Pre-Selection Selector */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                    <ShieldCheck className="h-4 w-4 text-indigo-600" />
+                    <span>Assurance / Organisme payeur du décompte :</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    {selectedInsurance === 'AUTO' ? '⚡ Détection auto par IA' : `Sélection forcée : ${getEffectiveInsurance() || 'Personnalisé'}`}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { id: 'AUTO', label: '⚡ Auto-détection' },
+                    { id: 'MCI CARE', label: '🏥 MCI CARE' },
+                    { id: 'BSA', label: '🏢 BSA / ASK GS' },
+                    { id: 'ASCOMA', label: '📋 ASCOMA' },
+                    { id: 'ARO', label: '🛡️ ARO' },
+                    { id: 'AXA', label: '🏛️ AXA' },
+                    { id: 'CUSTOM', label: '✏️ Autre / Saisie...' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setSelectedInsurance(opt.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        selectedInsurance === opt.id
+                          ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                          : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {selectedInsurance === 'CUSTOM' && (
+                  <div className="pt-1">
+                    <input
+                      type="text"
+                      value={customInsurance}
+                      onChange={(e) => setCustomInsurance(e.target.value)}
+                      placeholder="Entrez le nom exact de l'organisme payeur (ex: NY HAVANA, ALLIANZ, OMNIS)..."
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Import Mode Tabs */}
               <div className="flex items-center justify-center">
                 <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-semibold">
