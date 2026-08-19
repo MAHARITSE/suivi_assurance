@@ -17,9 +17,12 @@ import {
   ArrowRight,
   Plus,
   Link as LinkIcon,
+  Link2,
   Unlink,
   ChevronRight,
-  ArrowLeft
+  ArrowLeft,
+  FileSpreadsheet,
+  ScanLine
 } from 'lucide-react';
 import { 
   Paiement, 
@@ -34,6 +37,7 @@ import {
 } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { ascomaSampleInvoice, mciCareSampleInvoice, bsaReleveSampleInvoice } from '../data/insuranceSampleDocuments';
+import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import * as XLSX from 'xlsx';
 
 interface DecompteImportModalProps {
@@ -53,10 +57,14 @@ interface MatchCandidate {
   lignePrestationId: string;
   codeActe: string;
   libelleActe: string;
+  societeNom?: string;
+  sousSociete?: string;
   personneId: string;
   personneNom: string;
   matricule: string;
   montantInitial: number;
+  ticketModerateur: number;
+  montantARembourser: number;
   dejaPaye: number;
   resteAPayer: number;
 }
@@ -98,6 +106,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   familles,
   onSavePaiement,
 }) => {
+  const [importMode, setImportMode] = useState<'excel' | 'pdf' | 'sample'>('excel');
   const [parsedDoc, setParsedDoc] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -108,6 +117,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const [actSearchQuery, setActSearchQuery] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   const handleResetAndBack = () => {
     setParsedDoc(null);
@@ -117,6 +127,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setIsProcessing(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+    if (excelInputRef.current) {
+      excelInputRef.current.value = '';
     }
   };
 
@@ -135,33 +148,75 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       if (prest.statut === 'Payé' || prest.statut === 'Rejeté') return;
 
       const pers = personnes.find(p => p.id === prest.personneId);
+      const persNom = prest.nomAgent || pers?.nomPrenom || 'Patient';
+      const persMat = prest.matricule || pers?.matricule || '-';
+      const socNom = prest.societeNom || societes.find(s => s.id === prest.societeId)?.nom || '';
+      const sousSoc = prest.sousSociete || '';
 
-      prest.lignes.forEach(ligne => {
-        const dejaPaye = ligne.totalPaye || 0;
-        const reste = Math.max(0, ligne.totalPrestation - dejaPaye);
+      if (prest.lignes && prest.lignes.length > 0) {
+        prest.lignes.forEach((ligne, lIdx) => {
+          const brut = ligne.totalPrestation || 0;
+          const part = ligne.ticketModerateur ?? Math.round((prest.ticketModerateur || 0) / (prest.lignes.length || 1));
+          const remb = ligne.montantARembourser ?? Math.max(0, brut - part);
+          const dejaPaye = ligne.totalPaye || 0;
+          const reste = Math.max(0, remb - dejaPaye);
 
-        // Exclude acts that are already fully settled!
+          // Exclude acts that are already fully settled!
+          if (reste > 0) {
+            const fam = familles.find(f => f.code.toUpperCase() === (ligne.code || '').toUpperCase());
+            list.push({
+              prestationId: prest.id,
+              prestationNum: prest.numeroFacture,
+              prestationDate: prest.date,
+              lignePrestationId: ligne.id || `${prest.id}-lig-${lIdx}`,
+              codeActe: ligne.code || 'CONS',
+              libelleActe: ligne.libelle || fam?.libelle || ligne.code || 'Acte de soins',
+              societeNom: socNom,
+              sousSociete: sousSoc,
+              personneId: prest.personneId,
+              personneNom: persNom,
+              matricule: persMat,
+              montantInitial: brut,
+              ticketModerateur: part,
+              montantARembourser: remb,
+              dejaPaye: dejaPaye,
+              resteAPayer: reste
+            });
+          }
+        });
+      } else {
+        // Fallback for prestation without split sub-lines
+        const tot = prest.montantTotal ?? prest.totalPrestation ?? 0;
+        const mod = prest.ticketModerateur ?? prest.participation ?? 0;
+        const remb = prest.montantARembourser ?? Math.max(0, tot - mod);
+        const dejaPaye = prest.totalPaye || 0;
+        const reste = Math.max(0, remb - dejaPaye);
+
         if (reste > 0) {
           list.push({
             prestationId: prest.id,
             prestationNum: prest.numeroFacture,
             prestationDate: prest.date,
-            lignePrestationId: ligne.id,
-            codeActe: ligne.code,
-            libelleActe: ligne.libelle || ligne.code,
+            lignePrestationId: `${prest.id}-main`,
+            codeActe: 'ACTE',
+            libelleActe: prest.commentaires || 'Prestation globale',
+            societeNom: socNom,
+            sousSociete: sousSoc,
             personneId: prest.personneId,
-            personneNom: pers?.nomPrenom || 'Patient inconnu',
-            matricule: pers?.matricule || '-',
-            montantInitial: ligne.totalPrestation,
+            personneNom: persNom,
+            matricule: persMat,
+            montantInitial: tot,
+            ticketModerateur: mod,
+            montantARembourser: remb,
             dejaPaye: dejaPaye,
             resteAPayer: reste
           });
         }
-      });
+      }
     });
 
     return list;
-  }, [prestations, personnes]);
+  }, [prestations, personnes, societes, familles]);
 
   // Intelligent Automatic Matcher for a settlement line
   const autoMatchSettlementLine = (
@@ -311,45 +366,75 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           try {
             const data = new Uint8Array(event.target?.result as ArrayBuffer);
             const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const sheetName = workbook.SheetNames[0];
+            const firstSheet = workbook.Sheets[sheetName];
             const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
 
-            if (jsonRows.length === 0) throw new Error('Fichier Excel vide.');
+            if (jsonRows.length === 0) throw new Error('Le fichier Excel est vide ou ne contient aucune ligne de données.');
+
+            let inferredBordereau = '';
+            let inferredOrganisme = 'ASCOMA / MCI / BSA';
+            let inferredDateReglement = new Date().toISOString().split('T')[0];
 
             const lignes: FactureLigneParsed[] = jsonRows.map((row, idx) => {
               const getVal = (keys: string[]) => {
                 for (const k of keys) {
-                  const foundKey = Object.keys(row).find(rk => rk.toLowerCase().trim() === k.toLowerCase().trim());
+                  const cleanK = k.toLowerCase().replace(/[\s_\-\.\/]/g, '');
+                  const foundKey = Object.keys(row).find(rk => {
+                    const cleanRk = rk.toLowerCase().replace(/[\s_\-\.\/]/g, '');
+                    return cleanRk === cleanK;
+                  });
                   if (foundKey && row[foundKey] !== undefined && row[foundKey] !== '') return row[foundKey];
                 }
                 return '';
               };
 
-              const nom = String(getVal(['Nom', 'Nom et Prénom', 'Adhérent', 'Patient', 'Nom Adherent', 'Assuré']) || `Patient ${idx + 1}`);
+              const rawBord = String(getVal(['Ref_Bordereau', 'RefBordereau', 'Bordereau', 'N° Bordereau', 'Numero_Reglement', 'Ref_Paiement']) || '').trim();
+              if (rawBord && !inferredBordereau) inferredBordereau = rawBord;
+
+              const rawOrg = String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client']) || '').trim();
+              if (rawOrg) inferredOrganisme = rawOrg;
+
+              const rawDateReg = String(getVal(['Date_Reglement', 'Date_Paiement', 'Date_Reglement_Paiement', 'Date Reglement', 'Date Paiement']) || '').trim();
+              if (rawDateReg) inferredDateReglement = rawDateReg;
+
+              let rawNom = String(getVal(['Nom_Agent', 'Nom', 'Nom et Prénom', 'Adhérent', 'Patient', 'Nom Adherent', 'Assuré']) || `Patient ${idx + 1}`).trim();
+              let sousSoc = String(getVal(['Sous_Societe', 'Sous-Société', 'Sous Societe', 'Département', 'Section', 'Service']) || '').trim();
+
+              const parenMatch = rawNom.match(/^([^(]+)\s*\(([^)]+)\)$/);
+              if (parenMatch) {
+                rawNom = parenMatch[1].trim();
+                if (!sousSoc) {
+                  sousSoc = parenMatch[2].trim();
+                }
+              }
+
               const matricule = String(getVal(['Matricule', 'N° Matricule', 'Immatriculation', 'Code']) || '').trim();
-              const dateSoins = String(getVal(['Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || new Date().toISOString().split('T')[0]);
-              const montantBrut = Number(getVal(['Montant Total Brut', 'Montant Brut', 'Montant Facture', 'Total Prestation'])) || 0;
-              const netAPayer = Number(getVal(['Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé'])) || montantBrut;
-              const participation = Number(getVal(['Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation'])) || 0;
-              const montantExclu = Number(getVal(['Montant Exclu', 'Exclu', 'Rejet'])) || 0;
-              const sousSoc = String(getVal(['Sous-Societe', 'Sous-Société', 'Département', 'Section']) || '');
-              const actCode = String(getVal(['Acte médicale/Prix', 'Actes Médicaux', 'Acte', 'Prestation', 'Code Acte']) || 'CONS');
+              const dateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || inferredDateReglement).trim();
+              const montantBrut = Number(getVal(['Montant_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Facture', 'Total Prestation'])) || 0;
+              const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation'])) || 0;
+              const netAPayer = Number(getVal(['Somme_Payee_Net', 'Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé', 'Somme Payée'])) || (montantBrut > 0 ? (montantBrut - participation) : 0);
+              const montantExclu = Number(getVal(['Montant_Exclu', 'Montant Exclu', 'Exclu', 'Rejet'])) || 0;
+              
+              const actCode = String(getVal(['Code_Acte', 'Code Acte', 'Acte', 'Code']) || 'CONS').trim().toUpperCase();
+              const actLibelle = String(getVal(['Libelle_Acte', 'Libellé Acte', 'Acte médicale/Prix', 'Actes Médicaux', 'Prestation', 'Libellé']) || actCode).trim();
+              const observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif']) || 'Import Excel').trim();
 
               return {
                 numeroLigne: idx + 1,
                 dateSoins,
                 matricule,
-                nomPrenom: nom,
-                societeAffiliee: 'ASCOMA / MCI / BSA',
+                nomPrenom: rawNom,
+                societeAffiliee: inferredOrganisme,
                 sousSociete: sousSoc,
-                actes: [{ code: actCode.substring(0, 6).toUpperCase(), libelle: actCode, montant: montantBrut }],
-                actesTexte: actCode,
-                montantBrut,
+                actes: [{ code: actCode.substring(0, 8), libelle: actLibelle, montant: montantBrut || netAPayer }],
+                actesTexte: actLibelle,
+                montantBrut: montantBrut || netAPayer,
                 montantExclu,
-                baseReglement: montantBrut,
+                baseReglement: montantBrut || netAPayer,
                 participation,
                 netAPayer,
-                observations: 'Import Excel'
+                observations
               };
             });
 
@@ -360,11 +445,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             const doc: ParsedFactureAssurance = {
               documentType: 'decompte',
               etablissement: 'CENTRE DE SANTÉ',
-              numeroFacture: `BORD-${Date.now().toString().substring(6)}`,
-              numeroBordereau: `BORD-${Date.now().toString().substring(6)}`,
+              numeroFacture: inferredBordereau || `BORD-${Date.now().toString().substring(6)}`,
+              numeroBordereau: inferredBordereau || `BORD-${Date.now().toString().substring(6)}`,
               moisPriseEnCharge: new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
-              clientDoit: 'Assurance Tiers Payant',
-              dateEmission: new Date().toISOString().split('T')[0],
+              clientDoit: inferredOrganisme,
+              dateEmission: inferredDateReglement,
               totalMontantBrut: totalBrut,
               totalParticipation: totalPart,
               totalNetAPayer: totalNet,
@@ -434,13 +519,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // Filtered search list inside manual match modal
   const filteredSearchCandidates = useMemo(() => {
     if (!actSearchQuery.trim()) return allEligibleActs;
-    const q = actSearchQuery.toLowerCase();
+    const q = actSearchQuery.toLowerCase().trim();
     return allEligibleActs.filter(cand => 
       cand.personneNom.toLowerCase().includes(q) ||
       cand.matricule.toLowerCase().includes(q) ||
       cand.prestationNum.toLowerCase().includes(q) ||
       cand.codeActe.toLowerCase().includes(q) ||
-      cand.libelleActe.toLowerCase().includes(q)
+      cand.libelleActe.toLowerCase().includes(q) ||
+      (cand.sousSociete && cand.sousSociete.toLowerCase().includes(q)) ||
+      (cand.societeNom && cand.societeNom.toLowerCase().includes(q))
     );
   }, [allEligibleActs, actSearchQuery]);
 
@@ -673,91 +760,209 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
           {!parsedDoc && (
             <div className="space-y-5">
-              {/* Preset buttons */}
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
-                  <Sparkles className="h-4 w-4 text-emerald-600" />
-                  <span>Charger un exemple de décompte reçu :</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <button
-                    onClick={() => handleLoadPredefined('ascoma')}
-                    disabled={isProcessing}
-                    className="flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5 text-left transition hover:bg-indigo-50 hover:border-indigo-300"
-                  >
-                    <div>
-                      <div className="text-xs font-bold text-indigo-950">ASCOMA Tiers Payant</div>
-                      <div className="text-[11px] text-slate-500">Réf 69235 (23 actes • 1 344 683 Ar)</div>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-indigo-600" />
-                  </button>
-
-                  <button
-                    onClick={() => handleLoadPredefined('mci')}
-                    disabled={isProcessing}
-                    className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 text-left transition hover:bg-blue-50 hover:border-blue-300"
-                  >
-                    <div>
-                      <div className="text-xs font-bold text-blue-950">MCI CARE (Groupe Axian)</div>
-                      <div className="text-[11px] text-slate-500">Pharmacie & Sous-factures (474 600 Ar)</div>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-blue-600" />
-                  </button>
-
-                  <button
-                    onClick={() => handleLoadPredefined('bsa')}
-                    disabled={isProcessing}
-                    className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5 text-left transition hover:bg-emerald-50 hover:border-emerald-300"
-                  >
-                    <div>
-                      <div className="text-xs font-bold text-emerald-950">BSA / ASK GS (Relevé)</div>
-                      <div className="text-[11px] text-slate-500">Lot 890621 (45 actes • 761 150 Ar)</div>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-emerald-600" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Upload Dropzone */}
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) {
-                    const event = { target: { files: [file] } } as any;
-                    handleFileUpload(event);
-                  }
-                }}
-                className="flex min-h-56 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/50 p-8 text-center transition hover:border-emerald-400 hover:bg-emerald-50/20"
-              >
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-slate-200">
-                  {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-slate-800">
-                    {isProcessing ? 'Traitement et rapprochement intelligent des actes...' : 'Déposez votre décompte ou relevé (PDF, Image ou Excel)'}
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Reconnaît les formats ASCOMA, MCI CARE, BSA, associe chaque ligne à l'acte prescrit et met à jour le solde restant.
-                  </p>
-                </div>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv"
-                  className="hidden"
-                />
+              {/* Import Mode Selector */}
+              <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-xl">
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isProcessing}
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                  type="button"
+                  onClick={() => setImportMode('excel')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
+                    importMode === 'excel'
+                      ? 'bg-white text-emerald-700 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
                 >
-                  Parcourir les fichiers
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                  <span>Mode Excel (.xlsx, .csv)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportMode('pdf')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
+                    importMode === 'pdf'
+                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                >
+                  <ScanLine className="h-4 w-4 text-indigo-600" />
+                  <span>Mode Scan PDF / Image</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportMode('sample')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
+                    importMode === 'sample'
+                      ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  <span>Exemples Décomptes Reçus</span>
                 </button>
               </div>
+
+              {/* MODE: EXCEL */}
+              {importMode === 'excel' && (
+                <div className="space-y-4">
+                  {/* Template download banner */}
+                  <div className="flex items-center justify-between rounded-xl bg-emerald-50/80 border border-emerald-200 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700 mt-0.5">
+                        <FileSpreadsheet className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-emerald-950">Modèle Excel pour Règlements / Décomptes</h4>
+                        <p className="text-xs text-emerald-800 mt-0.5 max-w-lg">
+                          Téléchargez le modèle Excel structuré : 
+                          <strong> Date_Reglement, Date_Soins, Nom_Agent, Matricule, Code_Acte, Libelle_Acte, Montant_Brut, Ticket_Moderateur, Somme_Payee_Net</strong>...
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => downloadDecomptesExcelTemplate()}
+                      className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 shadow-xs shrink-0"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>Télécharger le modèle Excel</span>
+                    </button>
+                  </div>
+
+                  {/* Excel Upload Area */}
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) {
+                        const event = { target: { files: [file] } } as any;
+                        handleFileUpload(event);
+                      }
+                    }}
+                    className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
+                  >
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
+                      {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">
+                        {isProcessing ? 'Rapprochement des actes en cours...' : 'Déposez votre fichier Excel de décompte (.xlsx, .xls, .csv)'}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-md">
+                        Rattache automatiquement chaque ligne de paiement à l'acte prescrit correspondant et exclut les actes déjà réglés.
+                      </p>
+                    </div>
+                    <input
+                      type="file"
+                      ref={excelInputRef}
+                      onChange={handleFileUpload}
+                      accept=".xlsx,.xls,.csv"
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => excelInputRef.current?.click()}
+                      disabled={isProcessing}
+                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs"
+                    >
+                      Parcourir un fichier Excel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* MODE: PDF / IMAGE OCR */}
+              {importMode === 'pdf' && (
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) {
+                      const event = { target: { files: [file] } } as any;
+                      handleFileUpload(event);
+                    }
+                  }}
+                  className="flex min-h-56 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/20 p-8 text-center transition hover:border-indigo-500 hover:bg-indigo-50/40"
+                >
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-indigo-600 border border-indigo-100">
+                    {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-900">
+                      {isProcessing ? 'Traitement IA et rapprochement des actes...' : 'Déposez votre décompte numérisé (PDF ou Image)'}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md">
+                      Reconnaît les formats ASCOMA, MCI CARE, BSA, associe chaque ligne à l'acte prescrit et met à jour le solde restant.
+                    </p>
+                  </div>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessing}
+                    className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 shadow-xs"
+                  >
+                    Parcourir un fichier PDF ou Image
+                  </button>
+                </div>
+              )}
+
+              {/* MODE: SAMPLE PRESETS */}
+              {importMode === 'sample' && (
+                <div className="space-y-3">
+                  <div className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-emerald-600" />
+                    <span>Choisir un décompte réel pré-chargé :</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleLoadPredefined('ascoma')}
+                      disabled={isProcessing}
+                      className="flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 text-left transition hover:bg-indigo-50 hover:border-indigo-300"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-indigo-950">ASCOMA Tiers Payant</div>
+                        <div className="text-[11px] text-slate-500">Réf 69235 (23 actes • 1 344 683 Ar)</div>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-indigo-600" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleLoadPredefined('mci')}
+                      disabled={isProcessing}
+                      className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-left transition hover:bg-blue-50 hover:border-blue-300"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-blue-950">MCI CARE (Groupe Axian)</div>
+                        <div className="text-[11px] text-slate-500">Pharmacie & Sous-factures (474 600 Ar)</div>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-blue-600" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleLoadPredefined('bsa')}
+                      disabled={isProcessing}
+                      className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 text-left transition hover:bg-emerald-50 hover:border-emerald-300"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-emerald-950">BSA / ASK GS (Relevé)</div>
+                        <div className="text-[11px] text-slate-500">Lot 890621 (45 actes • 761 150 Ar)</div>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-emerald-600" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -866,32 +1071,38 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                               <span className="text-[10px] text-slate-500 font-normal">({formatMoney(row.montantBrut)})</span>
                             </div>
                           </td>
-                          <td className="py-2.5 px-3 min-w-[280px]">
+                          <td className="py-2.5 px-3 min-w-[320px]">
                             {matched ? (
-                              <div className="rounded-lg bg-emerald-50/80 border border-emerald-200 p-2 text-[11px] space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5 font-bold text-emerald-950">
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                    <span>{matched.prestationNum}</span>
-                                    <span className="text-slate-500 font-normal font-mono">({matched.codeActe})</span>
+                              <div className="rounded-xl bg-emerald-50/90 border border-emerald-200 p-2.5 text-xs space-y-1.5 shadow-2xs">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
+                                      {matched.codeActe}
+                                    </span>
+                                    <span className="font-bold text-slate-900 text-[11px] truncate" title={matched.libelleActe}>
+                                      {matched.libelleActe}
+                                    </span>
                                   </div>
-                                  <span className="text-[10px] font-mono font-semibold text-emerald-800">
+                                  <span className="text-[11px] font-mono font-bold text-emerald-800 whitespace-nowrap shrink-0">
                                     Reste : {formatMoney(matched.resteAPayer)}
                                   </span>
                                 </div>
-                                <div className="text-slate-600 flex items-center justify-between text-[10px]">
-                                  <span>{matched.personneNom}</span>
-                                  <span className="text-slate-400">Total: {formatMoney(matched.montantInitial)}</span>
+                                <div className="text-[10px] text-slate-600 flex items-center justify-between border-t border-emerald-200/60 pt-1">
+                                  <span className="truncate">Facture: <strong>{matched.prestationNum}</strong> • {matched.personneNom}</span>
+                                  <span className="text-slate-500 font-mono shrink-0 ml-1">
+                                    Prix : {formatMoney(matched.montantInitial)}
+                                  </span>
                                 </div>
                               </div>
                             ) : (
-                              <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] flex items-center justify-between">
+                              <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-center justify-between shadow-2xs">
                                 <div className="flex items-center gap-1.5 text-amber-900 font-medium">
-                                  <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                                  <span>Aucun acte non réglé détecté</span>
+                                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                                  <span>Aucun acte non réglé rattaché</span>
                                 </div>
-                                <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
-                                  Créera la prestation
+                                <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">
+                                  Nouvelle Prestation
                                 </span>
                               </div>
                             )}
@@ -998,60 +1209,111 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             </div>
 
             <div className="p-4 space-y-3">
-              {/* Search input */}
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={actSearchQuery}
-                  onChange={(e) => setActSearchQuery(e.target.value)}
-                  placeholder="Rechercher par nom de patient, matricule, n° facture, code acte (ex: CONS, MEDIC)..."
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                  autoFocus
-                />
+              {/* Search input with Quick Filters */}
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={actSearchQuery}
+                    onChange={(e) => setActSearchQuery(e.target.value)}
+                    placeholder="Rechercher par nom de patient, matricule, n° facture, code acte (ex: CONS, MEDIC)..."
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-8 py-2 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    autoFocus
+                  />
+                  {actSearchQuery && (
+                    <button
+                      onClick={() => setActSearchQuery('')}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>
+                    {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement
+                  </span>
+                  {actSearchQuery && (
+                    <button
+                      onClick={() => setActSearchQuery('')}
+                      className="text-indigo-600 hover:underline font-semibold cursor-pointer"
+                    >
+                      Afficher tous les actes ouverts ({allEligibleActs.length})
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Act candidate list */}
-              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200">
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
                 {filteredSearchCandidates.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-500">
-                    Aucun acte en attente ou partiellement payé correspondant trouvé.
+                  <div className="p-8 text-center space-y-2">
+                    <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
+                    <div className="text-xs text-slate-600 font-medium">
+                      Aucun acte en attente ou partiellement payé correspondant trouvé.
+                    </div>
+                    {allEligibleActs.length > 0 && (
+                      <button
+                        onClick={() => setActSearchQuery('')}
+                        className="text-xs text-indigo-600 hover:underline font-bold"
+                      >
+                        Voir tous les {allEligibleActs.length} actes disponibles
+                      </button>
+                    )}
                   </div>
                 ) : (
                   filteredSearchCandidates.map((cand) => (
                     <div
                       key={cand.lignePrestationId}
-                      className="p-3 hover:bg-slate-50 transition flex items-center justify-between gap-3 text-xs"
+                      className="p-3.5 hover:bg-indigo-50/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                     >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900">{cand.personneNom}</span>
-                          <span className="font-mono text-[11px] text-slate-500">Mat: {cand.matricule}</span>
-                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        {/* Act header & Libelle */}
+                        <div className="flex items-center flex-wrap gap-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
                             {cand.codeActe}
                           </span>
+                          <span className="font-bold text-slate-900 text-xs truncate">
+                            {cand.libelleActe}
+                          </span>
                         </div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                          <span>Facture: <strong>{cand.prestationNum}</strong> ({cand.prestationDate})</span>
-                          <span>•</span>
-                          <span>Initial: {formatMoney(cand.montantInitial)}</span>
-                          <span>•</span>
-                          <span>Déjà réglé: {formatMoney(cand.dejaPaye)}</span>
+
+                        {/* Patient & Invoice metadata */}
+                        <div className="text-[11px] text-slate-600 flex items-center flex-wrap gap-x-2.5 gap-y-0.5">
+                          <span className="font-semibold text-slate-900">{cand.personneNom}</span>
+                          <span className="font-mono text-slate-500">Mat: {cand.matricule}</span>
+                          {cand.sousSociete && (
+                            <span className="text-indigo-600 font-medium">({cand.sousSociete})</span>
+                          )}
+                          <span className="text-slate-400">•</span>
+                          <span>Facture: <strong>{cand.prestationNum}</strong> ({formatDate(cand.prestationDate)})</span>
+                        </div>
+
+                        {/* Detailed price breakdown */}
+                        <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-200/80">
+                          <span>Prix Brut: <strong className="text-slate-900">{formatMoney(cand.montantInitial)}</strong></span>
+                          <span>Ticket Mod.: <strong className="text-amber-700">{formatMoney(cand.ticketModerateur)}</strong></span>
+                          <span>À Rembourser: <strong className="text-indigo-700">{formatMoney(cand.montantARembourser)}</strong></span>
+                          <span>Déjà Réglé: <strong className="text-emerald-700">{formatMoney(cand.dejaPaye)}</strong></span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          <span className="text-[10px] text-slate-400 block">Reste à payer</span>
-                          <strong className="text-xs font-bold text-amber-800">
+                      {/* Right column: Reste a payer & Action */}
+                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Reste à régler</span>
+                          <strong className="text-sm font-extrabold text-emerald-800 font-mono">
                             {formatMoney(cand.resteAPayer)}
                           </strong>
                         </div>
                         <button
                           onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
-                          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 transition shadow-2xs"
+                          className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer"
                         >
-                          Rattacher
+                          <Link2 className="w-3.5 h-3.5" />
+                          <span>Rattacher cet Acte</span>
                         </button>
                       </div>
                     </div>

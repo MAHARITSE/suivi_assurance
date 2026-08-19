@@ -8,6 +8,7 @@ import {
   Trash2, 
   FileText, 
   CheckCircle, 
+  CheckCircle2, 
   Clock, 
   AlertCircle, 
   ChevronDown, 
@@ -187,6 +188,103 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société';
   const getPersonne = (id: string) => personnes.find(p => p.id === id);
 
+  // Pre-calculate payment relationships from paiements database
+  const paymentsMap = useMemo(() => {
+    const prestPaidMap: Record<string, number> = {};
+    const linePaidMap: Record<string, number> = {};
+    const prestBordereauxMap: Record<string, Array<{ 
+      bordereau: string; 
+      date: string; 
+      mode: string; 
+      montant: number; 
+      nomAgent?: string;
+      acteCode?: string; 
+      acteLibelle?: string;
+    }>> = {};
+
+    (paiements || []).forEach(pm => {
+      (pm.lignes || []).forEach(lp => {
+        const pId = lp.prestationId;
+        const pNum = lp.prestationNumero;
+        const lId = lp.lignePrestationId;
+        const amount = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
+
+        if (amount > 0) {
+          if (pId) {
+            prestPaidMap[pId] = (prestPaidMap[pId] || 0) + amount;
+            if (!prestBordereauxMap[pId]) prestBordereauxMap[pId] = [];
+            prestBordereauxMap[pId].push({
+              bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
+              date: pm.datePaiement,
+              mode: pm.modePaiement || 'Virement',
+              montant: amount,
+              nomAgent: lp.nomAgent || lp.nomBaseAssurance,
+              acteCode: lp.actesPayes?.[0]?.code || 'ACTE',
+              acteLibelle: lp.actesPayes?.[0]?.libelle || lp.actesPayes?.[0]?.code || 'Règlement acte'
+            });
+          }
+          if (pNum) {
+            prestPaidMap[pNum] = (prestPaidMap[pNum] || 0) + amount;
+            if (!prestBordereauxMap[pNum]) prestBordereauxMap[pNum] = [];
+            prestBordereauxMap[pNum].push({
+              bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
+              date: pm.datePaiement,
+              mode: pm.modePaiement || 'Virement',
+              montant: amount,
+              nomAgent: lp.nomAgent || lp.nomBaseAssurance,
+              acteCode: lp.actesPayes?.[0]?.code || 'ACTE',
+              acteLibelle: lp.actesPayes?.[0]?.libelle || lp.actesPayes?.[0]?.code || 'Règlement acte'
+            });
+          }
+          if (lId) {
+            linePaidMap[lId] = (linePaidMap[lId] || 0) + amount;
+          }
+        }
+      });
+    });
+
+    return { prestPaidMap, linePaidMap, prestBordereauxMap };
+  }, [paiements]);
+
+  // Compute exact financial metrics for a prestation
+  const getPrestationFinancials = (p: Prestation) => {
+    const tot = p.montantTotal ?? p.totalPrestation ?? 0;
+    const mod = p.ticketModerateur ?? p.participation ?? 0;
+    const remb = p.montantARembourser ?? Math.max(0, tot - mod);
+
+    const paidFromPaiements = (paymentsMap.prestPaidMap[p.id] || 0) || (paymentsMap.prestPaidMap[p.numeroFacture] || 0);
+    const paidFromLines = (p.lignes || []).reduce((sum, l) => {
+      const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
+      const lPaidStored = l.totalPaye || 0;
+      return sum + Math.max(lPaidStored, lPaidFromP);
+    }, 0);
+    const paidFromPrestation = p.totalPaye || 0;
+
+    const totalPaye = Math.max(paidFromPaiements, paidFromLines, paidFromPrestation);
+    const resteAPayer = Math.max(0, remb - totalPaye);
+
+    const isFullyPaid = totalPaye >= remb && remb > 0;
+    const isPartiallyPaid = totalPaye > 0 && !isFullyPaid;
+    const statut = p.statut === 'Rejeté' ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente';
+
+    return { tot, mod, remb, totalPaye, resteAPayer, statut };
+  };
+
+  // Compute exact financial metrics for a prestation line
+  const getLineFinancials = (l: LignePrestation, p: Prestation) => {
+    const lBrut = l.totalPrestation || 0;
+    const lPart = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes?.length || 1));
+    const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
+    const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
+    const lTotalPaye = Math.max(l.totalPaye || 0, lPaidFromP);
+    const lReste = Math.max(0, lARemb - lTotalPaye);
+    const isFullyPaid = lTotalPaye >= lARemb && lARemb > 0;
+    const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid;
+    const statut = l.statut || (isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente');
+
+    return { lBrut, lPart, lARemb, lTotalPaye, lReste, statut };
+  };
+
   // Filtered and Sorted List
   const filteredAndSortedList = useMemo(() => {
     const list = prestations.filter(p => {
@@ -199,18 +297,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       // Date range filter
       const matchesDateDebut = !dateDebut || p.date >= dateDebut;
       const matchesDateFin = !dateFin || p.date <= dateFin;
-      // Solde filter
-      const totalM = p.montantTotal ?? p.totalPrestation ?? 0;
-      const ticketM = p.ticketModerateur ?? p.participation ?? 0;
-      const aRemb = p.montantARembourser ?? Math.max(0, totalM - ticketM);
-      const paid = p.totalPaye !== undefined ? p.totalPaye : p.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-      const reste = p.resteAPayer !== undefined ? p.resteAPayer : Math.max(0, aRemb - paid);
       
+      // Financials
+      const fin = getPrestationFinancials(p);
+
+      // Solde filter
       let matchesSolde = true;
       if (soldeFilter === 'NON_SOLDE') {
-        matchesSolde = reste > 0;
+        matchesSolde = fin.resteAPayer > 0;
       } else if (soldeFilter === 'SOLDE') {
-        matchesSolde = reste <= 0;
+        matchesSolde = fin.resteAPayer <= 0;
       }
 
       // Search term filter
@@ -235,6 +331,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     list.sort((a, b) => {
       let valA: any = '';
       let valB: any = '';
+      const finA = getPrestationFinancials(a);
+      const finB = getPrestationFinancials(b);
 
       switch (sortField) {
         case 'date':
@@ -260,44 +358,28 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           break;
         }
         case 'totalPrestation':
-          valA = a.montantTotal ?? a.totalPrestation ?? 0;
-          valB = b.montantTotal ?? b.totalPrestation ?? 0;
+          valA = finA.tot;
+          valB = finB.tot;
           break;
         case 'participation':
-          valA = a.ticketModerateur ?? a.participation ?? 0;
-          valB = b.ticketModerateur ?? b.participation ?? 0;
+          valA = finA.mod;
+          valB = finB.mod;
           break;
-        case 'montantARembourser': {
-          const mA = a.montantTotal ?? a.totalPrestation ?? 0;
-          const tA = a.ticketModerateur ?? a.participation ?? 0;
-          valA = a.montantARembourser ?? Math.max(0, mA - tA);
-          const mB = b.montantTotal ?? b.totalPrestation ?? 0;
-          const tB = b.ticketModerateur ?? b.participation ?? 0;
-          valB = b.montantARembourser ?? Math.max(0, mB - tB);
+        case 'montantARembourser':
+          valA = finA.remb;
+          valB = finB.remb;
           break;
-        }
-        case 'totalPaye': {
-          valA = a.totalPaye !== undefined ? a.totalPaye : a.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-          valB = b.totalPaye !== undefined ? b.totalPaye : b.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
+        case 'totalPaye':
+          valA = finA.totalPaye;
+          valB = finB.totalPaye;
           break;
-        }
-        case 'resteAPayer': {
-          const mA = a.montantTotal ?? a.totalPrestation ?? 0;
-          const tA = a.ticketModerateur ?? a.participation ?? 0;
-          const rembA = a.montantARembourser ?? Math.max(0, mA - tA);
-          const paidA = a.totalPaye !== undefined ? a.totalPaye : a.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-          valA = a.resteAPayer !== undefined ? a.resteAPayer : Math.max(0, rembA - paidA);
-
-          const mB = b.montantTotal ?? b.totalPrestation ?? 0;
-          const tB = b.ticketModerateur ?? b.participation ?? 0;
-          const rembB = b.montantARembourser ?? Math.max(0, mB - tB);
-          const paidB = b.totalPaye !== undefined ? b.totalPaye : b.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-          valB = b.resteAPayer !== undefined ? b.resteAPayer : Math.max(0, rembB - paidB);
+        case 'resteAPayer':
+          valA = finA.resteAPayer;
+          valB = finB.resteAPayer;
           break;
-        }
         case 'statut':
-          valA = a.statut || '';
-          valB = b.statut || '';
+          valA = finA.statut;
+          valB = finB.statut;
           break;
         default:
           valA = a.date || '';
@@ -322,7 +404,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     sortField,
     sortDirection,
     personnes,
-    societes
+    societes,
+    paymentsMap
   ]);
 
   // Aggregate statistics for the filtered dataset
@@ -335,17 +418,13 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     let totalReste = 0;
 
     filteredAndSortedList.forEach(p => {
-      const tot = p.montantTotal ?? p.totalPrestation ?? 0;
-      const mod = p.ticketModerateur ?? p.participation ?? 0;
-      const remb = p.montantARembourser ?? Math.max(0, tot - mod);
-      const paye = p.totalPaye !== undefined ? p.totalPaye : p.lignes.reduce((s, l) => s + (l.totalPaye || 0), 0);
-      const reste = p.resteAPayer !== undefined ? p.resteAPayer : Math.max(0, remb - paye);
+      const fin = getPrestationFinancials(p);
 
-      totalFacture += tot;
-      totalTicketMod += mod;
-      totalARembourser += remb;
-      totalPaye += paye;
-      totalReste += reste;
+      totalFacture += fin.tot;
+      totalTicketMod += fin.mod;
+      totalARembourser += fin.remb;
+      totalPaye += fin.totalPaye;
+      totalReste += fin.resteAPayer;
     });
 
     return {
@@ -356,7 +435,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       totalPaye,
       totalReste,
     };
-  }, [filteredAndSortedList]);
+  }, [filteredAndSortedList, paymentsMap]);
 
   // Form State for Create/Edit Modal
   const [formData, setFormData] = useState<Partial<Prestation>>({
@@ -501,11 +580,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const rows = filteredAndSortedList.map(p => {
       const personne = getPersonne(p.personneId);
       const soc = societes.find(s => s.id === p.societeId);
-      const tot = p.montantTotal ?? p.totalPrestation ?? 0;
-      const mod = p.ticketModerateur ?? p.participation ?? 0;
-      const remb = p.montantARembourser ?? Math.max(0, tot - mod);
-      const paye = p.totalPaye !== undefined ? p.totalPaye : p.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-      const reste = p.resteAPayer !== undefined ? p.resteAPayer : Math.max(0, remb - paye);
+      const fin = getPrestationFinancials(p);
 
       return {
         'N° Facture': p.numeroFacture,
@@ -514,12 +589,12 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         'Sous-Société / Service': p.sousSociete,
         'Matricule': personne?.matricule || p.matricule || '',
         'Nom & Prénom': personne?.nomPrenom || p.nomAgent || '',
-        'Total Facturé': tot,
-        'Ticket Modérateur': mod,
-        'À Rembourser': remb,
-        'Total Payé': paye,
-        'Reste à Payer': reste,
-        'Statut': p.statut,
+        'Total Facturé': fin.tot,
+        'Ticket Modérateur': fin.mod,
+        'À Rembourser': fin.remb,
+        'Total Payé': fin.totalPaye,
+        'Reste à Payer': fin.resteAPayer,
+        'Statut': fin.statut,
         'Nombre d\'actes': p.lignes.length,
         'Observations': p.commentaires || '',
       };
@@ -966,11 +1041,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                   const agentName = prestation.nomAgent || personne?.nomPrenom || 'Inconnu';
                   const matriculeStr = prestation.matricule || personne?.matricule || '-';
                   const socName = prestation.societeNom || getSocieteNom(prestation.societeId);
-                  const montantTotal = prestation.montantTotal ?? prestation.totalPrestation ?? 0;
-                  const ticketMod = prestation.ticketModerateur ?? prestation.participation ?? 0;
-                  const montantARemb = prestation.montantARembourser ?? Math.max(0, montantTotal - ticketMod);
-                  const totalPayePrestation = prestation.totalPaye !== undefined ? prestation.totalPaye : prestation.lignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-                  const resteAPayer = prestation.resteAPayer !== undefined ? prestation.resteAPayer : Math.max(0, montantARemb - totalPayePrestation);
+                  
+                  const fin = getPrestationFinancials(prestation);
+                  const attachedBordereaux = paymentsMap.prestBordereauxMap[prestation.id] || paymentsMap.prestBordereauxMap[prestation.numeroFacture] || [];
 
                   return (
                     <React.Fragment key={prestation.id}>
@@ -979,7 +1052,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                           <button
                             onClick={() => toggleRow(prestation.id)}
                             className="p-1 text-slate-400 hover:text-indigo-600 transition cursor-pointer"
-                            title="Afficher/masquer les actes médicaux"
+                            title="Afficher/masquer les actes médicaux et règlements"
                           >
                             {isExpanded ? <ChevronDown className="w-4 h-4 text-indigo-600 font-bold" /> : <ChevronRight className="w-4 h-4" />}
                           </button>
@@ -999,33 +1072,33 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                           <div className="text-[10px] text-indigo-600 font-medium">{prestation.sousSociete}</div>
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-slate-900 whitespace-nowrap">
-                          {formatMoney(montantTotal)}
+                          {formatMoney(fin.tot)}
                         </td>
                         <td className="py-3 px-3 text-right text-amber-700 font-medium whitespace-nowrap">
-                          {formatMoney(ticketMod)}
+                          {formatMoney(fin.mod)}
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-slate-900 whitespace-nowrap">
-                          {formatMoney(montantARemb)}
+                          {formatMoney(fin.remb)}
                         </td>
                         <td className="py-3 px-3 text-right text-emerald-700 font-bold whitespace-nowrap">
-                          {formatMoney(totalPayePrestation)}
+                          {formatMoney(fin.totalPaye)}
                         </td>
                         <td className="py-3 px-3 text-right font-bold whitespace-nowrap">
-                          <span className={resteAPayer > 0 ? 'text-rose-700 font-bold' : 'text-slate-400'}>
-                            {formatMoney(resteAPayer)}
+                          <span className={fin.resteAPayer > 0 ? 'text-rose-700 font-bold' : 'text-slate-400'}>
+                            {formatMoney(fin.resteAPayer)}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            prestation.statut === 'Payé'
+                            fin.statut === 'Payé'
                               ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                              : prestation.statut === 'Partiellement payé'
+                              : fin.statut === 'Partiellement payé'
                               ? 'bg-sky-100 text-sky-800 border border-sky-200'
-                              : prestation.statut === 'Rejeté'
+                              : fin.statut === 'Rejeté'
                               ? 'bg-rose-100 text-rose-800 border border-rose-200'
                               : 'bg-amber-100 text-amber-800 border border-amber-200'
                           }`}>
-                            {prestation.statut}
+                            {fin.statut}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-right whitespace-nowrap">
@@ -1059,10 +1132,10 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                         </td>
                       </tr>
 
-                      {/* Nested Expandable Sub-Table of Medical Acts (Base 2) */}
+                      {/* Nested Expandable Sub-Table of Medical Acts (Base 2) & Attached Payments */}
                       {isExpanded && (
                         <tr className="bg-slate-50/90 border-y border-slate-200/80">
-                          <td colSpan={12} className="p-4 pl-12">
+                          <td colSpan={12} className="p-4 pl-12 space-y-3">
                             <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-2">
                               <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                                 <span className="flex items-center gap-1.5 text-indigo-700">
@@ -1085,12 +1158,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                   {prestation.lignes.map(ligne => {
-                                    const actBrut = ligne.totalPrestation;
-                                    const actPart = ligne.ticketModerateur ?? Math.round((prestation.ticketModerateur || 0) / (prestation.lignes.length || 1));
-                                    const actARemb = ligne.montantARembourser ?? Math.max(0, actBrut - actPart);
-                                    const actPaye = ligne.totalPaye || 0;
-                                    const actSolde = Math.max(0, actARemb - actPaye);
-                                    const actStatut = ligne.statut || (actPaye >= actARemb && actARemb > 0 ? 'Payé' : actPaye > 0 ? 'Partiellement payé' : 'En attente');
+                                    const lFin = getLineFinancials(ligne, prestation);
 
                                     return (
                                       <tr key={ligne.id} className="hover:bg-slate-50">
@@ -1101,31 +1169,31 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                           {ligne.libelle || 'Acte de soins'}
                                         </td>
                                         <td className="py-2 px-2 text-right font-medium text-slate-900">
-                                          {formatMoney(actBrut)}
+                                          {formatMoney(lFin.lBrut)}
                                         </td>
                                         <td className="py-2 px-2 text-right text-amber-700 font-medium">
-                                          {formatMoney(actPart)}
+                                          {formatMoney(lFin.lPart)}
                                         </td>
                                         <td className="py-2 px-2 text-right font-bold text-slate-900">
-                                          {formatMoney(actARemb)}
+                                          {formatMoney(lFin.lARemb)}
                                         </td>
                                         <td className="py-2 px-2 text-right font-bold text-emerald-600">
-                                          {formatMoney(actPaye)}
+                                          {formatMoney(lFin.lTotalPaye)}
                                         </td>
                                         <td className="py-2 px-2 text-right font-mono font-semibold">
-                                          <span className={actSolde > 0 ? 'text-rose-700' : 'text-slate-400'}>
-                                            {formatMoney(actSolde)}
+                                          <span className={lFin.lReste > 0 ? 'text-rose-700' : 'text-slate-400'}>
+                                            {formatMoney(lFin.lReste)}
                                           </span>
                                         </td>
                                         <td className="py-2 px-2 text-center">
                                           <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold ${
-                                            actStatut === 'Payé'
+                                            lFin.statut === 'Payé'
                                               ? 'bg-emerald-100 text-emerald-800'
-                                              : actStatut === 'Partiellement payé'
+                                              : lFin.statut === 'Partiellement payé'
                                               ? 'bg-sky-100 text-sky-800'
                                               : 'bg-amber-100 text-amber-800'
                                           }`}>
-                                            {actStatut}
+                                            {lFin.statut}
                                           </span>
                                         </td>
                                       </tr>
@@ -1134,6 +1202,38 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                 </tbody>
                               </table>
                             </div>
+
+                            {/* Section: Règlements rattachés sur cette facture */}
+                            {attachedBordereaux.length > 0 && (
+                              <div className="bg-emerald-50/70 rounded-lg border border-emerald-200 p-3 shadow-xs space-y-2">
+                                <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider flex items-center justify-between">
+                                  <span className="flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Règlements & Décomptes rattachés ({attachedBordereaux.length})</span>
+                                  </span>
+                                  <span className="font-mono text-emerald-800 font-bold">
+                                    Total réglé : {formatMoney(fin.totalPaye)}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                  {attachedBordereaux.map((b, bIdx) => (
+                                    <div key={bIdx} className="bg-white rounded-md border border-emerald-200 p-2 text-xs flex items-center justify-between">
+                                      <div>
+                                        <div className="font-bold text-slate-800 font-mono text-[11px]">
+                                          {b.bordereau}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500">
+                                          {formatDate(b.date)} • {b.acteCode}
+                                        </div>
+                                      </div>
+                                      <div className="text-right font-mono font-bold text-emerald-700">
+                                        {formatMoney(b.montant)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )}
