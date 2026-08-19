@@ -213,7 +213,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     (paiements || []).forEach(pm => {
       (pm.lignes || []).forEach(lp => {
         const pId = lp.prestationId;
-        const pNum = lp.prestationNumero;
         const lId = lp.lignePrestationId;
         const amount = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
 
@@ -222,19 +221,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             prestPaidMap[pId] = (prestPaidMap[pId] || 0) + amount;
             if (!prestBordereauxMap[pId]) prestBordereauxMap[pId] = [];
             prestBordereauxMap[pId].push({
-              bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
-              date: pm.datePaiement,
-              mode: pm.modePaiement || 'Virement',
-              montant: amount,
-              nomAgent: lp.nomAgent || lp.nomBaseAssurance,
-              acteCode: lp.actesPayes?.[0]?.code || 'ACTE',
-              acteLibelle: lp.actesPayes?.[0]?.libelle || lp.actesPayes?.[0]?.code || 'Règlement acte'
-            });
-          }
-          if (pNum) {
-            prestPaidMap[pNum] = (prestPaidMap[pNum] || 0) + amount;
-            if (!prestBordereauxMap[pNum]) prestBordereauxMap[pNum] = [];
-            prestBordereauxMap[pNum].push({
               bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
               date: pm.datePaiement,
               mode: pm.modePaiement || 'Virement',
@@ -258,6 +244,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const settlementLinesLookup = useMemo(() => {
     const list: Array<{
       paiementId: string;
+      prestationId?: string;
+      lignePrestationId?: string;
       numeroBordereau: string;
       datePaiement: string;
       dateSoins?: string;
@@ -274,6 +262,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         const net = Number(lp.totalPaye || lp.montantPaye || 0);
         list.push({
           paiementId: p.id,
+          prestationId: lp.prestationId,
+          lignePrestationId: lp.lignePrestationId,
           numeroBordereau: p.numeroBordereau,
           datePaiement: p.datePaiement,
           dateSoins: lp.dateSoins,
@@ -295,7 +285,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const mod = p.ticketModerateur ?? p.participation ?? 0;
     const remb = p.montantARembourser ?? Math.max(0, tot - mod);
 
-    const paidFromPaiements = (paymentsMap.prestPaidMap[p.id] || 0) || (paymentsMap.prestPaidMap[p.numeroFacture] || 0);
+    const paidFromPaiements = paymentsMap.prestPaidMap[p.id] || 0;
     const paidFromLines = (p.lignes || []).reduce((sum, l) => {
       const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
       const lPaidStored = l.totalPaye || 0;
@@ -320,13 +310,21 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const pTot = fin.tot;
     const pRemb = fin.remb;
 
-    // Matching settlement lines with same date (dateSoins or datePaiement) AND same amount (gross or net)
+    // Matching settlement lines with same date (dateSoins or datePaiement) AND same amount (gross or net) for same patient
     const matchingSettlements = settlementLinesLookup.filter(sl => {
+      const isDirectId = sl.prestationId && sl.prestationId === p.id;
+      if (isDirectId) return true;
+
       const slDateSoins = sl.dateSoins ? sl.dateSoins.split('T')[0] : '';
       const slDatePaiement = sl.datePaiement ? sl.datePaiement.split('T')[0] : '';
       const matchDate = (slDateSoins && slDateSoins === pDate) || (slDatePaiement && slDatePaiement === pDate);
       const matchAmount = Math.abs(sl.montantBrut - pTot) < 1 || Math.abs(sl.montantPaye - pRemb) < 1 || Math.abs(sl.montantPaye - pTot) < 1;
-      return matchDate && matchAmount;
+      
+      const cleanNomP = (p.nomAgent || '').toLowerCase().trim();
+      const cleanNomSl = (sl.nomAgent || '').toLowerCase().trim();
+      const matchPatient = !cleanNomSl || !cleanNomP || cleanNomSl.includes(cleanNomP) || cleanNomP.includes(cleanNomSl);
+
+      return matchDate && matchAmount && matchPatient;
     });
 
     // Potential duplicates / homonym prestations with identical date and same total amount

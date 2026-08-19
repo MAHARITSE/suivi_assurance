@@ -134,23 +134,41 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
   // 2. Report: Rapprochement Factures vs Règlements
   const rapprochementFactures = useMemo(() => {
     return filteredPrestations.map(prest => {
-      // Find payments that mention this invoice
+      const pNom = (prest.nomAgent || getPersonne(prest.personneId)?.nomPrenom || '').toLowerCase().trim();
+      const pMat = (prest.matricule || getPersonne(prest.personneId)?.matricule || '').replace(/\s+/g, '').toLowerCase();
+
+      const isLineForPrestation = (l: any) => {
+        if (l.prestationId && l.prestationId === prest.id) return true;
+        if (l.lignePrestationId && prest.lignes?.some(pl => pl.id === l.lignePrestationId)) return true;
+        
+        // If matched only via invoice number, require patient verification to avoid attributing the whole invoice to every patient
+        if (l.prestationNumero === prest.numeroFacture) {
+          const lNom = (l.nomAgent || l.nomBaseAssurance || '').toLowerCase().trim();
+          const lMat = (l.immatriculation || '').replace(/\s+/g, '').toLowerCase();
+          const matchName = lNom && pNom && (lNom.includes(pNom) || pNom.includes(lNom));
+          const matchMat = lMat && pMat && lMat !== '-' && (lMat === pMat);
+          return matchName || matchMat;
+        }
+        return false;
+      };
+
+      // Find payments that have lines for this specific prestation
       const matchedPaiements = paiements.filter(pai =>
-        pai.lignes?.some(l => l.prestationId === prest.id || l.prestationNumero === prest.numeroFacture)
+        pai.lignes?.some(l => isLineForPrestation(l))
       );
 
       const montantEncaisse = matchedPaiements.reduce((sum, pai) => {
-        const lignes = pai.lignes?.filter(l => l.prestationId === prest.id || l.prestationNumero === prest.numeroFacture) || [];
+        const lignes = pai.lignes?.filter(l => isLineForPrestation(l)) || [];
         return sum + lignes.reduce((lSum, l) => lSum + l.totalPaye, 0);
       }, 0);
 
       const moderateurAssocie = matchedPaiements.reduce((sum, pai) => {
-        const lignes = pai.lignes?.filter(l => l.prestationId === prest.id || l.prestationNumero === prest.numeroFacture) || [];
+        const lignes = pai.lignes?.filter(l => isLineForPrestation(l)) || [];
         return sum + lignes.reduce((lSum, l) => lSum + (l.ticketModerateur || 0), 0);
       }, 0);
 
       const excluAssocie = matchedPaiements.reduce((sum, pai) => {
-        const lignes = pai.lignes?.filter(l => l.prestationId === prest.id || l.prestationNumero === prest.numeroFacture) || [];
+        const lignes = pai.lignes?.filter(l => isLineForPrestation(l)) || [];
         return sum + lignes.reduce((lSum, l) => lSum + (l.montantExclu || 0), 0);
       }, 0);
 

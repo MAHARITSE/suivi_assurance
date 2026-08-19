@@ -88,10 +88,25 @@ export interface SettlementRowItem {
   participation: number;
   netAPayer: number;
   observations: string;
+  articlesCount?: number;
+  mergedArticles?: string[];
   // Matching status
   matchedCandidate: MatchCandidate | null;
   createNewPrestation: boolean;
   selected: boolean;
+}
+
+export function normalizeActFamilyCode(rawCode: string): string {
+  const c = (rawCode || '').toUpperCase().trim();
+  if (c.includes('PHAR') || c.includes('MEDIC') || c.includes('MED') || c === 'PH' || c.includes('PHARMACIE') || c.includes('ARTICLE')) return 'MEDIC';
+  if (c.includes('CONS') || c.includes('CG') || c.includes('VISITE')) return 'CONS';
+  if (c.includes('LABO') || c.includes('EB') || c.includes('ANALYSE') || c.includes('BIOLOGIE') || c.includes('TDR')) return 'LABO';
+  if (c.includes('DENT') || c === 'DC' || c === 'DK' || c.includes('DENTAIRE') || c.includes('ODONTO')) return 'DENT';
+  if (c.includes('ECHO') || c.includes('RADI') || c.includes('RADIO') || c.includes('IMAG')) return 'ECHO';
+  if (c.includes('SOIN') || c === 'SI' || c.includes('PANSEMENT')) return 'SOINS';
+  if (c.includes('HOSP') || c.includes('CHIR') || c.includes('SEJOUR')) return 'HOSP';
+  if (c.includes('STOCK')) return 'STOCK';
+  return c || 'ACTE';
 }
 
 export type ConfrontationType = 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED';
@@ -232,6 +247,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<SettlementRowItem[]>([]);
   const [confrontFilter, setConfrontFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED'>('ALL');
+  const [groupOnImport, setGroupOnImport] = useState<boolean>(true);
   
   // Search / Change Link modal state
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
@@ -353,8 +369,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     if (allEligibleActs.length === 0) return null;
 
     const cleanMatricule = (matricule || '').replace(/\s+/g, '').toLowerCase();
-    const cleanNom = (nomPrenom || '').toLowerCase().trim();
-    const cleanCode = (actCode || '').toUpperCase().trim();
+    const cleanNom = (nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const cleanCode = normalizeActFamilyCode(actCode);
     const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
     const brutMontant = Number(montantBrut || netMontant || 0);
 
@@ -364,9 +380,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     allEligibleActs.forEach(cand => {
       let score = 0;
       const candMatricule = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
-      const candNom = (cand.personneNom || '').toLowerCase().trim();
+      const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       const candDate = (cand.prestationDate || '').trim().substring(0, 10);
-      const candCode = (cand.codeActe || '').toUpperCase().trim();
+      const candCode = normalizeActFamilyCode(cand.codeActe);
       const candBrut = Number(cand.montantInitial || 0);
       const candRemb = Number(cand.montantARembourser || 0);
       const candReste = Number(cand.resteAPayer || 0);
@@ -374,7 +390,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       // 1. Patient matching
       const exactMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && cleanMatricule === candMatricule;
       const partialMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && (cleanMatricule.includes(candMatricule) || candMatricule.includes(cleanMatricule));
-      const nameMatch = cleanNom && (candNom.includes(cleanNom) || cleanNom.includes(candNom));
+      const nameMatch = cleanNom && candNom && (candNom.includes(cleanNom) || cleanNom.includes(candNom));
 
       if (exactMat) score += 100;
       else if (partialMat) score += 80;
@@ -404,18 +420,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
       // 4. Code / Famille Acte matching
       const exactCode = cleanCode && candCode && (cleanCode === candCode);
-      const aliasMatch = cleanCode && candCode && (
-        (cleanCode.includes('PHAR') && candCode === 'MEDIC') ||
-        (cleanCode.includes('MEDIC') && candCode === 'PHAR') ||
-        (cleanCode.includes('LABO') && candCode === 'EB') ||
-        (cleanCode.includes('EB') && candCode === 'LABO') ||
-        (cleanCode.includes('DENT') && (candCode === 'DC' || candCode === 'DK')) ||
-        (cleanCode.includes('CONS') && candCode === 'CG') ||
-        (cleanCode.includes('CG') && candCode === 'CONS')
-      );
-
-      if (exactCode) score += 40;
-      else if (aliasMatch) score += 30;
+      if (exactCode) {
+        score += 45;
+      }
 
       // Bonus for total perfect match (Same Patient + Same Date + Same Gross Amount)
       if (isSameDate && isSameGrossAmount) {
@@ -431,11 +438,25 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     return bestCandidate;
   };
 
-  const processLoadedDocument = (doc: ParsedFactureAssurance) => {
+  const processLoadedDocument = (doc: ParsedFactureAssurance, groupEnabled: boolean = groupOnImport) => {
     setParsedDoc(doc);
 
-    // Expand settlement lines and automatically link to open acts
-    const builtRows: SettlementRowItem[] = [];
+    // 1. Expand raw settlement lines
+    const rawItems: Array<{
+      originalIndex: number;
+      matricule: string;
+      nomPrenom: string;
+      sousSociete: string;
+      dateSoins: string;
+      actCode: string;
+      actLibelle: string;
+      montantBrut: number;
+      montantExclu: number;
+      participation: number;
+      netAPayer: number;
+      observations: string;
+      articlesCount: number;
+    }> = [];
 
     doc.lignes.forEach((l, idx) => {
       // For BSA and healthcare statements: the true patient is the person aligned with the date of care
@@ -443,74 +464,155 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
       // If line has multiple acts
       if (l.actes && l.actes.length > 0) {
-        l.actes.forEach((act, actIdx) => {
+        l.actes.forEach((act) => {
           const actMontant = act.montant || Math.round(l.montantBrut / (l.actes?.length || 1));
           const partRatio = l.montantBrut > 0 ? actMontant / l.montantBrut : 1 / (l.actes?.length || 1);
           const actPart = Math.round((l.participation || 0) * partRatio);
           const actNet = Math.max(0, actMontant - actPart);
 
-          const matched = autoMatchSettlementLine(
-            l.matricule, 
-            effectiveNom, 
-            act.code || 'CONS', 
-            l.dateSoins, 
-            actMontant, 
-            actNet
-          );
-
-          builtRows.push({
-            rowId: `row-${idx}-${actIdx}`,
+          rawItems.push({
             originalIndex: idx,
-            dateSoins: l.dateSoins,
             matricule: l.matricule,
             nomPrenom: effectiveNom,
             sousSociete: l.sousSociete || '',
+            dateSoins: l.dateSoins,
             actCode: act.code || 'CONS',
-            actLibelle: act.libelle || act.code,
+            actLibelle: act.libelle || act.code || 'Acte de soins',
             montantBrut: actMontant,
             montantExclu: 0,
             participation: actPart,
             netAPayer: actNet,
             observations: l.observations || '',
-            matchedCandidate: matched,
-            createNewPrestation: !matched,
-            selected: true
+            articlesCount: 1,
           });
         });
       } else {
         const actCode = (l.actesTexte || 'CONS').substring(0, 6).toUpperCase();
-        const matched = autoMatchSettlementLine(
-          l.matricule, 
-          effectiveNom, 
-          actCode, 
-          l.dateSoins, 
-          l.montantBrut, 
-          l.netAPayer
-        );
-
-        builtRows.push({
-          rowId: `row-${idx}`,
+        rawItems.push({
           originalIndex: idx,
-          dateSoins: l.dateSoins,
           matricule: l.matricule,
           nomPrenom: effectiveNom,
           sousSociete: l.sousSociete || '',
+          dateSoins: l.dateSoins,
           actCode: actCode,
           actLibelle: l.actesTexte || 'Prestation médicale',
           montantBrut: l.montantBrut,
           montantExclu: l.montantExclu || 0,
-          participation: l.participation,
+          participation: l.participation || 0,
           netAPayer: l.netAPayer,
           observations: l.observations || '',
-          matchedCandidate: matched,
-          createNewPrestation: !matched,
-          selected: true
+          articlesCount: 1,
         });
       }
     });
 
+    // 2. Optional: Group by Person + Date + Normalized Act family (to aggregate individual articles into single acts)
+    let finalItems: Array<{
+      originalIndex: number;
+      matricule: string;
+      nomPrenom: string;
+      sousSociete: string;
+      dateSoins: string;
+      actCode: string;
+      actLibelle: string;
+      montantBrut: number;
+      montantExclu: number;
+      participation: number;
+      netAPayer: number;
+      observations: string;
+      articlesCount: number;
+      mergedArticles?: string[];
+    }> = rawItems;
+
+    if (groupEnabled) {
+      const groupedMap = new Map<string, typeof rawItems[0] & { mergedArticles: string[] }>();
+
+      rawItems.forEach(item => {
+        const normNom = (item.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ');
+        const normDate = (item.dateSoins || '').trim().substring(0, 10);
+        const normFamily = normalizeActFamilyCode(item.actCode);
+        const key = `${normNom}|${normDate}|${normFamily}`;
+
+        if (groupedMap.has(key)) {
+          const existing = groupedMap.get(key)!;
+          existing.montantBrut += item.montantBrut;
+          existing.montantExclu += item.montantExclu;
+          existing.participation += item.participation;
+          existing.netAPayer += item.netAPayer;
+          existing.articlesCount += 1;
+          if (item.actLibelle && !existing.mergedArticles.includes(item.actLibelle)) {
+            existing.mergedArticles.push(item.actLibelle);
+          }
+          if (item.observations && !existing.observations.includes(item.observations)) {
+            existing.observations = existing.observations ? `${existing.observations} • ${item.observations}` : item.observations;
+          }
+        } else {
+          groupedMap.set(key, {
+            ...item,
+            actCode: normFamily,
+            mergedArticles: item.actLibelle ? [item.actLibelle] : []
+          });
+        }
+      });
+
+      finalItems = Array.from(groupedMap.values()).map(g => {
+        let displayLibelle = g.actLibelle;
+        if (g.articlesCount > 1) {
+          const preview = g.mergedArticles.slice(0, 3).join(', ') + (g.mergedArticles.length > 3 ? ` (+${g.mergedArticles.length - 3})` : '');
+          displayLibelle = `${g.actCode} (${g.articlesCount} articles regroupés : ${preview})`;
+        }
+        return {
+          ...g,
+          actLibelle: displayLibelle
+        };
+      });
+    }
+
+    // 3. Auto-match confrontation with eligible DB prescription acts
+    const builtRows: SettlementRowItem[] = finalItems.map((item, rowIdx) => {
+      const matched = autoMatchSettlementLine(
+        item.matricule,
+        item.nomPrenom,
+        item.actCode,
+        item.dateSoins,
+        item.montantBrut,
+        item.netAPayer
+      );
+
+      return {
+        rowId: `row-${rowIdx}`,
+        originalIndex: item.originalIndex,
+        dateSoins: item.dateSoins,
+        matricule: item.matricule,
+        nomPrenom: item.nomPrenom,
+        sousSociete: item.sousSociete || '',
+        actCode: item.actCode,
+        actLibelle: item.actLibelle,
+        montantBrut: item.montantBrut,
+        montantExclu: item.montantExclu,
+        participation: item.participation,
+        netAPayer: item.netAPayer,
+        observations: item.observations,
+        articlesCount: item.articlesCount,
+        mergedArticles: item.mergedArticles,
+        matchedCandidate: matched,
+        createNewPrestation: !matched,
+        selected: true
+      };
+    });
+
     setRows(builtRows);
     setIsProcessing(false);
+  };
+
+  const handleToggleGrouping = (newVal: boolean) => {
+    setGroupOnImport(newVal);
+    if (parsedDoc) {
+      setIsProcessing(true);
+      setTimeout(() => {
+        processLoadedDocument(parsedDoc, newVal);
+      }, 100);
+    }
   };
 
   const handleLoadPredefined = (type: 'ascoma' | 'mci' | 'bsa') => {
@@ -1233,6 +1335,42 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
               </div>
 
+              {/* Grouping Toggle Banner (Same Person + Same Date + Same Act) */}
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-indigo-600 text-white font-bold text-[11px]">
+                    ACTES
+                  </span>
+                  <div>
+                    <div className="font-bold text-indigo-950">
+                      Regroupement automatique des articles par acte (même personne, même date, même acte)
+                    </div>
+                    <div className="text-[11px] text-indigo-700">
+                      Fusionne les articles de pharmacie/soins multiples en une seule ligne globale d'acte pour correspondre à votre base de soins.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs font-semibold text-slate-700">
+                    {groupOnImport ? 'Regroupement Actif' : 'Lignes Détaillées'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleGrouping(!groupOnImport)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                      groupOnImport ? 'bg-indigo-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        groupOnImport ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
               {/* Visual Color Legend Bar */}
               <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
@@ -1408,6 +1546,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             <div className="text-[11px] text-slate-500 font-mono">
                               Mat: {row.matricule || '-'} {row.sousSociete ? `• (${row.sousSociete})` : ''}
                             </div>
+                            {row.articlesCount && row.articlesCount > 1 ? (
+                              <div className="mt-1">
+                                <span 
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200"
+                                  title={row.mergedArticles?.join(' • ') || row.actLibelle}
+                                >
+                                  📦 {row.articlesCount} articles regroupés
+                                </span>
+                              </div>
+                            ) : null}
                           </td>
 
                           {/* Acte Decompte (Gross amount without ticket moderator) */}
@@ -1416,7 +1564,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                               <span>{row.actCode}</span>
                               <span className="text-[10px] text-indigo-700 font-semibold">Brut: {formatMoney(row.montantBrut)}</span>
                             </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[150px]">
+                            <div className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[170px]" title={row.actLibelle}>
+                              {row.articlesCount && row.articlesCount > 1 ? `Total: ${row.articlesCount} articles` : row.actLibelle}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
                               TM: {formatMoney(row.participation)}
                             </div>
                           </td>
