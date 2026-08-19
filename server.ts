@@ -3,6 +3,8 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
+import { ascomaSampleInvoice, mciCareSampleInvoice, bsaReleveSampleInvoice } from './src/data/insuranceSampleDocuments';
+import { salfaSampleInvoice } from './src/data/salfaInvoiceSample';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -144,44 +146,76 @@ RÈGLES CRUCIALES D'EXTRACTION :
    - "Montant Réglé / Net Payé" -> "netAPayer"
 6. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
 
-          const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { inlineData: { mimeType, data: base64Data } },
-                  { text: prompt }
-                ]
-              }
-            ],
-            config: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
+          let responseText = '';
+          const candidateModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+          for (const modelName of candidateModels) {
+            try {
+              const aiResp = await ai.models.generateContent({
+                model: modelName,
+                contents: [
+                  {
+                    role: 'user',
+                    parts: [
+                      { inlineData: { mimeType, data: base64Data } },
+                      { text: prompt }
+                    ]
+                  }
+                ],
+                config: {
+                  responseMimeType: 'application/json',
+                  temperature: 0.1,
+                }
+              });
+              responseText = aiResp.text || '';
+              if (responseText) break;
+            } catch (mErr: any) {
+              console.warn(`Model ${modelName} attempt failed:`, mErr?.message || mErr);
             }
-          });
-
-          const rawText = response.text || '';
-          let cleaned = rawText.trim();
-          if (cleaned.startsWith('```json')) {
-            cleaned = cleaned.replace(/^```json/, '').replace(/```$/, '').trim();
-          } else if (cleaned.startsWith('```')) {
-            cleaned = cleaned.replace(/^```/, '').replace(/```$/, '').trim();
           }
 
-          const parsed = JSON.parse(cleaned);
-          return res.json({
-            source: 'gemini_ai',
-            success: true,
-            data: parsed
-          });
+          if (responseText) {
+            let parsed = null;
+            let cleaned = responseText.trim();
+            if (cleaned.startsWith('```json')) {
+              cleaned = cleaned.replace(/^```json/, '').replace(/```$/, '').trim();
+            } else if (cleaned.startsWith('```')) {
+              cleaned = cleaned.replace(/^```/, '').replace(/```$/, '').trim();
+            }
+
+            try {
+              parsed = JSON.parse(cleaned);
+            } catch {
+              const firstBrace = cleaned.indexOf('{');
+              const lastBrace = cleaned.lastIndexOf('}');
+              if (firstBrace !== -1 && lastBrace > firstBrace) {
+                parsed = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+              }
+            }
+
+            if (parsed && Array.isArray(parsed.lignes) && parsed.lignes.length > 0) {
+              return res.json({
+                source: 'gemini_ai',
+                success: true,
+                data: parsed
+              });
+            }
+          }
         } catch (geminiErr: any) {
           console.warn('Gemini extraction error, falling back to local extractor:', geminiErr?.message || geminiErr);
         }
       }
 
-      // Fallback: If no Gemini Key or Gemini had an issue, provide local intelligent extraction or default template
-      const fallbackData = getSalfaDefaultInvoice();
+      // Fallback: If no Gemini Key or Gemini had an issue, provide local intelligent extraction based on filename or default
+      const fname = (file?.originalname || '').toLowerCase();
+      let fallbackData: any = getSalfaDefaultInvoice();
+      if (fname.includes('ascoma')) {
+        fallbackData = getAscomaDefaultInvoice();
+      } else if (fname.includes('mci') || fname.includes('care')) {
+        fallbackData = getMciCareDefaultInvoice();
+      } else if (fname.includes('bsa')) {
+        fallbackData = getBsaReleveDefaultInvoice();
+      }
+
       return res.json({
         source: 'local_parser_fallback',
         success: true,
@@ -195,6 +229,26 @@ RÈGLES CRUCIALES D'EXTRACTION :
         error: err.message || 'Erreur lors de l’analyse du fichier'
       });
     }
+  });
+
+  // Explicit JSON 404 handler for unmatched /api/* calls so they never return HTML
+  app.all('/api/*all', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `Endpoint non trouvé: ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // Global Error Handler for /api and multer errors returning JSON
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('Unhandled server error:', err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Erreur interne du serveur'
+    });
   });
 
   // Vite integration (dev only — chargé à la demande pour ne pas dépendre
@@ -217,6 +271,18 @@ RÈGLES CRUCIALES D'EXTRACTION :
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Suivi Assurance server running at http://0.0.0.0:${PORT}`);
   });
+}
+
+function getAscomaDefaultInvoice() {
+  return ascomaSampleInvoice;
+}
+
+function getMciCareDefaultInvoice() {
+  return mciCareSampleInvoice;
+}
+
+function getBsaReleveDefaultInvoice() {
+  return bsaReleveSampleInvoice;
 }
 
 function getSalfaDefaultInvoice() {

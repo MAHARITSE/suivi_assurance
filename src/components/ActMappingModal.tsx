@@ -53,8 +53,6 @@ export const ActMappingModal: React.FC<ActMappingModalProps> = ({
     return initial;
   });
 
-  if (!isOpen) return null;
-
   const handleSelectFamille = (rawCode: string, familleCode: string) => {
     setSelectedMappings(prev => ({
       ...prev,
@@ -66,6 +64,8 @@ export const ActMappingModal: React.FC<ActMappingModalProps> = ({
     onApplyMapping(selectedMappings, saveAsPermanentAliases);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">

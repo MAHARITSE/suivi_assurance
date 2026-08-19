@@ -14,11 +14,14 @@ export interface Personne {
   nomPrenom: string;
   matricule: string;
   societeId: string;
-  qualite: 'Adhérent Principal' | 'Conjoint' | 'Enfant' | 'Ayant droit';
+  sousSociete?: string;
+  qualite?: 'Adhérent Principal' | 'Conjoint' | 'Enfant' | 'Ayant droit' | string;
   familleCode?: string;
   dateNaissance?: string;
   telephone?: string;
   email?: string;
+  tauxCouverture?: number;
+  statut?: 'Actif' | 'Inactif' | string;
 }
 
 export interface Famille {
@@ -27,6 +30,8 @@ export interface Famille {
   libelle: string;
   plafondAnnuel?: number;
   tauxStandard?: number;
+  tarifConventionne?: number;
+  ticketModerateurDefaut?: number;
   description?: string;
   aliases: string[]; // Codes alternatifs, synonymes et descriptions reconnus (ex: ['PH', 'PHSB', 'PHARMACIE', 'MEDIC'])
 }
@@ -34,10 +39,14 @@ export interface Famille {
 export interface LignePrestation {
   id: string;
   prestationId: string;
-  code: string; // Famille code, e.g. CONS, PHAR
+  code: string; // Famille code, e.g. CONS, PHAR, LABO, DENT, HOSP
   libelle?: string;
-  totalPrestation: number;
-  totalPaye: number;
+  totalPrestation: number; // Montant brut de l'acte
+  montant?: number; // Alias pour montant de l'acte
+  ticketModerateur?: number; // Part modérateur assuré sur cet acte
+  montantARembourser?: number; // Net à rembourser sur cet acte
+  totalPaye: number; // Montant cumulé payé à travers tous les règlements
+  statut?: 'En attente' | 'Partiellement payé' | 'Payé';
 }
 
 export interface Prestation {
@@ -45,10 +54,18 @@ export interface Prestation {
   numeroFacture: string;
   date: string;
   societeId: string;
+  societeNom?: string;
   sousSociete: string;
   personneId: string;
-  totalPrestation: number;
+  nomAgent?: string; // Nom de l'agent / assuré / bénéficiaire
+  matricule?: string; // Matricule de l'agent
+  totalPrestation: number; // Montant total brut
+  montantTotal?: number; // Alias montant total
   participation: number; // Ticket modérateur assuré
+  ticketModerateur?: number; // Alias ticket modérateur
+  montantARembourser?: number; // Montant à rembourser (total - ticket modérateur)
+  totalPaye?: number; // Somme cumulée payée (règlements multiples)
+  resteAPayer?: number; // Reste à recouvrer
   statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté';
   lignes: LignePrestation[];
   dateCreation: string;
@@ -62,14 +79,18 @@ export interface LignePaiement {
   prestationId: string;
   immatriculation: string;
   nomBaseAssurance: string;
+  nomAgent?: string; // Nom de l'agent rattaché
   // rattachement à la prescription (base 1)
   prestationNumero?: string;
   dateSoins?: string; // date des soins de la prestation d'origine
   // montants
-  totalPaye: number;
+  totalPaye: number; // Montant payé sur cette ligne
+  montantPaye?: number;
   ticketModerateur: number;
   montantExclu: number;
   montantReclame?: number; // montant initial de l'acte
+  codeActe?: string;
+  libelleActe?: string;
   // regroupement des actes payés dans cette ligne
   actesPayes?: { code: string; libelle: string; montant: number }[];
   commentaire?: string;
@@ -79,14 +100,25 @@ export interface Paiement {
   id: string;
   numeroBordereau: string;
   datePaiement: string;
+  dateSoins?: string; // Date des soins
   dateSaisie: string;
   societeId: string;
+  societeNom?: string;
+  sousSociete?: string;
+  nomAgent?: string; // Nom de l'agent rattaché
+  matricule?: string;
+  prestationId?: string; // Prescription rattachée principale si mono-adhérent
+  prestationNumero?: string;
   modePaiement: 'Virement bancaire' | 'Chèque' | 'Espèces' | 'Mobile Money';
   referencePaiement: string;
-  totalReclame: number;
-  totalPaye: number;
+  totalReclame: number; // Montant brut à payer
+  montantAPayer?: number;
+  totalPaye: number; // Somme payée nette
+  sommePayee?: number;
   totalModerateur: number;
+  ticketModerateur?: number;
   totalExclu: number;
+  montantExclu?: number;
   remise: number;
   statut: 'Brouillon' | 'Validé' | 'Comptabilisé';
   lignes: LignePaiement[];
@@ -155,6 +187,7 @@ export type ActiveTab =
   | 'dashboard'
   | 'prestations'
   | 'paiements'
+  | 'importation'
   | 'historique'
   | 'societes'
   | 'personnes'

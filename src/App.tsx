@@ -237,6 +237,7 @@ export function App() {
         {activeTab === 'prestations' && (
           <PrestationsView
             prestations={prestations}
+            paiements={paiements}
             societes={societes}
             personnes={personnes}
             familles={familles}

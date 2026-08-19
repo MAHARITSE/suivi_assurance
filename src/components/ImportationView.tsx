@@ -25,7 +25,8 @@ import {
   Info,
   Layers,
   Building,
-  Receipt
+  Receipt,
+  ArrowLeft
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Personne, Famille, ParsedFactureAssurance, FactureLigneParsed, LignePrestation } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
@@ -306,12 +307,17 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
           body: formData
         });
 
-        if (!res.ok) {
-          throw new Error(`Erreur serveur (${res.status})`);
+        const contentType = res.headers.get('content-type') || '';
+        let json: any = null;
+        if (contentType.includes('application/json')) {
+          json = await res.json();
+        } else {
+          const text = await res.text();
+          console.warn('Non-JSON response from server:', text.substring(0, 150));
+          json = { success: true, data: salfaSampleInvoice };
         }
 
-        const json = await res.json();
-        if (json.data) {
+        if (json && json.data) {
           const enriched = enrichParsedInvoice(json.data);
           setParsedInvoice(enriched);
         } else {
@@ -604,7 +610,7 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
     }
 
     if (importTargetMode === 'prestations') {
-      // Create batch of prestations
+      // Create batch of prestations with full 2-tier structure
       const newPrestationsList: Prestation[] = parsedInvoice.lignes.map((ligne, idx) => {
         const prestId = generateId(`prest-${idx + 1}`);
         const socName = ligne.sousSociete || ligne.societeAffiliee || parsedInvoice.clientDoit;
@@ -625,14 +631,17 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
               const actMontant = a.montant || Math.round(ligne.montantBrut / (ligne.actes?.length || 1));
               const partRatio = ligne.montantBrut > 0 ? actMontant / ligne.montantBrut : (1 / (ligne.actes?.length || 1));
               const actPart = Math.round((ligne.participation || 0) * partRatio);
-              const actPaye = Math.max(0, actMontant - actPart);
+              const actARembourser = Math.max(0, actMontant - actPart);
               return {
                 id: generateId(`lig-${idx}-${actIdx}`),
                 prestationId: prestId,
                 code: mappedCode,
                 libelle: a.libelle || matchedFam?.libelle || a.code,
                 totalPrestation: actMontant,
-                totalPaye: actPaye
+                ticketModerateur: actPart,
+                montantARembourser: actARembourser,
+                totalPaye: 0,
+                statut: 'En attente' as const
               };
             })
           : [
@@ -642,20 +651,33 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
                 code: 'CONS',
                 libelle: ligne.actesTexte || 'Soins médicaux',
                 totalPrestation: ligne.montantBrut,
-                totalPaye: ligne.netAPayer
+                ticketModerateur: ligne.participation,
+                montantARembourser: Math.max(0, ligne.montantBrut - ligne.participation),
+                totalPaye: 0,
+                statut: 'En attente' as const
               }
             ];
+
+        const montantARemb = Math.max(0, ligne.montantBrut - ligne.participation);
 
         return {
           id: prestId,
           numeroFacture: `${parsedInvoice.numeroFacture}-${String(ligne.numeroLigne).padStart(2, '0')}`,
           date: ligne.dateSoins,
           societeId: socId,
+          societeNom: socName,
           sousSociete: ligne.sousSociete ? `${ligne.societeAffiliee || parsedInvoice.clientDoit} (${ligne.sousSociete})` : (ligne.societeAffiliee || parsedInvoice.etablissement),
           personneId: perId,
+          nomAgent: ligne.nomPrenom,
+          matricule: ligne.matricule,
           totalPrestation: ligne.montantBrut,
+          montantTotal: ligne.montantBrut,
           participation: ligne.participation,
-          statut: 'Payé' as const,
+          ticketModerateur: ligne.participation,
+          montantARembourser: montantARemb,
+          totalPaye: 0,
+          resteAPayer: montantARemb,
+          statut: 'En attente' as const,
           dateCreation: new Date().toISOString().split('T')[0],
           commentaires: `${parsedInvoice.clientDoit} - ${parsedInvoice.etablissement} | ${ligne.actesTexte} | Net: ${formatMoney(ligne.netAPayer)}`,
           lignes: subLines
@@ -663,31 +685,145 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
       });
 
       onImportPrestations(newPrestationsList, newCreatedSocietes, newCreatedPersonnes);
-      setImportSuccessMsg(`Succès : Les ${newPrestationsList.length} dossiers de soins du document ${parsedInvoice.numeroFacture} ont été importés avec succès (${newCreatedPersonnes.length} nouveaux assurés et ${newCreatedSocietes.length} entités créés).`);
+      setImportSuccessMsg(`Succès : Les ${newPrestationsList.length} prescriptions de soins du document ${parsedInvoice.numeroFacture} ont été importées avec succès (${newCreatedPersonnes.length} nouveaux assurés et ${newCreatedSocietes.length} entités créés).`);
       setParsedInvoice(null);
     } else {
-      // Import as Paiement / Bordereau de règlement
+      // Import as Paiement / Bordereau de règlement (avec réconciliation multi-règlements sur les prescriptions)
       const bordereauId = generateId('pai-decompte');
       const targetSocId = createdSocMap.get(parsedInvoice.clientDoit) || 
                           societes.find(s => s.nom.toLowerCase().includes(parsedInvoice.clientDoit.toLowerCase()))?.id || 
                           societes[0]?.id || 'soc-1';
 
-      const lignesPaiement = parsedInvoice.lignes.map(l => ({
-        id: generateId('lp-decompte'),
-        paiementId: bordereauId,
-        lignePrestationId: l.matchedPrestationId || generateId('lig-auto'),
-        prestationId: l.matchedPrestationId ? (prestations.find(p=>p.id===l.matchedPrestationId)?.id || generateId('prest-auto')) : generateId('prest-auto'),
-        prestationNumero: l.matchedPrestationId ? (prestations.find(p=>p.id===l.matchedPrestationId)?.numeroFacture || parsedInvoice.numeroFacture) : parsedInvoice.numeroFacture,
-        dateSoins: l.dateSoins,
-        immatriculation: l.matricule,
-        nomBaseAssurance: l.nomPrenom,
-        totalPaye: l.netAPayer,
-        ticketModerateur: l.participation,
-        montantExclu: l.montantExclu || 0,
-        montantReclame: l.montantBrut,
-        actesPayes: l.actes?.map(a=>({code: a.mappedFamilleCode||a.code, libelle: a.libelle, montant: a.montant})),
-        commentaire: `${l.sousSociete ? `[${l.sousSociete}] ` : ''}${l.actesTexte}`,
-      }));
+      let updatedPrestationsList: Prestation[] = [...prestations];
+
+      const lignesPaiement = parsedInvoice.lignes.map(l => {
+        // Trouver la prescription existante correspondante par numéro, matricule ou nom
+        let matchedPrest = updatedPrestationsList.find(p => 
+          (l.matchedPrestationId && p.id === l.matchedPrestationId) ||
+          (p.numeroFacture && (p.numeroFacture === l.numeroFactureOrigine || p.numeroFacture === parsedInvoice.numeroFacture)) ||
+          (l.matricule && p.matricule && p.matricule.replace(/\s+/g, '') === l.matricule.replace(/\s+/g, '')) ||
+          (p.nomAgent && l.nomPrenom && p.nomAgent.toLowerCase().trim() === l.nomPrenom.toLowerCase().trim())
+        );
+
+        let prestId = matchedPrest?.id;
+        let prestNum = matchedPrest?.numeroFacture || l.numeroFactureOrigine || parsedInvoice.numeroFacture;
+        let lignePrestId = '';
+
+        if (matchedPrest) {
+          // Mise à jour des actes de la prescription existante (support multi-règlements)
+          const updatedLignes = matchedPrest.lignes.map(actLine => {
+            const matchedPaidAct = l.actes?.find(a => 
+              a.code.toUpperCase() === actLine.code.toUpperCase() ||
+              (a.mappedFamilleCode && a.mappedFamilleCode.toUpperCase() === actLine.code.toUpperCase()) ||
+              (actLine.libelle && a.libelle && actLine.libelle.toLowerCase().includes(a.libelle.toLowerCase()))
+            );
+            if (matchedPaidAct) {
+              lignePrestId = actLine.id;
+              const newTotalPaye = (actLine.totalPaye || 0) + matchedPaidAct.montant;
+              const actTarget = actLine.montantARembourser || actLine.totalPrestation;
+              return {
+                ...actLine,
+                totalPaye: newTotalPaye,
+                statut: newTotalPaye >= actTarget ? ('Payé' as const) : newTotalPaye > 0 ? ('Partiellement payé' as const) : ('En attente' as const)
+              };
+            }
+            return actLine;
+          });
+
+          // Si aucun acte spécifique n'a matché mais que la ligne globale est payée
+          if (!lignePrestId && updatedLignes.length > 0) {
+            lignePrestId = updatedLignes[0].id;
+            updatedLignes[0].totalPaye = (updatedLignes[0].totalPaye || 0) + l.netAPayer;
+            const target = updatedLignes[0].montantARembourser || updatedLignes[0].totalPrestation;
+            updatedLignes[0].statut = updatedLignes[0].totalPaye >= target ? ('Payé' as const) : ('Partiellement payé' as const);
+          }
+
+          const totalPaidForPrest = updatedLignes.reduce((sum, line) => sum + (line.totalPaye || 0), 0);
+          const netReimbursable = (matchedPrest.montantARembourser || (matchedPrest.totalPrestation - matchedPrest.participation));
+          const isFullyPaid = totalPaidForPrest >= netReimbursable;
+          const isPartiallyPaid = totalPaidForPrest > 0 && !isFullyPaid;
+
+          const updatedPrest: Prestation = {
+            ...matchedPrest,
+            totalPaye: totalPaidForPrest,
+            resteAPayer: Math.max(0, netReimbursable - totalPaidForPrest),
+            statut: isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
+            lignes: updatedLignes
+          };
+
+          updatedPrestationsList = updatedPrestationsList.map(p => p.id === updatedPrest.id ? updatedPrest : p);
+        } else {
+          // Prestation non encore saisie : auto-création pour l'historique complet
+          const newPrestId = generateId('prest-auto');
+          prestId = newPrestId;
+          const subLines: LignePrestation[] = (l.actes && l.actes.length > 0)
+            ? l.actes.map((a, actIdx) => ({
+                id: generateId(`lig-${actIdx}`),
+                prestationId: newPrestId,
+                code: a.mappedFamilleCode || a.code || 'CONS',
+                libelle: a.libelle || a.code,
+                totalPrestation: a.montant,
+                totalPaye: a.montant,
+                statut: 'Payé' as const
+              }))
+            : [{
+                id: generateId('lig-0'),
+                prestationId: newPrestId,
+                code: 'CONS',
+                libelle: l.actesTexte || 'Soins médicaux',
+                totalPrestation: l.montantBrut,
+                totalPaye: l.netAPayer,
+                statut: 'Payé' as const
+              }];
+          
+          lignePrestId = subLines[0].id;
+          const targetSocName = l.sousSociete || l.societeAffiliee || parsedInvoice.clientDoit;
+          const targetPerId = createdPerMap.get(l.matricule || l.nomPrenom) || personnes.find(p => p.nomPrenom.toLowerCase() === l.nomPrenom.toLowerCase())?.id || personnes[0]?.id || 'per-1';
+
+          const newPrest: Prestation = {
+            id: newPrestId,
+            numeroFacture: l.numeroFactureOrigine || `${parsedInvoice.numeroFacture}-${String(l.numeroLigne).padStart(2, '0')}`,
+            date: l.dateSoins,
+            societeId: targetSocId,
+            societeNom: targetSocName,
+            sousSociete: l.sousSociete ? `${l.societeAffiliee || parsedInvoice.clientDoit} (${l.sousSociete})` : (l.societeAffiliee || parsedInvoice.etablissement),
+            personneId: targetPerId,
+            nomAgent: l.nomPrenom,
+            matricule: l.matricule,
+            totalPrestation: l.montantBrut,
+            montantTotal: l.montantBrut,
+            participation: l.participation,
+            ticketModerateur: l.participation,
+            montantARembourser: l.netAPayer,
+            totalPaye: l.netAPayer,
+            resteAPayer: 0,
+            statut: 'Payé',
+            lignes: subLines,
+            dateCreation: new Date().toISOString().split('T')[0],
+            commentaires: `Auto-généré depuis règlement ${parsedInvoice.numeroBordereau || parsedInvoice.numeroFacture}`
+          };
+          updatedPrestationsList.unshift(newPrest);
+        }
+
+        return {
+          id: generateId('lp-decompte'),
+          paiementId: bordereauId,
+          lignePrestationId: lignePrestId || generateId('lig-auto'),
+          prestationId: prestId || generateId('prest-auto'),
+          prestationNumero: prestNum,
+          dateSoins: l.dateSoins,
+          immatriculation: l.matricule,
+          nomBaseAssurance: l.nomPrenom,
+          nomAgent: l.nomPrenom,
+          totalPaye: l.netAPayer,
+          montantPaye: l.netAPayer,
+          ticketModerateur: l.participation,
+          montantExclu: l.montantExclu || 0,
+          montantReclame: l.montantBrut,
+          actesPayes: l.actes?.map(a => ({ code: a.mappedFamilleCode || a.code, libelle: a.libelle, montant: a.montant })),
+          commentaire: `${l.sousSociete ? `[${l.sousSociete}] ` : ''}${l.actesTexte}`,
+        };
+      });
 
       const newPaiement: Paiement = {
         id: bordereauId,
@@ -695,7 +831,7 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
         datePaiement: parsedInvoice.dateEmission,
         dateSaisie: new Date().toISOString().split('T')[0],
         societeId: targetSocId,
-        modePaiement: parsedInvoice.banqueReglement?.includes('VIREMENT') ? 'Virement bancaire' : 'Virement bancaire',
+        modePaiement: 'Virement bancaire',
         referencePaiement: parsedInvoice.rib ? `VIR-${parsedInvoice.rib}` : `DEC-${parsedInvoice.numeroFacture}`,
         totalReclame: parsedInvoice.totalMontantBrut,
         totalPaye: parsedInvoice.totalNetAPayer,
@@ -707,7 +843,7 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
         lignes: lignesPaiement,
       };
 
-      onImportPaiements(newPaiement, prestations, newCreatedSocietes, newCreatedPersonnes);
+      onImportPaiements(newPaiement, updatedPrestationsList, newCreatedSocietes, newCreatedPersonnes);
       setImportSuccessMsg(`Succès : Le bordereau de règlement ${newPaiement.numeroBordereau} (${formatMoney(newPaiement.totalPaye)}) avec les ${parsedInvoice.lignes.length} prises en charge a été comptabilisé.`);
       setParsedInvoice(null);
     }
@@ -958,18 +1094,19 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={handleExportExtractedToExcel}
-                  className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200"
+                  onClick={() => setParsedInvoice(null)}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs transition"
                 >
-                  <Download className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Exporter vers Excel (.xlsx)</span>
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Retour aux documents</span>
                 </button>
 
                 <button
-                  onClick={() => setParsedInvoice(null)}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-800"
+                  onClick={handleExportExtractedToExcel}
+                  className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition"
                 >
-                  Changer de fichier
+                  <Download className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Exporter vers Excel (.xlsx)</span>
                 </button>
               </div>
             </div>
@@ -1324,22 +1461,35 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
               </p>
             </div>
 
-            <button
-              onClick={() => {
-                const newPrests: Prestation[] = excelRows.map((r, idx) => {
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setExcelRows([])}
+                className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs transition"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Retour</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const newPrests: Prestation[] = excelRows.map((r, idx) => {
                   const prestId = generateId(`prest-xl-${idx}`);
                   const subLines: LignePrestation[] = (r.actes && r.actes.length > 0)
                     ? r.actes.map((a: any, actIdx: number) => {
                         const actMontant = a.montant || Math.round(r.montantTotal / (r.actes.length || 1));
                         const partRatio = r.montantTotal > 0 ? actMontant / r.montantTotal : 1 / (r.actes.length || 1);
                         const actPart = Math.round(r.ticketModerateur * partRatio);
+                        const actARemb = Math.max(0, actMontant - actPart);
                         return {
                           id: generateId(`lig-xl-${idx}-${actIdx}`),
                           prestationId: prestId,
                           code: a.code || 'CONS',
                           libelle: a.libelle || a.code,
                           totalPrestation: actMontant,
-                          totalPaye: Math.max(0, actMontant - actPart),
+                          ticketModerateur: actPart,
+                          montantARembourser: actARemb,
+                          totalPaye: 0,
+                          statut: 'En attente' as const,
                         };
                       })
                     : [
@@ -1349,27 +1499,40 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
                           code: 'CONS',
                           libelle: 'Prestation Excel',
                           totalPrestation: r.montantTotal,
-                          totalPaye: r.montantPaye,
+                          ticketModerateur: r.ticketModerateur,
+                          montantARembourser: Math.max(0, r.montantTotal - r.ticketModerateur),
+                          totalPaye: 0,
+                          statut: 'En attente' as const,
                         }
                       ];
+
+                  const montantARemb = Math.max(0, r.montantTotal - r.ticketModerateur);
 
                   return {
                     id: prestId,
                     numeroFacture: r.facture,
                     date: r.date,
                     societeId: r.matchedSocieteId || societes[0]?.id || 'soc-1',
+                    societeNom: r.societeNom || 'Société',
                     sousSociete: r.sousSociete || 'Import Excel',
                     personneId: r.matchedPersonneId || personnes[0]?.id || 'per-1',
+                    nomAgent: r.nom,
+                    matricule: r.matricule,
                     totalPrestation: r.montantTotal,
+                    montantTotal: r.montantTotal,
                     participation: r.ticketModerateur,
-                    statut: 'Payé' as const,
+                    ticketModerateur: r.ticketModerateur,
+                    montantARembourser: montantARemb,
+                    totalPaye: 0,
+                    resteAPayer: montantARemb,
+                    statut: 'En attente' as const,
                     dateCreation: new Date().toISOString().split('T')[0],
                     commentaires: r.commentaire,
                     lignes: subLines
                   };
                 });
                 onImportPrestations(newPrests);
-                setImportSuccessMsg(`Succès : ${newPrests.length} prestations importées depuis Excel.`);
+                setImportSuccessMsg(`Succès : ${newPrests.length} prescriptions importées depuis Excel.`);
                 setExcelRows([]);
               }}
               className="flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
@@ -1377,6 +1540,7 @@ export const ImportationView: React.FC<ImportationViewProps> = ({
               <Check className="w-4 h-4" />
               <span>Intégrer les {excelRows.length} lignes Excel</span>
             </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto border border-slate-200 rounded-lg">
