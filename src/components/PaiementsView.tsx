@@ -27,7 +27,11 @@ import {
   ArrowDown,
   SlidersHorizontal,
   RotateCcw,
-  Filter
+  Filter,
+  Layers,
+  Users,
+  Boxes,
+  FileText
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
@@ -35,7 +39,49 @@ import { DecompteImportModal } from './DecompteImportModal';
 import * as XLSX from 'xlsx';
 
 type PaiementSortField = 'datePaiement' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
+type GroupSortField = 'dateSoins' | 'nomAgent' | 'codeActe' | 'societe' | 'totalReclame' | 'totalPaye' | 'ticketModerateur' | 'totalExclu' | 'nombreLignes';
 type SortDirection = 'asc' | 'desc';
+type ViewMode = 'bordereaux' | 'groupes_actes';
+
+export interface GroupedPaymentAct {
+  groupKey: string;
+  nomAgent: string;
+  immatriculation: string;
+  dateSoins: string;
+  codeActe: string;
+  libelleActe: string;
+  societeNom: string;
+  societeId: string;
+  bordereaux: Array<{
+    paiementId: string;
+    numeroBordereau: string;
+    datePaiement: string;
+    modePaiement: string;
+    referencePaiement: string;
+  }>;
+  prestationsNumeros: string[];
+  totalReclame: number;
+  totalPaye: number;
+  ticketModerateur: number;
+  totalExclu: number;
+  nombreLignes: number;
+  lignes: Array<{
+    ligneId: string;
+    paiementId: string;
+    numeroBordereau: string;
+    datePaiement: string;
+    dateSoins?: string;
+    prestationNumero?: string;
+    montantReclame?: number;
+    ticketModerateur?: number;
+    totalPaye: number;
+    montantExclu: number;
+    codeActe?: string;
+    libelleActe?: string;
+    actesPayes?: Array<{ code: string; libelle: string; montant: number }>;
+    commentaire?: string;
+  }>;
+}
 
 interface PaiementsViewProps {
   paiements: Paiement[];
@@ -65,13 +111,20 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   setIsCreateModalOpen,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState<ViewMode>('bordereaux');
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [expandedGroupRows, setExpandedGroupRows] = useState<Record<string, boolean>>({});
+  const [groupLinesInBordereau, setGroupLinesInBordereau] = useState<boolean>(true);
   const [viewingPaiement, setViewingPaiement] = useState<Paiement | null>(null);
   const [isDecompteModalOpen, setIsDecompteModalOpen] = useState<boolean>(false);
 
-  // Sorting state
+  // Sorting state for bordereaux
   const [sortField, setSortField] = useState<PaiementSortField>('datePaiement');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Sorting state for grouped view (Patient + Date + Actes)
+  const [groupSortField, setGroupSortField] = useState<GroupSortField>('dateSoins');
+  const [groupSortDirection, setGroupSortDirection] = useState<SortDirection>('desc');
 
   // Multi-criteria filters state
   const [filterSocieteId, setFilterSocieteId] = useState<string>('ALL');
@@ -84,6 +137,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
   const toggleRow = (id: string) => {
     setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleGroupRow = (key: string) => {
+    setExpandedGroupRows(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société';
@@ -379,6 +436,238 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     societes,
   ]);
 
+  // Grouped Aggregation across all filtered payments: Group by Personne (Patient) + Date des Soins + Mêmes Actes
+  const groupedPaymentActs = useMemo(() => {
+    const groupsMap = new Map<string, GroupedPaymentAct>();
+
+    filteredAndSortedPaiements.forEach(p => {
+      const socNom = getSocieteNom(p.societeId);
+
+      (p.lignes || []).forEach(l => {
+        const rawNom = (l.nomAgent || l.nomBaseAssurance || 'Assuré inconnu').trim();
+        const rawDate = (l.dateSoins || p.datePaiement || '').split('T')[0];
+        
+        // Determine act code & label
+        let actCode = (l.codeActe || (l.actesPayes && l.actesPayes[0]?.code) || 'CONS').toUpperCase().trim();
+        let actLibelle = l.libelleActe || (l.actesPayes && l.actesPayes[0]?.libelle) || actCode;
+        
+        const groupKey = `${rawNom.toLowerCase()}|${rawDate}|${actCode.toLowerCase()}`;
+
+        const reclame = Number(l.montantReclame || ((l.totalPaye || 0) + (l.ticketModerateur || 0)) || 0);
+        const paye = Number(l.totalPaye || l.montantPaye || 0);
+        const mod = Number(l.ticketModerateur || 0);
+        const exclu = Number(l.montantExclu || 0);
+
+        if (!groupsMap.has(groupKey)) {
+          groupsMap.set(groupKey, {
+            groupKey,
+            nomAgent: rawNom,
+            immatriculation: l.immatriculation || '-',
+            dateSoins: rawDate,
+            codeActe: actCode,
+            libelleActe: actLibelle,
+            societeNom: socNom,
+            societeId: p.societeId,
+            bordereaux: [
+              {
+                paiementId: p.id,
+                numeroBordereau: p.numeroBordereau,
+                datePaiement: p.datePaiement,
+                modePaiement: p.modePaiement,
+                referencePaiement: p.referencePaiement,
+              }
+            ],
+            prestationsNumeros: l.prestationNumero ? [l.prestationNumero] : [],
+            totalReclame: reclame,
+            totalPaye: paye,
+            ticketModerateur: mod,
+            totalExclu: exclu,
+            nombreLignes: 1,
+            lignes: [
+              {
+                ligneId: l.id,
+                paiementId: p.id,
+                numeroBordereau: p.numeroBordereau,
+                datePaiement: p.datePaiement,
+                dateSoins: l.dateSoins,
+                prestationNumero: l.prestationNumero,
+                montantReclame: reclame,
+                ticketModerateur: mod,
+                totalPaye: paye,
+                montantExclu: exclu,
+                codeActe: actCode,
+                libelleActe: actLibelle,
+                actesPayes: l.actesPayes,
+                commentaire: l.commentaire,
+              }
+            ]
+          });
+        } else {
+          const grp = groupsMap.get(groupKey)!;
+          grp.totalReclame += reclame;
+          grp.totalPaye += paye;
+          grp.ticketModerateur += mod;
+          grp.totalExclu += exclu;
+          grp.nombreLignes += 1;
+
+          if (!grp.bordereaux.some(b => b.paiementId === p.id)) {
+            grp.bordereaux.push({
+              paiementId: p.id,
+              numeroBordereau: p.numeroBordereau,
+              datePaiement: p.datePaiement,
+              modePaiement: p.modePaiement,
+              referencePaiement: p.referencePaiement,
+            });
+          }
+
+          if (l.prestationNumero && !grp.prestationsNumeros.includes(l.prestationNumero)) {
+            grp.prestationsNumeros.push(l.prestationNumero);
+          }
+
+          grp.lignes.push({
+            ligneId: l.id,
+            paiementId: p.id,
+            numeroBordereau: p.numeroBordereau,
+            datePaiement: p.datePaiement,
+            dateSoins: l.dateSoins,
+            prestationNumero: l.prestationNumero,
+            montantReclame: reclame,
+            ticketModerateur: mod,
+            totalPaye: paye,
+            montantExclu: exclu,
+            codeActe: actCode,
+            libelleActe: actLibelle,
+            actesPayes: l.actesPayes,
+            commentaire: l.commentaire,
+          });
+        }
+      });
+    });
+
+    return Array.from(groupsMap.values()).sort((a, b) => {
+      let valA: any = '';
+      let valB: any = '';
+
+      switch (groupSortField) {
+        case 'dateSoins':
+          valA = a.dateSoins || '';
+          valB = b.dateSoins || '';
+          break;
+        case 'nomAgent':
+          valA = (a.nomAgent || '').toLowerCase();
+          valB = (b.nomAgent || '').toLowerCase();
+          break;
+        case 'codeActe':
+          valA = (a.codeActe || '').toLowerCase();
+          valB = (b.codeActe || '').toLowerCase();
+          break;
+        case 'societe':
+          valA = (a.societeNom || '').toLowerCase();
+          valB = (b.societeNom || '').toLowerCase();
+          break;
+        case 'totalReclame':
+          valA = a.totalReclame || 0;
+          valB = b.totalReclame || 0;
+          break;
+        case 'totalPaye':
+          valA = a.totalPaye || 0;
+          valB = b.totalPaye || 0;
+          break;
+        case 'ticketModerateur':
+          valA = a.ticketModerateur || 0;
+          valB = b.ticketModerateur || 0;
+          break;
+        case 'totalExclu':
+          valA = a.totalExclu || 0;
+          valB = b.totalExclu || 0;
+          break;
+        case 'nombreLignes':
+          valA = a.nombreLignes || 0;
+          valB = b.nombreLignes || 0;
+          break;
+        default:
+          valA = a.dateSoins || '';
+          valB = b.dateSoins || '';
+      }
+
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return groupSortDirection === 'asc' ? valA - valB : valB - valA;
+      }
+
+      const comp = String(valA).localeCompare(String(valB));
+      return groupSortDirection === 'asc' ? comp : -comp;
+    });
+  }, [filteredAndSortedPaiements, groupSortField, groupSortDirection, societes]);
+
+  const handleGroupSort = (field: GroupSortField) => {
+    if (groupSortField === field) {
+      setGroupSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setGroupSortField(field);
+      setGroupSortDirection(field.startsWith('total') || field === 'nombreLignes' ? 'desc' : 'asc');
+    }
+  };
+
+  // Helper to group lines of a single payment by person + date + act
+  const groupLinesForSinglePayment = (lines: LignePaiement[], paymentDate: string) => {
+    const map = new Map<string, {
+      groupKey: string;
+      nomAgent: string;
+      immatriculation: string;
+      dateSoins: string;
+      codeActe: string;
+      libelleActe: string;
+      prestationNumero: string;
+      totalReclame: number;
+      ticketModerateur: number;
+      totalPaye: number;
+      montantExclu: number;
+      nombreActes: number;
+      subLines: LignePaiement[];
+    }>();
+
+    (lines || []).forEach(l => {
+      const rawNom = (l.nomAgent || l.nomBaseAssurance || 'Assuré').trim();
+      const rawDate = (l.dateSoins || paymentDate || '').split('T')[0];
+      const actCode = (l.codeActe || (l.actesPayes && l.actesPayes[0]?.code) || 'CONS').toUpperCase().trim();
+      const actLib = l.libelleActe || (l.actesPayes && l.actesPayes[0]?.libelle) || actCode;
+      const key = `${rawNom.toLowerCase()}|${rawDate}|${actCode.toLowerCase()}`;
+
+      const rec = Number(l.montantReclame || ((l.totalPaye || 0) + (l.ticketModerateur || 0)) || 0);
+      const pay = Number(l.montantPaye || l.totalPaye || 0);
+      const mod = Number(l.ticketModerateur || 0);
+      const exc = Number(l.montantExclu || 0);
+
+      if (!map.has(key)) {
+        map.set(key, {
+          groupKey: key,
+          nomAgent: rawNom,
+          immatriculation: l.immatriculation || '-',
+          dateSoins: rawDate,
+          codeActe: actCode,
+          libelleActe: actLib,
+          prestationNumero: l.prestationNumero || '-',
+          totalReclame: rec,
+          ticketModerateur: mod,
+          totalPaye: pay,
+          montantExclu: exc,
+          nombreActes: 1,
+          subLines: [l]
+        });
+      } else {
+        const item = map.get(key)!;
+        item.totalReclame += rec;
+        item.ticketModerateur += mod;
+        item.totalPaye += pay;
+        item.montantExclu += exc;
+        item.nombreActes += 1;
+        item.subLines.push(l);
+      }
+    });
+
+    return Array.from(map.values());
+  };
+
   // Aggregate statistics for the filtered dataset
   const stats = useMemo(() => {
     const totalReclame = filteredAndSortedPaiements.reduce((sum, p) => sum + (p.totalReclame || 0), 0);
@@ -605,6 +894,30 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   };
 
   const handleExportExcel = () => {
+    if (viewMode === 'groupes_actes') {
+      const rows = groupedPaymentActs.map(g => ({
+        'Patient / Assuré': g.nomAgent,
+        'Matricule': g.immatriculation,
+        'Date Soins': g.dateSoins,
+        'Code Acte': g.codeActe,
+        'Libellé Acte': g.libelleActe,
+        'Société Assureur': g.societeNom,
+        'N° Bordereaux Associés': g.bordereaux.map(b => b.numeroBordereau).join(', '),
+        'Réf Prescriptions': g.prestationsNumeros.join(', '),
+        'Nb Lignes / Règlements': g.nombreLignes,
+        'Total Réclamé (Brut)': g.totalReclame,
+        'Total Réglé (Payé Net)': g.totalPaye,
+        'Ticket Modérateur': g.ticketModerateur,
+        'Total Exclusions': g.totalExclu,
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Paiements_Groupes_Actes');
+      XLSX.writeFile(workbook, `Paiements_Groupes_Patient_Date_Actes_${new Date().toISOString().split('T')[0]}.xlsx`);
+      return;
+    }
+
     const rows = filteredAndSortedPaiements.map(p => {
       const soc = societes.find(s => s.id === p.societeId);
       return {
@@ -641,25 +954,66 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     );
   };
 
+  const renderGroupSortIcon = (field: GroupSortField) => {
+    if (groupSortField !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity ml-1" />;
+    }
+    return groupSortDirection === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-emerald-600 font-bold ml-1" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-emerald-600 font-bold ml-1" />
+    );
+  };
+
   return (
     <div id="paiements-view" className="space-y-5">
       {/* View Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Saisie & Bordereaux de Règlement</h2>
+          <h2 className="text-xl font-bold text-slate-900">Saisie & Règlements d'Assurance</h2>
           <p className="text-xs text-slate-500">
-            Enregistrement des virements assureurs, lettrage des prestations et calcul des exclusions
+            Bordereaux de paiements, lettrage des prescriptions et regroupement des soins par assuré, date et mêmes actes
           </p>
         </div>
 
         <div className="flex items-center flex-wrap gap-2">
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              id="tab-view-bordereaux"
+              type="button"
+              onClick={() => setViewMode('bordereaux')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                viewMode === 'bordereaux'
+                  ? 'bg-white text-emerald-800 shadow-xs border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Vue par Bordereau ({filteredAndSortedPaiements.length})</span>
+            </button>
+            <button
+              id="tab-view-groupes"
+              type="button"
+              onClick={() => setViewMode('groupes_actes')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                viewMode === 'groupes_actes'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Regroupé par Patient + Date + Actes ({groupedPaymentActs.length})</span>
+            </button>
+          </div>
+
           <button
             id="btn-import-decompte"
             onClick={() => setIsDecompteModalOpen(true)}
             className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-xs transition cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Importer Décompte (ASCOMA / MCI / BSA)</span>
+            <span>Importer Décompte</span>
           </button>
 
           <button
@@ -668,7 +1022,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-xs transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
-            <span>Exporter Excel</span>
+            <span>Exporter {viewMode === 'groupes_actes' ? 'Actes Groupés' : 'Bordereaux'} Excel</span>
           </button>
 
           <button
@@ -677,7 +1031,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             className="flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Nouveau Bordereau de Règlement</span>
+            <span>Nouveau Règlement</span>
           </button>
         </div>
       </div>
@@ -921,343 +1275,698 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         )}
       </div>
 
-      {/* Paiements Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
-              <tr>
-                <th className="py-3 px-2 w-8"></th>
-                
-                {/* Date Règlement */}
-                <th 
-                  onClick={() => handleSort('datePaiement')}
-                  className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'datePaiement' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center">
-                    <span>Date Règlement</span>
-                    {renderSortIcon('datePaiement')}
-                  </div>
-                </th>
-
-                {/* N° Bordereau */}
-                <th 
-                  onClick={() => handleSort('numeroBordereau')}
-                  className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'numeroBordereau' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center">
-                    <span>N° Bordereau</span>
-                    {renderSortIcon('numeroBordereau')}
-                  </div>
-                </th>
-
-                {/* Société Assureur */}
-                <th 
-                  onClick={() => handleSort('societe')}
-                  className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'societe' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center">
-                    <span>Société Assureur</span>
-                    {renderSortIcon('societe')}
-                  </div>
-                </th>
-
-                {/* Mode & Référence */}
-                <th 
-                  onClick={() => handleSort('modePaiement')}
-                  className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'modePaiement' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center">
-                    <span>Mode & Référence</span>
-                    {renderSortIcon('modePaiement')}
-                  </div>
-                </th>
-
-                {/* Total Réclamé */}
-                <th 
-                  onClick={() => handleSort('totalReclame')}
-                  className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalReclame' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center justify-end">
-                    <span>Total Réclamé</span>
-                    {renderSortIcon('totalReclame')}
-                  </div>
-                </th>
-
-                {/* Somme Payée */}
-                <th 
-                  onClick={() => handleSort('totalPaye')}
-                  className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalPaye' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center justify-end">
-                    <span>Somme Payée</span>
-                    {renderSortIcon('totalPaye')}
-                  </div>
-                </th>
-
-                {/* Ticket Modérateur */}
-                <th 
-                  onClick={() => handleSort('totalModerateur')}
-                  className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalModerateur' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center justify-end">
-                    <span>Ticket Mod.</span>
-                    {renderSortIcon('totalModerateur')}
-                  </div>
-                </th>
-
-                {/* Exclu / Rejet */}
-                <th 
-                  onClick={() => handleSort('totalExclu')}
-                  className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalExclu' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center justify-end">
-                    <span>Exclu / Rejet</span>
-                    {renderSortIcon('totalExclu')}
-                  </div>
-                </th>
-
-                {/* Statut */}
-                <th 
-                  onClick={() => handleSort('statut')}
-                  className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'statut' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
-                >
-                  <div className="flex items-center justify-center">
-                    <span>Statut</span>
-                    {renderSortIcon('statut')}
-                  </div>
-                </th>
-
-                <th className="py-3 px-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredAndSortedPaiements.length === 0 ? (
+      {/* Paiements Table / Grouped Table based on viewMode */}
+      {viewMode === 'bordereaux' ? (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
                 <tr>
-                  <td colSpan={11} className="py-10 text-center text-slate-400 space-y-2">
-                    <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
-                    <div>Aucun bordereau de règlement ne correspond aux critères sélectionnés.</div>
-                    {activeFiltersCount > 0 && (
-                      <button
-                        onClick={handleResetFilters}
-                        className="text-xs text-emerald-600 hover:underline font-medium"
-                      >
-                        Réinitialiser tous les filtres
-                      </button>
-                    )}
-                  </td>
+                  <th className="py-3 px-2 w-8"></th>
+                  
+                  {/* Date Règlement */}
+                  <th 
+                    onClick={() => handleSort('datePaiement')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'datePaiement' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Date Règlement</span>
+                      {renderSortIcon('datePaiement')}
+                    </div>
+                  </th>
+
+                  {/* N° Bordereau */}
+                  <th 
+                    onClick={() => handleSort('numeroBordereau')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'numeroBordereau' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>N° Bordereau</span>
+                      {renderSortIcon('numeroBordereau')}
+                    </div>
+                  </th>
+
+                  {/* Société Assureur */}
+                  <th 
+                    onClick={() => handleSort('societe')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'societe' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Société Assureur</span>
+                      {renderSortIcon('societe')}
+                    </div>
+                  </th>
+
+                  {/* Mode & Référence */}
+                  <th 
+                    onClick={() => handleSort('modePaiement')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'modePaiement' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Mode & Référence</span>
+                      {renderSortIcon('modePaiement')}
+                    </div>
+                  </th>
+
+                  {/* Total Réclamé */}
+                  <th 
+                    onClick={() => handleSort('totalReclame')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalReclame' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Total Réclamé</span>
+                      {renderSortIcon('totalReclame')}
+                    </div>
+                  </th>
+
+                  {/* Somme Payée */}
+                  <th 
+                    onClick={() => handleSort('totalPaye')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalPaye' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Somme Payée</span>
+                      {renderSortIcon('totalPaye')}
+                    </div>
+                  </th>
+
+                  {/* Ticket Modérateur */}
+                  <th 
+                    onClick={() => handleSort('totalModerateur')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalModerateur' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Ticket Mod.</span>
+                      {renderSortIcon('totalModerateur')}
+                    </div>
+                  </th>
+
+                  {/* Exclu / Rejet */}
+                  <th 
+                    onClick={() => handleSort('totalExclu')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalExclu' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Exclu / Rejet</span>
+                      {renderSortIcon('totalExclu')}
+                    </div>
+                  </th>
+
+                  {/* Statut */}
+                  <th 
+                    onClick={() => handleSort('statut')}
+                    className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'statut' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-center">
+                      <span>Statut</span>
+                      {renderSortIcon('statut')}
+                    </div>
+                  </th>
+
+                  <th className="py-3 px-3 text-right">Actions</th>
                 </tr>
-              ) : (
-                filteredAndSortedPaiements.map(p => {
-                  const isExpanded = !!expandedRows[p.id];
-                  const recInfo = getPaiementReconciliationInfo(p);
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredAndSortedPaiements.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="py-10 text-center text-slate-400 space-y-2">
+                      <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
+                      <div>Aucun bordereau de règlement ne correspond aux critères sélectionnés.</div>
+                      {activeFiltersCount > 0 && (
+                        <button
+                          onClick={handleResetFilters}
+                          className="text-xs text-emerald-600 hover:underline font-medium"
+                        >
+                          Réinitialiser tous les filtres
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAndSortedPaiements.map(p => {
+                    const isExpanded = !!expandedRows[p.id];
+                    const recInfo = getPaiementReconciliationInfo(p);
+                    const groupedPaymentLines = groupLinesForSinglePayment(p.lignes, p.datePaiement);
 
-                  // Tooltip text for reconciliation
-                  const matchTooltip = recInfo.hasMatch
-                    ? `Même date et montant qu'une prestation (${recInfo.matchingPrestations.map(m => `Facture ${m.numeroFacture} : ${formatMoney(m.montantBrut)}`).join(', ')})`
-                    : undefined;
-                  const duplicateTooltip = recInfo.hasDuplicate
-                    ? `Attention : ${recInfo.duplicatePayments.length} autre(s) bordereau(x) avec la même date (${formatDate(p.datePaiement)}) et le même montant (${formatMoney(p.totalPaye)}) : ${recInfo.duplicatePayments.map(d => d.numeroBordereau).join(', ')}`
-                    : undefined;
+                    // Tooltip text for reconciliation
+                    const matchTooltip = recInfo.hasMatch
+                      ? `Même date et montant qu'une prestation (${recInfo.matchingPrestations.map(m => `Facture ${m.numeroFacture} : ${formatMoney(m.montantBrut)}`).join(', ')})`
+                      : undefined;
+                    const duplicateTooltip = recInfo.hasDuplicate
+                      ? `Attention : ${recInfo.duplicatePayments.length} autre(s) bordereau(x) avec la même date (${formatDate(p.datePaiement)}) et le même montant (${formatMoney(p.totalPaye)}) : ${recInfo.duplicatePayments.map(d => d.numeroBordereau).join(', ')}`
+                      : undefined;
 
-                  return (
-                    <React.Fragment key={p.id}>
-                      <tr className={`transition hover:bg-slate-50/80 ${
-                        recInfo.hasMatch ? 'bg-emerald-50/20' : recInfo.hasDuplicate ? 'bg-amber-50/20' : ''
-                      }`}>
-                        <td className="py-3 px-2 text-center">
-                          <button
-                            onClick={() => toggleRow(p.id)}
-                            className="p-1 text-slate-400 hover:text-emerald-600 transition cursor-pointer"
-                            title="Afficher les lignes et actes réglés"
-                          >
-                            {isExpanded ? <ChevronDown className="w-4 h-4 text-emerald-600 font-bold" /> : <ChevronRight className="w-4 h-4" />}
-                          </button>
-                        </td>
-                        <td className="py-3 px-3 text-slate-600 font-medium whitespace-nowrap">
-                          <div className="flex items-center gap-1">
-                            <span className={
-                              recInfo.hasMatch 
-                                ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' 
-                                : recInfo.hasDuplicate 
-                                ? 'border-b-2 border-dashed border-amber-500 text-amber-900 font-semibold' 
-                                : ''
-                            } title={matchTooltip || duplicateTooltip}>
-                              {formatDate(p.datePaiement)}
-                            </span>
-                            {recInfo.hasMatch && (
-                              <span title={matchTooltip} className="inline-flex items-center text-emerald-600">
-                                <Sparkles className="w-3.5 h-3.5" />
-                              </span>
-                            )}
-                            {recInfo.hasDuplicate && (
-                              <span title={duplicateTooltip} className="inline-flex items-center text-amber-500">
-                                <AlertTriangle className="w-3.5 h-3.5" />
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 font-bold text-emerald-700 whitespace-nowrap">{p.numeroBordereau}</td>
-                        <td className="py-3 px-3 font-medium text-slate-900">{getSocieteNom(p.societeId)}</td>
-                        <td className="py-3 px-3">
-                          <div className="text-slate-800 font-medium">{p.modePaiement}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">{p.referencePaiement}</div>
-                        </td>
-                        <td className="py-3 px-3 text-right text-slate-600 whitespace-nowrap">{formatMoney(p.totalReclame)}</td>
-                        <td className="py-3 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1">
-                            <span className={
-                              recInfo.hasMatch 
-                                ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900' 
-                                : recInfo.hasDuplicate 
-                                ? 'border-b-2 border-dashed border-amber-500 text-amber-900' 
-                                : ''
-                            } title={matchTooltip || duplicateTooltip}>
-                              {formatMoney(p.totalPaye)}
-                            </span>
-                            {recInfo.hasMatch && (
-                              <span title={matchTooltip} className="text-[10px] px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 font-semibold">
-                                Match
-                              </span>
-                            )}
-                            {recInfo.hasDuplicate && (
-                              <span title={duplicateTooltip} className="text-[10px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">
-                                Doublon
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 text-right text-amber-700 font-medium whitespace-nowrap">{formatMoney(p.totalModerateur)}</td>
-                        <td className="py-3 px-3 text-right text-rose-600 font-medium whitespace-nowrap">{formatMoney(p.totalExclu)}</td>
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            {p.statut}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end space-x-1">
+                    return (
+                      <React.Fragment key={p.id}>
+                        <tr className={`transition hover:bg-slate-50/80 ${
+                          recInfo.hasMatch ? 'bg-emerald-50/20' : recInfo.hasDuplicate ? 'bg-amber-50/20' : ''
+                        }`}>
+                          <td className="py-3 px-2 text-center">
                             <button
-                              onClick={() => setViewingPaiement(p)}
-                              title="Visualiser le bordereau"
-                              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+                              onClick={() => toggleRow(p.id)}
+                              className="p-1 text-slate-400 hover:text-emerald-600 transition cursor-pointer"
+                              title="Afficher les lignes et actes réglés"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              {isExpanded ? <ChevronDown className="w-4 h-4 text-emerald-600 font-bold" /> : <ChevronRight className="w-4 h-4" />}
                             </button>
-                            <button
-                              onClick={() => {
-                                if (confirm(`Voulez-vous supprimer le bordereau ${p.numeroBordereau} ?`)) {
-                                  onDeletePaiement(p.id);
-                                }
-                              }}
-                              title="Supprimer"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-
-                      {/* Nested Expandable Sub-Table of Payment Lines (Lignes Règlement & Actes payés) */}
-                      {isExpanded && (
-                        <tr className="bg-slate-50/90 border-y border-slate-200/80">
-                          <td colSpan={11} className="p-4 pl-12">
-                            <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-2">
-                              <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                                <span className="flex items-center gap-1.5 text-emerald-700">
-                                  <span>Lignes Règlement rattachées aux Prescriptions ({p.lignes.length} assurés/soins)</span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-600 font-medium whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              <span className={
+                                recInfo.hasMatch 
+                                  ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' 
+                                  : recInfo.hasDuplicate 
+                                  ? 'border-b-2 border-dashed border-amber-500 text-amber-900 font-semibold' 
+                                  : ''
+                              } title={matchTooltip || duplicateTooltip}>
+                                {formatDate(p.datePaiement)}
+                              </span>
+                              {recInfo.hasMatch && (
+                                <span title={matchTooltip} className="inline-flex items-center text-emerald-600">
+                                  <Sparkles className="w-3.5 h-3.5" />
                                 </span>
-                                <span className="text-slate-400 font-mono text-[11px] lowercase">Date règlement: {formatDate(p.datePaiement)}</span>
-                              </div>
-                              <table className="w-full text-xs">
-                                <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
-                                  <tr>
-                                    <th className="py-2 px-2 text-left">Date Soins</th>
-                                    <th className="py-2 px-2 text-left">Nom de l'Agent (Prescription)</th>
-                                    <th className="py-2 px-2 text-left">Matricule</th>
-                                    <th className="py-2 px-2 text-left">Réf Prescription</th>
-                                    <th className="py-2 px-2 text-left min-w-[180px]">Actes Payés & Montants</th>
-                                    <th className="py-2 px-2 text-right">Montant à Payer</th>
-                                    <th className="py-2 px-2 text-right">Ticket Modérateur</th>
-                                    <th className="py-2 px-2 text-right">Somme Payée</th>
-                                    <th className="py-2 px-2 text-right">Exclusions</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                  {p.lignes.map((l) => {
-                                    const lMatch = getLignePaiementMatchInfo(l, p);
-                                    const lMatchTooltip = lMatch.hasMatch 
-                                      ? `Concordance Prescription : Facture ${lMatch.matchedPrescription?.numeroFacture} (Date: ${formatDate(lMatch.matchedPrescription?.date || '')}, Montant: ${formatMoney(lMatch.matchedPrescription?.montantBrut || 0)})`
-                                      : undefined;
-
-                                    return (
-                                      <tr key={l.id} className={`hover:bg-slate-50 ${lMatch.hasMatch ? 'bg-emerald-50/30' : ''}`}>
-                                        <td className="py-2 px-2 text-slate-600 font-medium">
-                                          <div className="flex items-center gap-1">
-                                            <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
-                                              {l.dateSoins ? formatDate(l.dateSoins) : '-'}
-                                            </span>
-                                            {lMatch.hasMatch && (
-                                              <span title={lMatchTooltip} className="inline-flex items-center text-emerald-600">
-                                                <Sparkles className="w-3 h-3" />
-                                              </span>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td className="py-2 px-2 font-semibold text-slate-900">
-                                          {l.nomAgent || l.nomBaseAssurance}
-                                        </td>
-                                        <td className="py-2 px-2 font-mono text-[11px] text-slate-600">
-                                          {l.immatriculation || '-'}
-                                        </td>
-                                        <td className="py-2 px-2 font-mono font-bold text-indigo-700">
-                                          {l.prestationNumero || '-'}
-                                        </td>
-                                        <td className="py-2 px-2">
-                                          {l.actesPayes && l.actesPayes.length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
-                                              {l.actesPayes.map((a, actIdx) => (
-                                                <span key={actIdx} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-medium">
-                                                  <span className="font-bold">{a.code}</span>
-                                                  <span>: {formatMoney(a.montant)}</span>
-                                                </span>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <span className="text-slate-500 text-[11px]">{l.commentaire || 'Soins réglés'}</span>
-                                          )}
-                                        </td>
-                                        <td className="py-2 px-2 text-right font-medium text-slate-900">
-                                          <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
-                                            {formatMoney(l.montantReclame || l.totalPaye + (l.ticketModerateur || 0))}
-                                          </span>
-                                        </td>
-                                        <td className="py-2 px-2 text-right text-amber-700 font-medium">
-                                          {formatMoney(l.ticketModerateur || 0)}
-                                        </td>
-                                        <td className="py-2 px-2 text-right font-bold text-emerald-700">
-                                          {formatMoney(l.montantPaye || l.totalPaye)}
-                                        </td>
-                                        <td className="py-2 px-2 text-right text-rose-600 font-medium">
-                                          {formatMoney(l.montantExclu || 0)}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
+                              )}
+                              {recInfo.hasDuplicate && (
+                                <span title={duplicateTooltip} className="inline-flex items-center text-amber-500">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 font-bold text-emerald-700 whitespace-nowrap">{p.numeroBordereau}</td>
+                          <td className="py-3 px-3 font-medium text-slate-900">{getSocieteNom(p.societeId)}</td>
+                          <td className="py-3 px-3">
+                            <div className="text-slate-800 font-medium">{p.modePaiement}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{p.referencePaiement}</div>
+                          </td>
+                          <td className="py-3 px-3 text-right text-slate-600 whitespace-nowrap">{formatMoney(p.totalReclame)}</td>
+                          <td className="py-3 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1">
+                              <span className={
+                                recInfo.hasMatch 
+                                  ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900' 
+                                  : recInfo.hasDuplicate 
+                                  ? 'border-b-2 border-dashed border-amber-500 text-amber-900' 
+                                  : ''
+                              } title={matchTooltip || duplicateTooltip}>
+                                {formatMoney(p.totalPaye)}
+                              </span>
+                              {recInfo.hasMatch && (
+                                <span title={matchTooltip} className="text-[10px] px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 font-semibold">
+                                  Match
+                                </span>
+                              )}
+                              {recInfo.hasDuplicate && (
+                                <span title={duplicateTooltip} className="text-[10px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">
+                                  Doublon
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right text-amber-700 font-medium whitespace-nowrap">{formatMoney(p.totalModerateur)}</td>
+                          <td className="py-3 px-3 text-right text-rose-600 font-medium whitespace-nowrap">{formatMoney(p.totalExclu)}</td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              {p.statut}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end space-x-1">
+                              <button
+                                onClick={() => setViewingPaiement(p)}
+                                title="Visualiser le bordereau"
+                                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Voulez-vous supprimer le bordereau ${p.numeroBordereau} ?`)) {
+                                    onDeletePaiement(p.id);
+                                  }
+                                }}
+                                title="Supprimer"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </td>
                         </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+
+                        {/* Nested Expandable Sub-Table of Payment Lines */}
+                        {isExpanded && (
+                          <tr className="bg-slate-50/90 border-y border-slate-200/80">
+                            <td colSpan={11} className="p-4 pl-10">
+                              <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                                      <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Lignes Règlement du Bordereau ({p.lignes.length} soins)</span>
+                                    </span>
+                                    <span className="text-xs text-slate-400 font-mono">| {formatDate(p.datePaiement)}</span>
+                                  </div>
+
+                                  {/* Sub-table grouping toggle */}
+                                  <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-md text-[11px]">
+                                    <Layers className="w-3 h-3 text-emerald-600" />
+                                    <label className="text-slate-700 font-medium flex items-center gap-1 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={groupLinesInBordereau}
+                                        onChange={(e) => setGroupLinesInBordereau(e.target.checked)}
+                                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3 h-3 cursor-pointer"
+                                      />
+                                      <span>Regrouper (même personne, date et même acte)</span>
+                                    </label>
+                                  </div>
+                                </div>
+
+                                {groupLinesInBordereau ? (
+                                  /* Grouped sub-lines */
+                                  <table className="w-full text-xs">
+                                    <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                                      <tr>
+                                        <th className="py-2 px-2 text-left">Date Soins</th>
+                                        <th className="py-2 px-2 text-left">Patient / Assuré</th>
+                                        <th className="py-2 px-2 text-left">Matricule</th>
+                                        <th className="py-2 px-2 text-left">Acte Regroupé</th>
+                                        <th className="py-2 px-2 text-center">Nb Actes</th>
+                                        <th className="py-2 px-2 text-right">Total Réclamé</th>
+                                        <th className="py-2 px-2 text-right">Ticket Modérateur</th>
+                                        <th className="py-2 px-2 text-right">Somme Payée (Net)</th>
+                                        <th className="py-2 px-2 text-right">Exclusions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {groupedPaymentLines.map((grp) => (
+                                        <tr key={grp.groupKey} className="hover:bg-slate-50">
+                                          <td className="py-2 px-2 text-slate-600 font-medium">
+                                            {formatDate(grp.dateSoins)}
+                                          </td>
+                                          <td className="py-2 px-2 font-semibold text-slate-900">
+                                            {grp.nomAgent}
+                                          </td>
+                                          <td className="py-2 px-2 font-mono text-[11px] text-slate-600">
+                                            {grp.immatriculation}
+                                          </td>
+                                          <td className="py-2 px-2">
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold">
+                                                {grp.codeActe}
+                                              </span>
+                                              <span className="text-slate-700 font-medium">{grp.libelleActe}</span>
+                                            </div>
+                                          </td>
+                                          <td className="py-2 px-2 text-center">
+                                            <span className="px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px]">
+                                              {grp.nombreActes}
+                                            </span>
+                                          </td>
+                                          <td className="py-2 px-2 text-right font-medium text-slate-900">
+                                            {formatMoney(grp.totalReclame)}
+                                          </td>
+                                          <td className="py-2 px-2 text-right text-amber-700 font-medium">
+                                            {formatMoney(grp.ticketModerateur)}
+                                          </td>
+                                          <td className="py-2 px-2 text-right font-bold text-emerald-700">
+                                            {formatMoney(grp.totalPaye)}
+                                          </td>
+                                          <td className="py-2 px-2 text-right text-rose-600 font-medium">
+                                            {formatMoney(grp.montantExclu)}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  /* Raw individual lines */
+                                  <table className="w-full text-xs">
+                                    <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                                      <tr>
+                                        <th className="py-2 px-2 text-left">Date Soins</th>
+                                        <th className="py-2 px-2 text-left">Nom de l'Agent (Prescription)</th>
+                                        <th className="py-2 px-2 text-left">Matricule</th>
+                                        <th className="py-2 px-2 text-left">Réf Prescription</th>
+                                        <th className="py-2 px-2 text-left min-w-[180px]">Actes Payés & Montants</th>
+                                        <th className="py-2 px-2 text-right">Montant à Payer</th>
+                                        <th className="py-2 px-2 text-right">Ticket Modérateur</th>
+                                        <th className="py-2 px-2 text-right">Somme Payée</th>
+                                        <th className="py-2 px-2 text-right">Exclusions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {p.lignes.map((l) => {
+                                        const lMatch = getLignePaiementMatchInfo(l, p);
+                                        const lMatchTooltip = lMatch.hasMatch 
+                                          ? `Concordance Prescription : Facture ${lMatch.matchedPrescription?.numeroFacture} (Date: ${formatDate(lMatch.matchedPrescription?.date || '')}, Montant: ${formatMoney(lMatch.matchedPrescription?.montantBrut || 0)})`
+                                          : undefined;
+
+                                        return (
+                                          <tr key={l.id} className={`hover:bg-slate-50 ${lMatch.hasMatch ? 'bg-emerald-50/30' : ''}`}>
+                                            <td className="py-2 px-2 text-slate-600 font-medium">
+                                              <div className="flex items-center gap-1">
+                                                <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
+                                                  {l.dateSoins ? formatDate(l.dateSoins) : '-'}
+                                                </span>
+                                                {lMatch.hasMatch && (
+                                                  <span title={lMatchTooltip} className="inline-flex items-center text-emerald-600">
+                                                    <Sparkles className="w-3 h-3" />
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </td>
+                                            <td className="py-2 px-2 font-semibold text-slate-900">
+                                              {l.nomAgent || l.nomBaseAssurance}
+                                            </td>
+                                            <td className="py-2 px-2 font-mono text-[11px] text-slate-600">
+                                              {l.immatriculation || '-'}
+                                            </td>
+                                            <td className="py-2 px-2 font-mono font-bold text-indigo-700">
+                                              {l.prestationNumero || '-'}
+                                            </td>
+                                            <td className="py-2 px-2">
+                                              {l.actesPayes && l.actesPayes.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                  {l.actesPayes.map((a, actIdx) => (
+                                                    <span key={actIdx} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-medium">
+                                                      <span className="font-bold">{a.code}</span>
+                                                      <span>: {formatMoney(a.montant)}</span>
+                                                    </span>
+                                                  ))}
+                                                </div>
+                                              ) : (
+                                                <span className="text-slate-500 text-[11px]">{l.commentaire || 'Soins réglés'}</span>
+                                              )}
+                                            </td>
+                                            <td className="py-2 px-2 text-right font-medium text-slate-900">
+                                              <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
+                                                {formatMoney(l.montantReclame || l.totalPaye + (l.ticketModerateur || 0))}
+                                              </span>
+                                            </td>
+                                            <td className="py-2 px-2 text-right text-amber-700 font-medium">
+                                              {formatMoney(l.ticketModerateur || 0)}
+                                            </td>
+                                            <td className="py-2 px-2 text-right font-bold text-emerald-700">
+                                              {formatMoney(l.montantPaye || l.totalPaye)}
+                                            </td>
+                                            <td className="py-2 px-2 text-right text-rose-600 font-medium">
+                                              {formatMoney(l.montantExclu || 0)}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* Grouped View: Regroupé par Personne + Date + Mêmes Actes */
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="bg-emerald-50/50 px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs">
+              <Layers className="w-4 h-4 text-emerald-700" />
+              <span className="font-bold text-slate-900">Synthèse Groupée par Patient, Date de Soin et Mêmes Actes</span>
+              <span className="text-slate-400">({groupedPaymentActs.length} groupes cumulés)</span>
+            </div>
+            <span className="text-[11px] text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-full font-medium">
+              Agrégation multi-bordereaux automatique
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
+                <tr>
+                  <th className="py-3 px-2 w-8"></th>
+
+                  {/* Date Soins */}
+                  <th
+                    onClick={() => handleGroupSort('dateSoins')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'dateSoins' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Date Soins</span>
+                      {renderGroupSortIcon('dateSoins')}
+                    </div>
+                  </th>
+
+                  {/* Patient / Assuré */}
+                  <th
+                    onClick={() => handleGroupSort('nomAgent')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'nomAgent' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Patient / Assuré</span>
+                      {renderGroupSortIcon('nomAgent')}
+                    </div>
+                  </th>
+
+                  {/* Acte / Prestation */}
+                  <th
+                    onClick={() => handleGroupSort('codeActe')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'codeActe' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Acte Médical</span>
+                      {renderGroupSortIcon('codeActe')}
+                    </div>
+                  </th>
+
+                  {/* Société */}
+                  <th
+                    onClick={() => handleGroupSort('societe')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'societe' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center">
+                      <span>Assureur</span>
+                      {renderGroupSortIcon('societe')}
+                    </div>
+                  </th>
+
+                  {/* Bordereau(x) */}
+                  <th className="py-3 px-3">Bordereau(x)</th>
+
+                  {/* Nb Règlements */}
+                  <th
+                    onClick={() => handleGroupSort('nombreLignes')}
+                    className={`py-3 px-2 text-center cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'nombreLignes' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-center">
+                      <span>Nb Règl.</span>
+                      {renderGroupSortIcon('nombreLignes')}
+                    </div>
+                  </th>
+
+                  {/* Total Réclamé */}
+                  <th
+                    onClick={() => handleGroupSort('totalReclame')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'totalReclame' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Total Réclamé</span>
+                      {renderGroupSortIcon('totalReclame')}
+                    </div>
+                  </th>
+
+                  {/* Ticket Modérateur */}
+                  <th
+                    onClick={() => handleGroupSort('ticketModerateur')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'ticketModerateur' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Ticket Mod.</span>
+                      {renderGroupSortIcon('ticketModerateur')}
+                    </div>
+                  </th>
+
+                  {/* Somme Payée (Net) */}
+                  <th
+                    onClick={() => handleGroupSort('totalPaye')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'totalPaye' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Somme Payée</span>
+                      {renderGroupSortIcon('totalPaye')}
+                    </div>
+                  </th>
+
+                  {/* Total Exclu */}
+                  <th
+                    onClick={() => handleGroupSort('totalExclu')}
+                    className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'totalExclu' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Exclusions</span>
+                      {renderGroupSortIcon('totalExclu')}
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {groupedPaymentActs.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="py-10 text-center text-slate-400 space-y-2">
+                      <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
+                      <div>Aucun acte regroupé ne correspond aux critères sélectionnés.</div>
+                      {activeFiltersCount > 0 && (
+                        <button
+                          onClick={handleResetFilters}
+                          className="text-xs text-emerald-600 hover:underline font-medium"
+                        >
+                          Réinitialiser tous les filtres
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  groupedPaymentActs.map((grp) => {
+                    const isGroupExpanded = !!expandedGroupRows[grp.groupKey];
+
+                    return (
+                      <React.Fragment key={grp.groupKey}>
+                        <tr className={`transition hover:bg-slate-50/80 ${isGroupExpanded ? 'bg-emerald-50/20 font-medium' : ''}`}>
+                          <td className="py-3 px-2 text-center">
+                            <button
+                              onClick={() => toggleGroupRow(grp.groupKey)}
+                              className="p-1 text-slate-400 hover:text-emerald-600 transition cursor-pointer"
+                              title="Afficher les règlements rattachés à ce groupe"
+                            >
+                              {isGroupExpanded ? <ChevronDown className="w-4 h-4 text-emerald-600 font-bold" /> : <ChevronRight className="w-4 h-4" />}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 text-slate-700 font-semibold whitespace-nowrap">
+                            {formatDate(grp.dateSoins)}
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-bold text-slate-900">{grp.nomAgent}</div>
+                            {grp.immatriculation && grp.immatriculation !== '-' && (
+                              <div className="text-[10px] text-slate-400 font-mono">{grp.immatriculation}</div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-200 text-[10px] font-bold">
+                                {grp.codeActe}
+                              </span>
+                              <span className="font-semibold text-slate-800">{grp.libelleActe}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-slate-700 font-medium">{grp.societeNom}</td>
+                          <td className="py-3 px-3">
+                            <div className="flex flex-wrap gap-1">
+                              {grp.bordereaux.map((b) => (
+                                <span
+                                  key={b.paiementId}
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 text-[10px] font-mono font-medium"
+                                  title={`Règlement du ${formatDate(b.datePaiement)} via ${b.modePaiement}`}
+                                >
+                                  {b.numeroBordereau}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="py-3 px-2 text-center">
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                              {grp.nombreLignes}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right text-slate-600 font-medium whitespace-nowrap">
+                            {formatMoney(grp.totalReclame)}
+                          </td>
+                          <td className="py-3 px-3 text-right text-amber-700 font-medium whitespace-nowrap">
+                            {formatMoney(grp.ticketModerateur)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
+                            {formatMoney(grp.totalPaye)}
+                          </td>
+                          <td className="py-3 px-3 text-right text-rose-600 font-medium whitespace-nowrap">
+                            {formatMoney(grp.totalExclu)}
+                          </td>
+                        </tr>
+
+                        {/* Nested Sub-Table for Grouped Row */}
+                        {isGroupExpanded && (
+                          <tr className="bg-slate-50/90 border-y border-slate-200/80">
+                            <td colSpan={11} className="p-4 pl-10">
+                              <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-2">
+                                <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between border-b border-slate-100 pb-2">
+                                  <span className="flex items-center gap-1.5 text-emerald-700">
+                                    <Boxes className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Détail des {grp.lignes.length} règlements cumulés pour {grp.nomAgent} - Acte {grp.codeActe}</span>
+                                  </span>
+                                  <span className="text-slate-400 font-mono text-[11px]">Soins du {formatDate(grp.dateSoins)}</span>
+                                </div>
+
+                                <table className="w-full text-xs">
+                                  <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                                    <tr>
+                                      <th className="py-2 px-2 text-left">N° Bordereau</th>
+                                      <th className="py-2 px-2 text-left">Date Règlement</th>
+                                      <th className="py-2 px-2 text-left">Réf Prescription</th>
+                                      <th className="py-2 px-2 text-left">Détail Acte / Commentaire</th>
+                                      <th className="py-2 px-2 text-right">Montant Réclamé</th>
+                                      <th className="py-2 px-2 text-right">Ticket Mod.</th>
+                                      <th className="py-2 px-2 text-right">Somme Payée</th>
+                                      <th className="py-2 px-2 text-right">Exclusion</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {grp.lignes.map((sub, sIdx) => (
+                                      <tr key={`${sub.ligneId}_${sIdx}`} className="hover:bg-slate-50">
+                                        <td className="py-2 px-2 font-bold font-mono text-emerald-700">
+                                          {sub.numeroBordereau}
+                                        </td>
+                                        <td className="py-2 px-2 text-slate-600">
+                                          {formatDate(sub.datePaiement)}
+                                        </td>
+                                        <td className="py-2 px-2 font-mono font-bold text-indigo-700">
+                                          {sub.prestationNumero || '-'}
+                                        </td>
+                                        <td className="py-2 px-2 text-slate-600">
+                                          {sub.commentaire || `${sub.libelleActe || sub.codeActe}`}
+                                        </td>
+                                        <td className="py-2 px-2 text-right text-slate-800 font-medium">
+                                          {formatMoney(sub.montantReclame)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right text-amber-700 font-medium">
+                                          {formatMoney(sub.ticketModerateur)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right font-bold text-emerald-700">
+                                          {formatMoney(sub.totalPaye)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right text-rose-600 font-medium">
+                                          {formatMoney(sub.montantExclu)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Modal: View Bordereau Details */}
       {viewingPaiement && (
@@ -1296,32 +2005,96 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             </div>
 
             <div className="space-y-2">
-              <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">Lignes & Prestations Réglées</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">Lignes & Prestations Réglées ({viewingPaiement.lignes.length} actes)</h4>
+                <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+                  <Layers className="w-3 h-3 text-emerald-600" />
+                  <label className="text-slate-700 font-medium flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={groupLinesInBordereau}
+                      onChange={(e) => setGroupLinesInBordereau(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3 h-3 cursor-pointer"
+                    />
+                    <span>Regrouper (même personne, date et acte)</span>
+                  </label>
+                </div>
+              </div>
+
               <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-100 text-slate-600">
-                    <tr>
-                      <th className="p-2 text-left">Matricule</th>
-                      <th className="p-2 text-left">Assuré</th>
-                      <th className="p-2 text-right">Montant Réglé</th>
-                      <th className="p-2 text-right">Ticket Modérateur</th>
-                      <th className="p-2 text-right">Montant Exclu</th>
-                      <th className="p-2 text-left">Observations</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {viewingPaiement.lignes.map(l => (
-                      <tr key={l.id}>
-                        <td className="p-2 font-mono font-medium text-indigo-700">{l.immatriculation}</td>
-                        <td className="p-2 font-semibold text-slate-800">{l.nomBaseAssurance}</td>
-                        <td className="p-2 text-right font-bold text-emerald-700">{formatMoney(l.totalPaye)}</td>
-                        <td className="p-2 text-right text-amber-700 font-medium">{formatMoney(l.ticketModerateur)}</td>
-                        <td className="p-2 text-right text-rose-600 font-medium">{formatMoney(l.montantExclu)}</td>
-                        <td className="p-2 text-slate-500 text-[11px]">{l.commentaire || '-'}</td>
+                {groupLinesInBordereau ? (
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-100 text-slate-600">
+                      <tr>
+                        <th className="p-2 text-left">Date Soins</th>
+                        <th className="p-2 text-left">Patient / Assuré</th>
+                        <th className="p-2 text-left">Matricule</th>
+                        <th className="p-2 text-left">Acte Regroupé</th>
+                        <th className="p-2 text-center">Nb Actes</th>
+                        <th className="p-2 text-right">Total Réclamé</th>
+                        <th className="p-2 text-right">Ticket Modérateur</th>
+                        <th className="p-2 text-right">Montant Réglé (Net)</th>
+                        <th className="p-2 text-right">Montant Exclu</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {groupLinesForSinglePayment(viewingPaiement.lignes, viewingPaiement.datePaiement).map(grp => (
+                        <tr key={grp.groupKey}>
+                          <td className="p-2 text-slate-600 font-medium">{formatDate(grp.dateSoins)}</td>
+                          <td className="p-2 font-semibold text-slate-900">{grp.nomAgent}</td>
+                          <td className="p-2 font-mono text-[11px] text-slate-600">{grp.immatriculation}</td>
+                          <td className="p-2">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold text-[10px] mr-1">
+                              {grp.codeActe}
+                            </span>
+                            <span className="text-slate-700">{grp.libelleActe}</span>
+                          </td>
+                          <td className="p-2 text-center font-bold text-slate-700">{grp.nombreActes}</td>
+                          <td className="p-2 text-right text-slate-700 font-medium">{formatMoney(grp.totalReclame)}</td>
+                          <td className="p-2 text-right text-amber-700 font-medium">{formatMoney(grp.ticketModerateur)}</td>
+                          <td className="p-2 text-right font-bold text-emerald-700">{formatMoney(grp.totalPaye)}</td>
+                          <td className="p-2 text-right text-rose-600 font-medium">{formatMoney(grp.montantExclu)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-100 text-slate-600">
+                      <tr>
+                        <th className="p-2 text-left">Date Soins</th>
+                        <th className="p-2 text-left">Matricule</th>
+                        <th className="p-2 text-left">Assuré</th>
+                        <th className="p-2 text-left">Acte / Commentaire</th>
+                        <th className="p-2 text-right">Montant Réglé</th>
+                        <th className="p-2 text-right">Ticket Modérateur</th>
+                        <th className="p-2 text-right">Montant Exclu</th>
+                        <th className="p-2 text-left">Observations</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {viewingPaiement.lignes.map(l => (
+                        <tr key={l.id}>
+                          <td className="p-2 text-slate-600 font-medium">{l.dateSoins ? formatDate(l.dateSoins) : '-'}</td>
+                          <td className="p-2 font-mono font-medium text-indigo-700">{l.immatriculation || '-'}</td>
+                          <td className="p-2 font-semibold text-slate-800">{l.nomAgent || l.nomBaseAssurance}</td>
+                          <td className="p-2">
+                            {l.codeActe ? (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold text-[10px] mr-1">
+                                {l.codeActe}
+                              </span>
+                            ) : null}
+                            <span className="text-slate-600 text-[11px]">{l.libelleActe || l.commentaire || '-'}</span>
+                          </td>
+                          <td className="p-2 text-right font-bold text-emerald-700">{formatMoney(l.totalPaye)}</td>
+                          <td className="p-2 text-right text-amber-700 font-medium">{formatMoney(l.ticketModerateur)}</td>
+                          <td className="p-2 text-right text-rose-600 font-medium">{formatMoney(l.montantExclu)}</td>
+                          <td className="p-2 text-slate-500 text-[11px]">{l.commentaire || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
 
