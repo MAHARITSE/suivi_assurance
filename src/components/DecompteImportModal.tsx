@@ -7,6 +7,7 @@ import {
   RefreshCw, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
   Building2, 
   Receipt,
   Search,
@@ -22,7 +23,11 @@ import {
   ChevronRight,
   ArrowLeft,
   FileSpreadsheet,
-  ScanLine
+  ScanLine,
+  Calendar,
+  CalendarCheck,
+  Tag,
+  Filter
 } from 'lucide-react';
 import { 
   Paiement, 
@@ -50,7 +55,7 @@ interface DecompteImportModalProps {
   onSavePaiement: (newPaiement: Paiement, updatedPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
 }
 
-interface MatchCandidate {
+export interface MatchCandidate {
   prestationId: string;
   prestationNum: string;
   prestationDate: string;
@@ -69,7 +74,7 @@ interface MatchCandidate {
   resteAPayer: number;
 }
 
-interface SettlementRowItem {
+export interface SettlementRowItem {
   rowId: string;
   originalIndex: number;
   dateSoins: string;
@@ -87,6 +92,121 @@ interface SettlementRowItem {
   matchedCandidate: MatchCandidate | null;
   createNewPrestation: boolean;
   selected: boolean;
+}
+
+export type ConfrontationType = 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED';
+
+export interface ConfrontationDetails {
+  type: ConfrontationType;
+  isSameDate: boolean;
+  isSameMontantBrut: boolean;
+  isSameMontantNet: boolean;
+  isSameMontant: boolean;
+  diffMontantBrut: number;
+  label: string;
+  badgeClass: string;
+  cardBorderClass: string;
+  rowBorderClass: string;
+  tagColor: string;
+}
+
+export function getConfrontationDetails(
+  dateSoins: string,
+  montantBrut: number,
+  netAPayer: number,
+  candidate: MatchCandidate | null
+): ConfrontationDetails {
+  if (!candidate) {
+    return {
+      type: 'UNLINKED',
+      isSameDate: false,
+      isSameMontantBrut: false,
+      isSameMontantNet: false,
+      isSameMontant: false,
+      diffMontantBrut: 0,
+      label: 'Non rattaché (Créer)',
+      badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
+      cardBorderClass: 'border-slate-200 bg-slate-50/60',
+      rowBorderClass: 'border-l-4 border-l-slate-300',
+      tagColor: 'slate'
+    };
+  }
+
+  const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
+  const cleanCandDate = (candidate.prestationDate || '').trim().substring(0, 10);
+  const isSameDate = Boolean(cleanDateSoins && cleanCandDate && cleanDateSoins === cleanCandDate);
+
+  const brut = Number(montantBrut || netAPayer || 0);
+  const candBrut = Number(candidate.montantInitial || 0);
+  const candRemb = Number(candidate.montantARembourser || 0);
+  const candReste = Number(candidate.resteAPayer || 0);
+
+  const isSameMontantBrut = Math.abs(brut - candBrut) < 2;
+  const isSameMontantNet = Math.abs(netAPayer - candRemb) < 2 || Math.abs(netAPayer - candReste) < 2;
+  const isSameMontant = isSameMontantBrut || isSameMontantNet;
+  const diffMontantBrut = brut - candBrut;
+
+  if (isSameDate && isSameMontant) {
+    return {
+      type: 'PERFECT',
+      isSameDate,
+      isSameMontantBrut,
+      isSameMontantNet,
+      isSameMontant,
+      diffMontantBrut,
+      label: 'Même Date & Même Montant',
+      badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+      cardBorderClass: 'border-emerald-300 bg-emerald-50/70',
+      rowBorderClass: 'border-l-4 border-l-emerald-500 bg-emerald-50/30',
+      tagColor: 'emerald'
+    };
+  }
+
+  if (isSameDate && !isSameMontant) {
+    return {
+      type: 'SAME_DATE',
+      isSameDate,
+      isSameMontantBrut,
+      isSameMontantNet,
+      isSameMontant,
+      diffMontantBrut,
+      label: 'Même Date (Montant différent)',
+      badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
+      cardBorderClass: 'border-sky-300 bg-sky-50/60',
+      rowBorderClass: 'border-l-4 border-l-sky-500 bg-sky-50/20',
+      tagColor: 'sky'
+    };
+  }
+
+  if (!isSameDate && isSameMontant) {
+    return {
+      type: 'SAME_AMOUNT',
+      isSameDate,
+      isSameMontantBrut,
+      isSameMontantNet,
+      isSameMontant,
+      diffMontantBrut,
+      label: 'Même Montant (Date différente)',
+      badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
+      cardBorderClass: 'border-purple-300 bg-purple-50/60',
+      rowBorderClass: 'border-l-4 border-l-purple-500 bg-purple-50/20',
+      tagColor: 'purple'
+    };
+  }
+
+  return {
+    type: 'VERIFY',
+    isSameDate,
+    isSameMontantBrut,
+    isSameMontantNet,
+    isSameMontant,
+    diffMontantBrut,
+    label: 'À vérifier (Date & Montant diffèrent)',
+    badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
+    cardBorderClass: 'border-amber-300 bg-amber-50/60',
+    rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
+    tagColor: 'amber'
+  };
 }
 
 function getAppropriateDecompteFallback(filename: string): ParsedFactureAssurance {
@@ -111,6 +231,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<SettlementRowItem[]>([]);
+  const [confrontFilter, setConfrontFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED'>('ALL');
   
   // Search / Change Link modal state
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
@@ -125,6 +246,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setErrorMessage(null);
     setSearchingRowId(null);
     setIsProcessing(false);
+    setConfrontFilter('ALL');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -219,10 +341,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   }, [prestations, personnes, societes, familles]);
 
   // Intelligent Automatic Matcher for a settlement line
+  // Confronts date of care against prescription act date, and gross amount without ticket moderator against prescription act gross amount
   const autoMatchSettlementLine = (
     matricule: string, 
     nomPrenom: string, 
-    actCode: string, 
+    actCode: string,
+    dateSoins: string,
+    montantBrut: number,
     netMontant: number
   ): MatchCandidate | null => {
     if (allEligibleActs.length === 0) return null;
@@ -230,51 +355,80 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     const cleanMatricule = (matricule || '').replace(/\s+/g, '').toLowerCase();
     const cleanNom = (nomPrenom || '').toLowerCase().trim();
     const cleanCode = (actCode || '').toUpperCase().trim();
+    const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
+    const brutMontant = Number(montantBrut || netMontant || 0);
 
-    // 1. Try match by Matricule + Act Code
-    if (cleanMatricule) {
-      const matMatches = allEligibleActs.filter(cand => 
-        cand.matricule.replace(/\s+/g, '').toLowerCase() === cleanMatricule
+    let bestCandidate: MatchCandidate | null = null;
+    let highestScore = -1;
+
+    allEligibleActs.forEach(cand => {
+      let score = 0;
+      const candMatricule = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+      const candNom = (cand.personneNom || '').toLowerCase().trim();
+      const candDate = (cand.prestationDate || '').trim().substring(0, 10);
+      const candCode = (cand.codeActe || '').toUpperCase().trim();
+      const candBrut = Number(cand.montantInitial || 0);
+      const candRemb = Number(cand.montantARembourser || 0);
+      const candReste = Number(cand.resteAPayer || 0);
+
+      // 1. Patient matching
+      const exactMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && cleanMatricule === candMatricule;
+      const partialMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && (cleanMatricule.includes(candMatricule) || candMatricule.includes(cleanMatricule));
+      const nameMatch = cleanNom && (candNom.includes(cleanNom) || cleanNom.includes(candNom));
+
+      if (exactMat) score += 100;
+      else if (partialMat) score += 80;
+      else if (nameMatch) score += 75;
+      else {
+        // Skip candidate if no patient relation
+        return;
+      }
+
+      // 2. Date de soins vs Date de l'acte dans la prescription
+      const isSameDate = Boolean(cleanDateSoins && candDate && cleanDateSoins === candDate);
+      if (isSameDate) {
+        score += 70;
+      }
+
+      // 3. Montant sans ticket modérateur (Montant brut initial)
+      const isSameGrossAmount = Math.abs(brutMontant - candBrut) < 2;
+      const isSameNetAmount = Math.abs(netMontant - candRemb) < 2 || Math.abs(netMontant - candReste) < 2;
+
+      if (isSameGrossAmount) {
+        score += 70;
+      } else if (isSameNetAmount) {
+        score += 45;
+      } else if (candBrut > 0 && Math.abs(brutMontant - candBrut) / candBrut <= 0.15) {
+        score += 20;
+      }
+
+      // 4. Code / Famille Acte matching
+      const exactCode = cleanCode && candCode && (cleanCode === candCode);
+      const aliasMatch = cleanCode && candCode && (
+        (cleanCode.includes('PHAR') && candCode === 'MEDIC') ||
+        (cleanCode.includes('MEDIC') && candCode === 'PHAR') ||
+        (cleanCode.includes('LABO') && candCode === 'EB') ||
+        (cleanCode.includes('EB') && candCode === 'LABO') ||
+        (cleanCode.includes('DENT') && (candCode === 'DC' || candCode === 'DK')) ||
+        (cleanCode.includes('CONS') && candCode === 'CG') ||
+        (cleanCode.includes('CG') && candCode === 'CONS')
       );
 
-      if (matMatches.length > 0) {
-        // Look for matching act code
-        const codeMatch = matMatches.find(c => 
-          c.codeActe.toUpperCase() === cleanCode ||
-          (cleanCode.includes('PHAR') && c.codeActe === 'MEDIC') ||
-          (cleanCode.includes('MEDIC') && c.codeActe === 'PHAR') ||
-          (cleanCode.includes('LABO') && c.codeActe === 'EB') ||
-          (cleanCode.includes('DENT') && (c.codeActe === 'DC' || c.codeActe === 'DK'))
-        );
-        if (codeMatch) return codeMatch;
+      if (exactCode) score += 40;
+      else if (aliasMatch) score += 30;
 
-        // Otherwise if single open act for this matricule, return it
-        if (matMatches.length === 1) return matMatches[0];
-
-        // Or closest remaining amount
-        return matMatches.sort((a, b) => Math.abs(a.resteAPayer - netMontant) - Math.abs(b.resteAPayer - netMontant))[0];
+      // Bonus for total perfect match (Same Patient + Same Date + Same Gross Amount)
+      if (isSameDate && isSameGrossAmount) {
+        score += 60;
       }
-    }
 
-    // 2. Try match by Name + Act Code
-    if (cleanNom) {
-      const nameMatches = allEligibleActs.filter(cand => {
-        const cNom = cand.personneNom.toLowerCase();
-        return cNom.includes(cleanNom) || cleanNom.includes(cNom);
-      });
-
-      if (nameMatches.length > 0) {
-        const codeMatch = nameMatches.find(c => 
-          c.codeActe.toUpperCase() === cleanCode ||
-          (cleanCode.includes('PHAR') && c.codeActe === 'MEDIC') ||
-          (cleanCode.includes('MEDIC') && c.codeActe === 'PHAR')
-        );
-        if (codeMatch) return codeMatch;
-        return nameMatches[0];
+      if (score > highestScore && score >= 100) {
+        highestScore = score;
+        bestCandidate = cand;
       }
-    }
+    });
 
-    return null;
+    return bestCandidate;
   };
 
   const processLoadedDocument = (doc: ParsedFactureAssurance) => {
@@ -292,7 +446,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           const actPart = Math.round((l.participation || 0) * partRatio);
           const actNet = Math.max(0, actMontant - actPart);
 
-          const matched = autoMatchSettlementLine(l.matricule, l.nomPrenom, act.code, actNet);
+          const matched = autoMatchSettlementLine(
+            l.matricule, 
+            l.nomPrenom, 
+            act.code || 'CONS', 
+            l.dateSoins, 
+            actMontant, 
+            actNet
+          );
 
           builtRows.push({
             rowId: `row-${idx}-${actIdx}`,
@@ -315,7 +476,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         });
       } else {
         const actCode = (l.actesTexte || 'CONS').substring(0, 6).toUpperCase();
-        const matched = autoMatchSettlementLine(l.matricule, l.nomPrenom, actCode, l.netAPayer);
+        const matched = autoMatchSettlementLine(
+          l.matricule, 
+          l.nomPrenom, 
+          actCode, 
+          l.dateSoins, 
+          l.montantBrut, 
+          l.netAPayer
+        );
 
         builtRows.push({
           rowId: `row-${idx}`,
@@ -389,7 +557,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 return '';
               };
 
-              const rawBord = String(getVal(['Ref_Bordereau', 'RefBordereau', 'Bordereau', 'N° Bordereau', 'Numero_Reglement', 'Ref_Paiement']) || '').trim();
+              const rawBord = String(getVal(['Ref_Bordereau', 'RefBordereau', 'Bordereau', 'N° Bordereau', 'Numero_Reglement', 'Ref_Paiement', 'Ref_Decompte']) || '').trim();
               if (rawBord && !inferredBordereau) inferredBordereau = rawBord;
 
               const rawOrg = String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client']) || '').trim();
@@ -411,14 +579,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
               const matricule = String(getVal(['Matricule', 'N° Matricule', 'Immatriculation', 'Code']) || '').trim();
               const dateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || inferredDateReglement).trim();
-              const montantBrut = Number(getVal(['Montant_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Facture', 'Total Prestation'])) || 0;
+              const montantBrut = Number(getVal(['Montant_Reclame_Brut', 'Montant_Brut', 'Montant Total Brut', 'Montant Facture', 'Total Prestation', 'Montant Reclame'])) || 0;
               const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation'])) || 0;
-              const netAPayer = Number(getVal(['Somme_Payee_Net', 'Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé', 'Somme Payée'])) || (montantBrut > 0 ? (montantBrut - participation) : 0);
-              const montantExclu = Number(getVal(['Montant_Exclu', 'Montant Exclu', 'Exclu', 'Rejet'])) || 0;
+              const netAPayer = Number(getVal(['Montant_Paye_Regle', 'Somme_Payee_Net', 'Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé', 'Somme Payée'])) || (montantBrut > 0 ? (montantBrut - participation) : 0);
+              const montantExclu = Number(getVal(['Montant_Exclu', 'Montant_Exclu_Rejet', 'Montant Exclu', 'Exclu', 'Rejet'])) || 0;
               
               const actCode = String(getVal(['Code_Acte', 'Code Acte', 'Acte', 'Code']) || 'CONS').trim().toUpperCase();
               const actLibelle = String(getVal(['Libelle_Acte', 'Libellé Acte', 'Acte médicale/Prix', 'Actes Médicaux', 'Prestation', 'Libellé']) || actCode).trim();
-              const observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif']) || 'Import Excel').trim();
+              const observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif', 'Motif_Observation']) || 'Import Excel').trim();
 
               return {
                 numeroLigne: idx + 1,
@@ -477,8 +645,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         if (contentType.includes('application/json')) {
           json = await response.json();
         } else {
-          const text = await response.text();
-          console.warn('Non-JSON response from /api/parse-invoice:', text.substring(0, 150));
+          console.warn('Non-JSON response from /api/parse-invoice');
           json = { success: true, data: getAppropriateDecompteFallback(file.name) };
         }
 
@@ -516,22 +683,71 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setActSearchQuery('');
   };
 
-  // Filtered search list inside manual match modal
-  const filteredSearchCandidates = useMemo(() => {
-    if (!actSearchQuery.trim()) return allEligibleActs;
-    const q = actSearchQuery.toLowerCase().trim();
-    return allEligibleActs.filter(cand => 
-      cand.personneNom.toLowerCase().includes(q) ||
-      cand.matricule.toLowerCase().includes(q) ||
-      cand.prestationNum.toLowerCase().includes(q) ||
-      cand.codeActe.toLowerCase().includes(q) ||
-      cand.libelleActe.toLowerCase().includes(q) ||
-      (cand.sousSociete && cand.sousSociete.toLowerCase().includes(q)) ||
-      (cand.societeNom && cand.societeNom.toLowerCase().includes(q))
-    );
-  }, [allEligibleActs, actSearchQuery]);
-
   const activeSearchingRow = rows.find(r => r.rowId === searchingRowId);
+
+  // Filtered search list inside manual match modal, scored by match quality
+  const filteredSearchCandidates = useMemo(() => {
+    let list = allEligibleActs;
+    if (actSearchQuery.trim()) {
+      const q = actSearchQuery.toLowerCase().trim();
+      list = allEligibleActs.filter(cand => 
+        cand.personneNom.toLowerCase().includes(q) ||
+        cand.matricule.toLowerCase().includes(q) ||
+        cand.prestationNum.toLowerCase().includes(q) ||
+        cand.codeActe.toLowerCase().includes(q) ||
+        cand.libelleActe.toLowerCase().includes(q) ||
+        (cand.sousSociete && cand.sousSociete.toLowerCase().includes(q)) ||
+        (cand.societeNom && cand.societeNom.toLowerCase().includes(q))
+      );
+    }
+
+    if (!activeSearchingRow) return list;
+
+    // Sort so candidates with same date and same amount appear first
+    return [...list].sort((a, b) => {
+      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a);
+      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b);
+
+      const scoreMap: Record<ConfrontationType, number> = {
+        PERFECT: 100,
+        SAME_DATE: 70,
+        SAME_AMOUNT: 60,
+        VERIFY: 20,
+        UNLINKED: 0
+      };
+
+      return (scoreMap[detailsB.type] || 0) - (scoreMap[detailsA.type] || 0);
+    });
+  }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
+
+  // Statistics for confrontation categories
+  const confrontStats = useMemo(() => {
+    let perfect = 0;
+    let sameDate = 0;
+    let sameAmount = 0;
+    let verify = 0;
+    let unlinked = 0;
+
+    rows.forEach(r => {
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      if (details.type === 'PERFECT') perfect++;
+      else if (details.type === 'SAME_DATE') sameDate++;
+      else if (details.type === 'SAME_AMOUNT') sameAmount++;
+      else if (details.type === 'VERIFY') verify++;
+      else if (details.type === 'UNLINKED') unlinked++;
+    });
+
+    return { perfect, sameDate, sameAmount, verify, unlinked, total: rows.length };
+  }, [rows]);
+
+  // Filtered rows for display in table
+  const displayedRows = useMemo(() => {
+    if (confrontFilter === 'ALL') return rows;
+    return rows.filter(r => {
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      return details.type === confrontFilter;
+    });
+  }, [rows, confrontFilter]);
 
   // Final Validation
   const handleValidateAndSave = () => {
@@ -707,8 +923,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   const selectedRows = rows.filter(r => r.selected);
-  const matchedCount = rows.filter(r => r.selected && r.matchedCandidate).length;
-  const unlinkedCount = rows.filter(r => r.selected && !r.matchedCandidate).length;
   const totalSelectedPaye = selectedRows.reduce((s, r) => s + r.netAPayer, 0);
 
   if (!isOpen) return null;
@@ -737,7 +951,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 {parsedDoc ? `Rapprochement Décompte : ${parsedDoc.numeroBordereau || parsedDoc.clientDoit}` : 'Importation Décompte Règlement (ASCOMA, MCI CARE, BSA)'}
               </h3>
               <p className="text-xs text-slate-500">
-                {parsedDoc ? `${selectedRows.length} actes à rapprocher avec les prestations en attente` : 'Rapprochement automatique des règlements reçus avec les actes prescrits ouverts (exclut les actes déjà réglés).'}
+                {parsedDoc 
+                  ? `Confrontation intelligente par Date de Soins et Montant Brut sans ticket modérateur (${selectedRows.length} actes).`
+                  : 'Rapprochement automatique des règlements avec les actes prescrits ouverts par comparaison de date et montant initial.'}
               </p>
             </div>
           </div>
@@ -749,81 +965,78 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        {/* Modal Content */}
+        <div className="flex-1 overflow-y-auto p-6">
           {errorMessage && (
-            <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800">
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 font-medium">
+              <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
           {!parsedDoc && (
-            <div className="space-y-5">
-              {/* Import Mode Selector */}
-              <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setImportMode('excel')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
-                    importMode === 'excel'
-                      ? 'bg-white text-emerald-700 shadow-xs border border-slate-200/80'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                  <span>Mode Excel (.xlsx, .csv)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportMode('pdf')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
-                    importMode === 'pdf'
-                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <ScanLine className="h-4 w-4 text-indigo-600" />
-                  <span>Mode Scan PDF / Image</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportMode('sample')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
-                    importMode === 'sample'
-                      ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <Sparkles className="h-4 w-4 text-amber-500" />
-                  <span>Exemples Décomptes Reçus</span>
-                </button>
+            <div className="space-y-6">
+              {/* Import Mode Tabs */}
+              <div className="flex items-center justify-center">
+                <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('excel')}
+                    className={`flex items-center gap-2 rounded-lg px-4 py-2 transition ${
+                      importMode === 'excel'
+                        ? 'bg-white text-emerald-800 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                    <span>Fichier Excel (.xlsx, .csv)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('pdf')}
+                    className={`flex items-center gap-2 rounded-lg px-4 py-2 transition ${
+                      importMode === 'pdf'
+                        ? 'bg-white text-indigo-700 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <ScanLine className="h-4 w-4 text-indigo-600" />
+                    <span>Scan PDF / Image OCR</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('sample')}
+                    className={`flex items-center gap-2 rounded-lg px-4 py-2 transition ${
+                      importMode === 'sample'
+                        ? 'bg-white text-slate-900 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Sparkles className="h-4 w-4 text-amber-500" />
+                    <span>Décomptes Prédéfinis (Démo)</span>
+                  </button>
+                </div>
               </div>
 
-              {/* MODE: EXCEL */}
+              {/* MODE: EXCEL IMPORT */}
               {importMode === 'excel' && (
                 <div className="space-y-4">
-                  {/* Template download banner */}
-                  <div className="flex items-center justify-between rounded-xl bg-emerald-50/80 border border-emerald-200 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700 mt-0.5">
-                        <FileSpreadsheet className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-emerald-950">Modèle Excel pour Règlements / Décomptes</h4>
-                        <p className="text-xs text-emerald-800 mt-0.5 max-w-lg">
-                          Téléchargez le modèle Excel structuré : 
-                          <strong> Date_Reglement, Date_Soins, Nom_Agent, Matricule, Code_Acte, Libelle_Acte, Montant_Brut, Ticket_Moderateur, Somme_Payee_Net</strong>...
-                        </p>
-                      </div>
+                  <div className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-950">
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="h-4 w-4 text-emerald-700 shrink-0" />
+                      <span>
+                        Importez vos bordereaux de règlement au format Excel. La confrontation s'effectue automatiquement sur la <strong>Date des soins</strong> et le <strong>Montant brut (sans ticket modérateur)</strong>.
+                      </span>
                     </div>
                     <button
                       type="button"
-                      onClick={() => downloadDecomptesExcelTemplate()}
-                      className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 shadow-xs shrink-0"
+                      onClick={downloadDecomptesExcelTemplate}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 font-bold hover:bg-emerald-100 text-xs shrink-0 shadow-2xs transition"
                     >
-                      <Download className="h-4 w-4" />
-                      <span>Télécharger le modèle Excel</span>
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Télécharger Modèle Excel</span>
                     </button>
                   </div>
 
@@ -845,10 +1058,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-slate-900">
-                        {isProcessing ? 'Rapprochement des actes en cours...' : 'Déposez votre fichier Excel de décompte (.xlsx, .xls, .csv)'}
+                        {isProcessing ? 'Confrontation des actes en cours...' : 'Déposez votre fichier Excel de décompte (.xlsx, .xls, .csv)'}
                       </h4>
                       <p className="text-xs text-slate-500 mt-1 max-w-md">
-                        Rattache automatiquement chaque ligne de paiement à l'acte prescrit correspondant et exclut les actes déjà réglés.
+                        Rapprochement automatique par date de soins et montant initial sans ticket modérateur. Exclut les actes déjà réglés.
                       </p>
                     </div>
                     <input
@@ -862,7 +1075,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       type="button"
                       onClick={() => excelInputRef.current?.click()}
                       disabled={isProcessing}
-                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs"
+                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer"
                     >
                       Parcourir un fichier Excel
                     </button>
@@ -889,7 +1102,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-slate-900">
-                      {isProcessing ? 'Traitement IA et rapprochement des actes...' : 'Déposez votre décompte numérisé (PDF ou Image)'}
+                      {isProcessing ? 'Traitement IA et confrontation des actes...' : 'Déposez votre décompte numérisé (PDF ou Image)'}
                     </h4>
                     <p className="text-xs text-slate-500 mt-1 max-w-md">
                       Reconnaît les formats ASCOMA, MCI CARE, BSA, associe chaque ligne à l'acte prescrit et met à jour le solde restant.
@@ -906,7 +1119,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isProcessing}
-                    className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 shadow-xs"
+                    className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 shadow-xs cursor-pointer"
                   >
                     Parcourir un fichier PDF ou Image
                   </button>
@@ -926,7 +1139,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       type="button"
                       onClick={() => handleLoadPredefined('ascoma')}
                       disabled={isProcessing}
-                      className="flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 text-left transition hover:bg-indigo-50 hover:border-indigo-300"
+                      className="flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 text-left transition hover:bg-indigo-50 hover:border-indigo-300 cursor-pointer"
                     >
                       <div>
                         <div className="text-xs font-bold text-indigo-950">ASCOMA Tiers Payant</div>
@@ -939,7 +1152,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       type="button"
                       onClick={() => handleLoadPredefined('mci')}
                       disabled={isProcessing}
-                      className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-left transition hover:bg-blue-50 hover:border-blue-300"
+                      className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-left transition hover:bg-blue-50 hover:border-blue-300 cursor-pointer"
                     >
                       <div>
                         <div className="text-xs font-bold text-blue-950">MCI CARE (Groupe Axian)</div>
@@ -952,7 +1165,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       type="button"
                       onClick={() => handleLoadPredefined('bsa')}
                       disabled={isProcessing}
-                      className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 text-left transition hover:bg-emerald-50 hover:border-emerald-300"
+                      className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 text-left transition hover:bg-emerald-50 hover:border-emerald-300 cursor-pointer"
                     >
                       <div>
                         <div className="text-xs font-bold text-emerald-950">BSA / ASK GS (Relevé)</div>
@@ -979,11 +1192,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <strong className="text-emerald-700 font-bold text-sm">{parsedDoc.numeroBordereau || parsedDoc.numeroFacture}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Rapprochement Actes</span>
+                  <span className="text-slate-500 block">Lignes à Régler</span>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="font-bold text-emerald-700">{matchedCount} rattachés</span>
+                    <span className="font-bold text-emerald-700">{confrontStats.perfect + confrontStats.sameDate + confrontStats.sameAmount} rattachées</span>
                     <span className="text-slate-400">•</span>
-                    <span className="font-semibold text-amber-700">{unlinkedCount} non rattachés</span>
+                    <span className="font-semibold text-amber-700">{confrontStats.verify + confrontStats.unlinked} à vérifier</span>
                   </div>
                 </div>
                 <div>
@@ -992,32 +1205,112 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
               </div>
 
-              {/* Matching Toolbar info */}
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-50/60 border border-indigo-100 p-3 text-xs text-indigo-900">
-                <div className="flex items-center gap-2">
-                  <Info className="h-4 w-4 shrink-0 text-indigo-600" />
-                  <span>
-                    Chaque ligne est rattachée à un acte médical prescrit ouvert. <strong>Les actes déjà réglés à 100% sont masqués</strong>.
-                  </span>
+              {/* Visual Color Legend Bar */}
+              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-700 text-xs">
+                    <Tag className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Légende du Jeu de Couleurs (Confrontation Date & Montant Brut sans ticket modérateur) :</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleToggleSelectAll(true)}
+                      className="text-xs text-indigo-700 font-semibold hover:underline"
+                    >
+                      Tout cocher
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      onClick={() => handleToggleSelectAll(false)}
+                      className="text-xs text-slate-500 hover:underline"
+                    >
+                      Tout décocher
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+
+                {/* Filter Chips with counts & color codes */}
+                <div className="flex flex-wrap gap-2 pt-1">
                   <button
-                    onClick={() => handleToggleSelectAll(true)}
-                    className="text-xs text-indigo-700 font-semibold hover:underline"
+                    onClick={() => setConfrontFilter('ALL')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
+                      confrontFilter === 'ALL'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                    }`}
                   >
-                    Tout cocher
+                    <span>Tous</span>
+                    <span className="bg-white/20 px-1.5 py-0.2 rounded-full text-[10px]">{confrontStats.total}</span>
                   </button>
-                  <span className="text-slate-300">|</span>
+
                   <button
-                    onClick={() => handleToggleSelectAll(false)}
-                    className="text-xs text-slate-500 hover:underline"
+                    onClick={() => setConfrontFilter('PERFECT')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
+                      confrontFilter === 'PERFECT'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                    }`}
                   >
-                    Tout décocher
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>Même Date & Même Montant</span>
+                    <span className="bg-emerald-200/70 text-emerald-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.perfect}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setConfrontFilter('SAME_DATE')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
+                      confrontFilter === 'SAME_DATE'
+                        ? 'bg-sky-700 text-white border-sky-700 shadow-2xs'
+                        : 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+                    <span>Même Date (Montant diff.)</span>
+                    <span className="bg-sky-200/70 text-sky-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.sameDate}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setConfrontFilter('SAME_AMOUNT')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
+                      confrontFilter === 'SAME_AMOUNT'
+                        ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
+                        : 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                    <span>Même Montant (Date diff.)</span>
+                    <span className="bg-purple-200/70 text-purple-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.sameAmount}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setConfrontFilter('VERIFY')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
+                      confrontFilter === 'VERIFY'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                        : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span>À Vérifier (Écarts)</span>
+                    <span className="bg-amber-200/70 text-amber-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.verify}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setConfrontFilter('UNLINKED')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
+                      confrontFilter === 'UNLINKED'
+                        ? 'bg-slate-700 text-white border-slate-700 shadow-2xs'
+                        : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    <span>Non Rattachés (Créer)</span>
+                    <span className="bg-slate-200 text-slate-800 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.unlinked}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Table of settlement lines with live act attachment */}
+              {/* Table of settlement lines with live act attachment & color-coding */}
               <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
@@ -1032,20 +1325,22 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       </th>
                       <th className="py-2.5 px-3">Date Soins</th>
                       <th className="py-2.5 px-3">Adhérent & Matricule</th>
-                      <th className="py-2.5 px-3">Acte Décompte</th>
-                      <th className="py-2.5 px-3 min-w-[280px]">Acte Prescrit Rattaché (Prestations)</th>
-                      <th className="py-2.5 px-3 text-right">Montant Réglé</th>
+                      <th className="py-2.5 px-3">Acte Règlement (Brut sans TM)</th>
+                      <th className="py-2.5 px-3 min-w-[320px]">Acte Prescrit Rattaché (Confrontation)</th>
+                      <th className="py-2.5 px-3 text-right">Net Réglé</th>
                       <th className="py-2.5 px-3 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {rows.map((row) => {
+                    {displayedRows.map((row) => {
                       const matched = row.matchedCandidate;
+                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched);
+
                       return (
                         <tr
                           key={row.rowId}
-                          className={`hover:bg-slate-50/80 transition ${
-                            row.selected ? 'bg-white' : 'bg-slate-50/50 opacity-60'
+                          className={`hover:bg-slate-50/80 transition ${confront.rowBorderClass} ${
+                            row.selected ? '' : 'opacity-60 bg-slate-50/50'
                           }`}
                         >
                           <td className="py-2.5 px-3">
@@ -1056,27 +1351,55 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                               className="rounded text-indigo-600"
                             />
                           </td>
-                          <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
-                            {row.dateSoins}
+                          
+                          {/* Date Soins */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <div className="font-mono text-xs font-bold text-slate-800">
+                              {formatDate(row.dateSoins)}
+                            </div>
+                            {matched && (
+                              <div className="mt-0.5">
+                                {confront.isSameDate ? (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                                    <CalendarCheck className="w-2.5 h-2.5" />
+                                    <span>Date identique</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200" title={`Date prescription: ${formatDate(matched.prestationDate)}`}>
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    <span>Prescr: {formatDate(matched.prestationDate)}</span>
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </td>
+
+                          {/* Adherent / Patient */}
                           <td className="py-2.5 px-3">
                             <div className="font-semibold text-slate-900">{row.nomPrenom}</div>
                             <div className="text-[11px] text-slate-500 font-mono">
                               Mat: {row.matricule || '-'} {row.sousSociete ? `• (${row.sousSociete})` : ''}
                             </div>
                           </td>
-                          <td className="py-2.5 px-3">
+
+                          {/* Acte Decompte (Gross amount without ticket moderator) */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
                             <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200">
                               <span>{row.actCode}</span>
-                              <span className="text-[10px] text-slate-500 font-normal">({formatMoney(row.montantBrut)})</span>
+                              <span className="text-[10px] text-indigo-700 font-semibold">Brut: {formatMoney(row.montantBrut)}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[150px]">
+                              TM: {formatMoney(row.participation)}
                             </div>
                           </td>
+
+                          {/* Matched Prescription Act with Live Comparison & Color Coding */}
                           <td className="py-2.5 px-3 min-w-[320px]">
                             {matched ? (
-                              <div className="rounded-xl bg-emerald-50/90 border border-emerald-200 p-2.5 text-xs space-y-1.5 shadow-2xs">
+                              <div className={`rounded-xl border p-2.5 text-xs space-y-1.5 shadow-2xs ${confront.cardBorderClass}`}>
+                                {/* Header: Code, Libellé & Confrontation Badge */}
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5 min-w-0">
-                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
                                       {matched.codeActe}
                                     </span>
@@ -1084,39 +1407,74 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                       {matched.libelleActe}
                                     </span>
                                   </div>
-                                  <span className="text-[11px] font-mono font-bold text-emerald-800 whitespace-nowrap shrink-0">
-                                    Reste : {formatMoney(matched.resteAPayer)}
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border shrink-0 ${confront.badgeClass}`}>
+                                    {confront.type === 'PERFECT' && <CheckCircle2 className="w-3 h-3 text-emerald-700" />}
+                                    {confront.type === 'SAME_DATE' && <CalendarCheck className="w-3 h-3 text-sky-700" />}
+                                    {confront.type === 'SAME_AMOUNT' && <Tag className="w-3 h-3 text-purple-700" />}
+                                    {confront.type === 'VERIFY' && <AlertTriangle className="w-3 h-3 text-amber-700" />}
+                                    <span>{confront.label}</span>
                                   </span>
                                 </div>
-                                <div className="text-[10px] text-slate-600 flex items-center justify-between border-t border-emerald-200/60 pt-1">
-                                  <span className="truncate">Facture: <strong>{matched.prestationNum}</strong> • {matched.personneNom}</span>
-                                  <span className="text-slate-500 font-mono shrink-0 ml-1">
-                                    Prix : {formatMoney(matched.montantInitial)}
+
+                                {/* Comparison Pills: Date & Gross Amount (sans TM) */}
+                                <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+                                  {confront.isSameDate ? (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      ✓ Même Date ({formatDate(matched.prestationDate)})
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                      ⚠️ Date diff. (Prescr: {formatDate(matched.prestationDate)})
+                                    </span>
+                                  )}
+
+                                  {confront.isSameMontantBrut ? (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      ✓ Même Montant Brut ({formatMoney(matched.montantInitial)})
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-300">
+                                      ⚠️ Écart Brut : {formatMoney(row.montantBrut)} ≠ {formatMoney(matched.montantInitial)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Footer details: Facture, Patient & Reste à payer */}
+                                <div className="text-[10px] text-slate-600 flex items-center justify-between border-t border-slate-200/60 pt-1">
+                                  <span className="truncate">
+                                    Facture: <strong>{matched.prestationNum}</strong> • {matched.personneNom}
+                                  </span>
+                                  <span className="font-mono font-bold text-emerald-800 shrink-0 ml-1">
+                                    Reste : {formatMoney(matched.resteAPayer)}
                                   </span>
                                 </div>
                               </div>
                             ) : (
-                              <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-center justify-between shadow-2xs">
-                                <div className="flex items-center gap-1.5 text-amber-900 font-medium">
-                                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                              <div className="rounded-xl bg-slate-50 border border-slate-200 p-2.5 text-xs flex items-center justify-between shadow-2xs">
+                                <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                                  <AlertCircle className="h-4 w-4 text-slate-400 shrink-0" />
                                   <span>Aucun acte non réglé rattaché</span>
                                 </div>
-                                <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">
+                                <span className="text-[10px] font-semibold text-slate-700 bg-slate-200 px-2 py-0.5 rounded border border-slate-300">
                                   Nouvelle Prestation
                                 </span>
                               </div>
                             )}
                           </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+
+                          {/* Net Regle */}
+                          <td className="py-2.5 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
                             {formatMoney(row.netAPayer)}
                           </td>
-                          <td className="py-2.5 px-3 text-center">
+
+                          {/* Action */}
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
                             <button
                               onClick={() => {
                                 setSearchingRowId(row.rowId);
                                 setActSearchQuery(row.nomPrenom || row.matricule || '');
                               }}
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-2xs"
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
                               title="Modifier ou rechercher un acte à rattacher"
                             >
                               <Search className="h-3 w-3" />
@@ -1131,13 +1489,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               </div>
 
               {/* Reset action */}
-              <div className="flex justify-end">
+              <div className="flex justify-between items-center text-xs text-slate-500 pt-2">
+                <div>
+                  Affichage de <strong className="text-slate-800">{displayedRows.length}</strong> sur <strong>{rows.length}</strong> lignes
+                </div>
                 <button
                   onClick={() => {
                     setParsedDoc(null);
                     setRows([]);
                   }}
-                  className="text-xs text-slate-500 hover:text-slate-700"
+                  className="text-xs text-slate-500 hover:text-slate-700 hover:underline cursor-pointer"
                 >
                   Charger un autre décompte
                 </button>
@@ -1161,7 +1522,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             {parsedDoc && (
               <button
                 onClick={handleResetAndBack}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-1.5 shadow-2xs"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Retour</span>
@@ -1169,7 +1530,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             )}
             <button
               onClick={handleClose}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
             >
               Annuler
             </button>
@@ -1177,7 +1538,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               <button
                 onClick={handleValidateAndSave}
                 disabled={selectedRows.length === 0}
-                className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:opacity-50 shadow-xs flex items-center gap-2"
+                className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:opacity-50 shadow-xs flex items-center gap-2 cursor-pointer"
               >
                 <Check className="h-4 w-4" />
                 <span>Valider et Enregistrer le Règlement</span>
@@ -1197,7 +1558,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   Rattacher un acte prescrit à cette ligne de règlement
                 </h4>
                 <p className="text-xs text-slate-500">
-                  Pour : <strong className="text-slate-800">{activeSearchingRow.nomPrenom}</strong> (Mat: {activeSearchingRow.matricule || '-'}) • Acte décompte : <strong>{activeSearchingRow.actCode}</strong> • Montant réglé : {formatMoney(activeSearchingRow.netAPayer)}
+                  Pour : <strong className="text-slate-800">{activeSearchingRow.nomPrenom}</strong> (Mat: {activeSearchingRow.matricule || '-'}) • Date Soins : <strong>{formatDate(activeSearchingRow.dateSoins)}</strong> • Brut sans TM : <strong>{formatMoney(activeSearchingRow.montantBrut)}</strong>
                 </p>
               </div>
               <button
@@ -1233,7 +1594,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
                 <div className="flex items-center justify-between text-[11px] text-slate-500">
                   <span>
-                    {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement
+                    {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
                   </span>
                   {actSearchQuery && (
                     <button
@@ -1246,7 +1607,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
               </div>
 
-              {/* Act candidate list */}
+              {/* Act candidate list with live comparison badges */}
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
                 {filteredSearchCandidates.length === 0 ? (
                   <div className="p-8 text-center space-y-2">
@@ -1257,67 +1618,87 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     {allEligibleActs.length > 0 && (
                       <button
                         onClick={() => setActSearchQuery('')}
-                        className="text-xs text-indigo-600 hover:underline font-bold"
+                        className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
                       >
                         Voir tous les {allEligibleActs.length} actes disponibles
                       </button>
                     )}
                   </div>
                 ) : (
-                  filteredSearchCandidates.map((cand) => (
-                    <div
-                      key={cand.lignePrestationId}
-                      className="p-3.5 hover:bg-indigo-50/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        {/* Act header & Libelle */}
-                        <div className="flex items-center flex-wrap gap-2">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                            {cand.codeActe}
-                          </span>
-                          <span className="font-bold text-slate-900 text-xs truncate">
-                            {cand.libelleActe}
-                          </span>
+                  filteredSearchCandidates.map((cand) => {
+                    const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand);
+
+                    return (
+                      <div
+                        key={cand.lignePrestationId}
+                        className={`p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                          compDetails.type === 'PERFECT'
+                            ? 'bg-emerald-50/40 hover:bg-emerald-50/70 border-l-4 border-l-emerald-500'
+                            : compDetails.type === 'SAME_DATE'
+                            ? 'bg-sky-50/30 hover:bg-sky-50/60 border-l-4 border-l-sky-500'
+                            : compDetails.type === 'SAME_AMOUNT'
+                            ? 'bg-purple-50/30 hover:bg-purple-50/60 border-l-4 border-l-purple-500'
+                            : 'hover:bg-indigo-50/40'
+                        }`}
+                      >
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          {/* Act header & Libelle + Live confrontation badge */}
+                          <div className="flex items-center flex-wrap gap-2">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                              {cand.codeActe}
+                            </span>
+                            <span className="font-bold text-slate-900 text-xs truncate">
+                              {cand.libelleActe}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${compDetails.badgeClass}`}>
+                              <span>{compDetails.label}</span>
+                            </span>
+                          </div>
+
+                          {/* Patient & Invoice metadata */}
+                          <div className="text-[11px] text-slate-600 flex items-center flex-wrap gap-x-2.5 gap-y-0.5">
+                            <span className="font-semibold text-slate-900">{cand.personneNom}</span>
+                            <span className="font-mono text-slate-500">Mat: {cand.matricule}</span>
+                            {cand.sousSociete && (
+                              <span className="text-indigo-600 font-medium">({cand.sousSociete})</span>
+                            )}
+                            <span className="text-slate-400">•</span>
+                            <span>Facture: <strong>{cand.prestationNum}</strong> ({formatDate(cand.prestationDate)})</span>
+                          </div>
+
+                          {/* Detailed price breakdown & live comparison */}
+                          <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-200/80">
+                            <span>
+                              Prix Brut Initial: <strong className="text-slate-900">{formatMoney(cand.montantInitial)}</strong>
+                              {compDetails.isSameMontantBrut && (
+                                <span className="ml-1 text-[10px] text-emerald-700 font-bold">(Même montant)</span>
+                              )}
+                            </span>
+                            <span>Ticket Mod.: <strong className="text-amber-700">{formatMoney(cand.ticketModerateur)}</strong></span>
+                            <span>À Rembourser: <strong className="text-indigo-700">{formatMoney(cand.montantARembourser)}</strong></span>
+                            <span>Déjà Réglé: <strong className="text-emerald-700">{formatMoney(cand.dejaPaye)}</strong></span>
+                          </div>
                         </div>
 
-                        {/* Patient & Invoice metadata */}
-                        <div className="text-[11px] text-slate-600 flex items-center flex-wrap gap-x-2.5 gap-y-0.5">
-                          <span className="font-semibold text-slate-900">{cand.personneNom}</span>
-                          <span className="font-mono text-slate-500">Mat: {cand.matricule}</span>
-                          {cand.sousSociete && (
-                            <span className="text-indigo-600 font-medium">({cand.sousSociete})</span>
-                          )}
-                          <span className="text-slate-400">•</span>
-                          <span>Facture: <strong>{cand.prestationNum}</strong> ({formatDate(cand.prestationDate)})</span>
-                        </div>
-
-                        {/* Detailed price breakdown */}
-                        <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-200/80">
-                          <span>Prix Brut: <strong className="text-slate-900">{formatMoney(cand.montantInitial)}</strong></span>
-                          <span>Ticket Mod.: <strong className="text-amber-700">{formatMoney(cand.ticketModerateur)}</strong></span>
-                          <span>À Rembourser: <strong className="text-indigo-700">{formatMoney(cand.montantARembourser)}</strong></span>
-                          <span>Déjà Réglé: <strong className="text-emerald-700">{formatMoney(cand.dejaPaye)}</strong></span>
+                        {/* Right column: Reste a payer & Action */}
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                          <div className="text-left sm:text-right">
+                            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Reste à régler</span>
+                            <strong className="text-sm font-extrabold text-emerald-800 font-mono">
+                              {formatMoney(cand.resteAPayer)}
+                            </strong>
+                          </div>
+                          <button
+                            onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
+                            className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Link2 className="w-3.5 h-3.5" />
+                            <span>Rattacher cet Acte</span>
+                          </button>
                         </div>
                       </div>
-
-                      {/* Right column: Reste a payer & Action */}
-                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
-                        <div className="text-left sm:text-right">
-                          <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Reste à régler</span>
-                          <strong className="text-sm font-extrabold text-emerald-800 font-mono">
-                            {formatMoney(cand.resteAPayer)}
-                          </strong>
-                        </div>
-                        <button
-                          onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
-                          className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Link2 className="w-3.5 h-3.5" />
-                          <span>Rattacher cet Acte</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
@@ -1325,14 +1706,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={() => handleAssignCandidate(activeSearchingRow.rowId, null)}
-                  className="inline-flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-800 font-semibold"
+                  className="inline-flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-800 font-semibold cursor-pointer"
                 >
                   <Unlink className="h-3.5 w-3.5" />
                   <span>Ne pas rattacher (Créer une nouvelle prestation au vol)</span>
                 </button>
                 <button
                   onClick={() => setSearchingRowId(null)}
-                  className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50 cursor-pointer"
                 >
                   Fermer
                 </button>

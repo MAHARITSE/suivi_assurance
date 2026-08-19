@@ -12,6 +12,11 @@ import {
   Building, 
   Calendar,
   AlertCircle,
+  AlertTriangle,
+  CalendarCheck,
+  Tag,
+  Sparkles,
+  Link2,
   FileCheck2,
   Printer,
   FileSpreadsheet,
@@ -82,6 +87,109 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   };
 
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société';
+
+  // Memoized Lookup of all medical acts and prescriptions for confrontation / manual reconciliation
+  const prestationActsLookup = useMemo(() => {
+    const list: Array<{
+      prestationId: string;
+      numeroFacture: string;
+      date: string;
+      nomAgent?: string;
+      matricule?: string;
+      societeId?: string;
+      montantBrut: number;
+      montantARembourser: number;
+      codeActe?: string;
+      libelleActe?: string;
+    }> = [];
+
+    (prestations || []).forEach(p => {
+      const pTot = p.montantTotal ?? p.totalPrestation ?? 0;
+      const pRemb = p.montantARembourser ?? Math.max(0, pTot - (p.ticketModerateur ?? p.participation ?? 0));
+      const pDate = p.date ? p.date.split('T')[0] : '';
+      list.push({
+        prestationId: p.id,
+        numeroFacture: p.numeroFacture,
+        date: pDate,
+        nomAgent: p.nomAgent,
+        matricule: p.matricule,
+        societeId: p.societeId,
+        montantBrut: pTot,
+        montantARembourser: pRemb,
+      });
+
+      (p.lignes || []).forEach(l => {
+        const lBrut = l.totalPrestation || 0;
+        const lRemb = l.montantARembourser ?? Math.max(0, lBrut - (l.ticketModerateur || 0));
+        list.push({
+          prestationId: p.id,
+          numeroFacture: p.numeroFacture,
+          date: pDate,
+          nomAgent: p.nomAgent,
+          matricule: p.matricule,
+          societeId: p.societeId,
+          montantBrut: lBrut,
+          montantARembourser: lRemb,
+          codeActe: l.code,
+          libelleActe: l.libelle,
+        });
+      });
+    });
+
+    return list;
+  }, [prestations]);
+
+  // Reconciliation analysis for a payment
+  const getPaiementReconciliationInfo = (p: Paiement) => {
+    const pDate = p.datePaiement ? p.datePaiement.split('T')[0] : '';
+    const pPaye = p.totalPaye || 0;
+    const pReclame = p.totalReclame || 0;
+
+    // Check if any payment line or total matches a prestation on date and montant
+    const matchingPrestations = prestationActsLookup.filter(pa => {
+      const matchDate = (pa.date && pa.date === pDate) || (p.lignes?.some(l => l.dateSoins && l.dateSoins.split('T')[0] === pa.date));
+      const matchAmount = Math.abs(pa.montantBrut - pReclame) < 1 || 
+                          Math.abs(pa.montantARembourser - pPaye) < 1 || 
+                          Math.abs(pa.montantBrut - pPaye) < 1 ||
+                          (p.lignes?.some(l => Math.abs(pa.montantBrut - (l.montantReclame || l.totalPaye)) < 1 || Math.abs(pa.montantARembourser - l.totalPaye) < 1));
+      return matchDate && matchAmount;
+    });
+
+    // Check duplicate payments (same payment date and same totalPaye)
+    const duplicatePayments = paiements.filter(other => {
+      if (other.id === p.id) return false;
+      const oDate = other.datePaiement ? other.datePaiement.split('T')[0] : '';
+      return oDate === pDate && Math.abs((other.totalPaye || 0) - pPaye) < 1;
+    });
+
+    const hasMatch = matchingPrestations.length > 0;
+    const hasDuplicate = duplicatePayments.length > 0;
+
+    return {
+      hasMatch,
+      matchingPrestations,
+      hasDuplicate,
+      duplicatePayments,
+      isReconciled: hasMatch || hasDuplicate,
+    };
+  };
+
+  const getLignePaiementMatchInfo = (l: LignePaiement, p: Paiement) => {
+    const lDate = l.dateSoins ? l.dateSoins.split('T')[0] : (p.datePaiement ? p.datePaiement.split('T')[0] : '');
+    const lReclame = l.montantReclame || l.totalPaye + (l.ticketModerateur || 0);
+    const lPaye = l.montantPaye || l.totalPaye;
+
+    const matchedPrescription = prestationActsLookup.find(pa => {
+      const matchDate = pa.date === lDate;
+      const matchAmount = Math.abs(pa.montantBrut - lReclame) < 1 || Math.abs(pa.montantARembourser - lPaye) < 1 || Math.abs(pa.montantBrut - lPaye) < 1;
+      return matchDate && matchAmount;
+    });
+
+    return {
+      hasMatch: !!matchedPrescription,
+      matchedPrescription,
+    };
+  };
 
   const handleSort = (field: PaiementSortField) => {
     if (sortField === field) {
@@ -942,9 +1050,21 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               ) : (
                 filteredAndSortedPaiements.map(p => {
                   const isExpanded = !!expandedRows[p.id];
+                  const recInfo = getPaiementReconciliationInfo(p);
+
+                  // Tooltip text for reconciliation
+                  const matchTooltip = recInfo.hasMatch
+                    ? `Même date et montant qu'une prestation (${recInfo.matchingPrestations.map(m => `Facture ${m.numeroFacture} : ${formatMoney(m.montantBrut)}`).join(', ')})`
+                    : undefined;
+                  const duplicateTooltip = recInfo.hasDuplicate
+                    ? `Attention : ${recInfo.duplicatePayments.length} autre(s) bordereau(x) avec la même date (${formatDate(p.datePaiement)}) et le même montant (${formatMoney(p.totalPaye)}) : ${recInfo.duplicatePayments.map(d => d.numeroBordereau).join(', ')}`
+                    : undefined;
+
                   return (
                     <React.Fragment key={p.id}>
-                      <tr className="hover:bg-slate-50/70 transition">
+                      <tr className={`transition hover:bg-slate-50/80 ${
+                        recInfo.hasMatch ? 'bg-emerald-50/20' : recInfo.hasDuplicate ? 'bg-amber-50/20' : ''
+                      }`}>
                         <td className="py-3 px-2 text-center">
                           <button
                             onClick={() => toggleRow(p.id)}
@@ -954,7 +1074,29 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                             {isExpanded ? <ChevronDown className="w-4 h-4 text-emerald-600 font-bold" /> : <ChevronRight className="w-4 h-4" />}
                           </button>
                         </td>
-                        <td className="py-3 px-3 text-slate-600 font-medium whitespace-nowrap">{formatDate(p.datePaiement)}</td>
+                        <td className="py-3 px-3 text-slate-600 font-medium whitespace-nowrap">
+                          <div className="flex items-center gap-1">
+                            <span className={
+                              recInfo.hasMatch 
+                                ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' 
+                                : recInfo.hasDuplicate 
+                                ? 'border-b-2 border-dashed border-amber-500 text-amber-900 font-semibold' 
+                                : ''
+                            } title={matchTooltip || duplicateTooltip}>
+                              {formatDate(p.datePaiement)}
+                            </span>
+                            {recInfo.hasMatch && (
+                              <span title={matchTooltip} className="inline-flex items-center text-emerald-600">
+                                <Sparkles className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            {recInfo.hasDuplicate && (
+                              <span title={duplicateTooltip} className="inline-flex items-center text-amber-500">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-3 px-3 font-bold text-emerald-700 whitespace-nowrap">{p.numeroBordereau}</td>
                         <td className="py-3 px-3 font-medium text-slate-900">{getSocieteNom(p.societeId)}</td>
                         <td className="py-3 px-3">
@@ -962,7 +1104,29 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                           <div className="text-[10px] text-slate-400 font-mono">{p.referencePaiement}</div>
                         </td>
                         <td className="py-3 px-3 text-right text-slate-600 whitespace-nowrap">{formatMoney(p.totalReclame)}</td>
-                        <td className="py-3 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">{formatMoney(p.totalPaye)}</td>
+                        <td className="py-3 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <span className={
+                              recInfo.hasMatch 
+                                ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900' 
+                                : recInfo.hasDuplicate 
+                                ? 'border-b-2 border-dashed border-amber-500 text-amber-900' 
+                                : ''
+                            } title={matchTooltip || duplicateTooltip}>
+                              {formatMoney(p.totalPaye)}
+                            </span>
+                            {recInfo.hasMatch && (
+                              <span title={matchTooltip} className="text-[10px] px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 font-semibold">
+                                Match
+                              </span>
+                            )}
+                            {recInfo.hasDuplicate && (
+                              <span title={duplicateTooltip} className="text-[10px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">
+                                Doublon
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-3 px-3 text-right text-amber-700 font-medium whitespace-nowrap">{formatMoney(p.totalModerateur)}</td>
                         <td className="py-3 px-3 text-right text-rose-600 font-medium whitespace-nowrap">{formatMoney(p.totalExclu)}</td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
@@ -1020,48 +1184,66 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                  {p.lignes.map((l) => (
-                                    <tr key={l.id} className="hover:bg-slate-50">
-                                      <td className="py-2 px-2 text-slate-600 font-medium">
-                                        {l.dateSoins ? formatDate(l.dateSoins) : '-'}
-                                      </td>
-                                      <td className="py-2 px-2 font-semibold text-slate-900">
-                                        {l.nomAgent || l.nomBaseAssurance}
-                                      </td>
-                                      <td className="py-2 px-2 font-mono text-[11px] text-slate-600">
-                                        {l.immatriculation || '-'}
-                                      </td>
-                                      <td className="py-2 px-2 font-mono font-bold text-indigo-700">
-                                        {l.prestationNumero || '-'}
-                                      </td>
-                                      <td className="py-2 px-2">
-                                        {l.actesPayes && l.actesPayes.length > 0 ? (
-                                          <div className="flex flex-wrap gap-1">
-                                            {l.actesPayes.map((a, actIdx) => (
-                                              <span key={actIdx} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-medium">
-                                                <span className="font-bold">{a.code}</span>
-                                                <span>: {formatMoney(a.montant)}</span>
+                                  {p.lignes.map((l) => {
+                                    const lMatch = getLignePaiementMatchInfo(l, p);
+                                    const lMatchTooltip = lMatch.hasMatch 
+                                      ? `Concordance Prescription : Facture ${lMatch.matchedPrescription?.numeroFacture} (Date: ${formatDate(lMatch.matchedPrescription?.date || '')}, Montant: ${formatMoney(lMatch.matchedPrescription?.montantBrut || 0)})`
+                                      : undefined;
+
+                                    return (
+                                      <tr key={l.id} className={`hover:bg-slate-50 ${lMatch.hasMatch ? 'bg-emerald-50/30' : ''}`}>
+                                        <td className="py-2 px-2 text-slate-600 font-medium">
+                                          <div className="flex items-center gap-1">
+                                            <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
+                                              {l.dateSoins ? formatDate(l.dateSoins) : '-'}
+                                            </span>
+                                            {lMatch.hasMatch && (
+                                              <span title={lMatchTooltip} className="inline-flex items-center text-emerald-600">
+                                                <Sparkles className="w-3 h-3" />
                                               </span>
-                                            ))}
+                                            )}
                                           </div>
-                                        ) : (
-                                          <span className="text-slate-500 text-[11px]">{l.commentaire || 'Soins réglés'}</span>
-                                        )}
-                                      </td>
-                                      <td className="py-2 px-2 text-right font-medium text-slate-900">
-                                        {formatMoney(l.montantReclame || l.totalPaye + (l.ticketModerateur || 0))}
-                                      </td>
-                                      <td className="py-2 px-2 text-right text-amber-700 font-medium">
-                                        {formatMoney(l.ticketModerateur || 0)}
-                                      </td>
-                                      <td className="py-2 px-2 text-right font-bold text-emerald-700">
-                                        {formatMoney(l.montantPaye || l.totalPaye)}
-                                      </td>
-                                      <td className="py-2 px-2 text-right text-rose-600 font-medium">
-                                        {formatMoney(l.montantExclu || 0)}
-                                      </td>
-                                    </tr>
-                                  ))}
+                                        </td>
+                                        <td className="py-2 px-2 font-semibold text-slate-900">
+                                          {l.nomAgent || l.nomBaseAssurance}
+                                        </td>
+                                        <td className="py-2 px-2 font-mono text-[11px] text-slate-600">
+                                          {l.immatriculation || '-'}
+                                        </td>
+                                        <td className="py-2 px-2 font-mono font-bold text-indigo-700">
+                                          {l.prestationNumero || '-'}
+                                        </td>
+                                        <td className="py-2 px-2">
+                                          {l.actesPayes && l.actesPayes.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {l.actesPayes.map((a, actIdx) => (
+                                                <span key={actIdx} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-medium">
+                                                  <span className="font-bold">{a.code}</span>
+                                                  <span>: {formatMoney(a.montant)}</span>
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-500 text-[11px]">{l.commentaire || 'Soins réglés'}</span>
+                                          )}
+                                        </td>
+                                        <td className="py-2 px-2 text-right font-medium text-slate-900">
+                                          <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
+                                            {formatMoney(l.montantReclame || l.totalPaye + (l.ticketModerateur || 0))}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-2 text-right text-amber-700 font-medium">
+                                          {formatMoney(l.ticketModerateur || 0)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right font-bold text-emerald-700">
+                                          {formatMoney(l.montantPaye || l.totalPaye)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right text-rose-600 font-medium">
+                                          {formatMoney(l.montantExclu || 0)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>

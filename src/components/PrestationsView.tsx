@@ -11,6 +11,11 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle, 
+  AlertTriangle,
+  CalendarCheck,
+  Tag,
+  Sparkles,
+  Link2,
   ChevronDown, 
   ChevronRight,
   Download,
@@ -81,6 +86,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
   const [soldeFilter, setSoldeFilter] = useState<'ALL' | 'NON_SOLDE' | 'SOLDE'>('ALL');
+  const [reconciliationFilter, setReconciliationFilter] = useState<'ALL' | 'MATCH_DATE_MONTANT' | 'DUPLICATES'>('ALL');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
 
   // Sorting state
@@ -120,8 +126,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     if (dateDebut) count++;
     if (dateFin) count++;
     if (soldeFilter !== 'ALL') count++;
+    if (reconciliationFilter !== 'ALL') count++;
     return count;
-  }, [searchTerm, statusFilter, filterSocieteId, filterSousSociete, dateDebut, dateFin, soldeFilter]);
+  }, [searchTerm, statusFilter, filterSocieteId, filterSousSociete, dateDebut, dateFin, soldeFilter, reconciliationFilter]);
 
   const handleResetFilters = () => {
     setSearchTerm('');
@@ -131,6 +138,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     setDateDebut('');
     setDateFin('');
     setSoldeFilter('ALL');
+    setReconciliationFilter('ALL');
   };
 
   const setDatePreset = (preset: 'today' | 'this_month' | 'last_month' | 'this_year' | 'all') => {
@@ -246,6 +254,41 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     return { prestPaidMap, linePaidMap, prestBordereauxMap };
   }, [paiements]);
 
+  // Fast lookup map for settlement lines across all paiements for manual reconciliation
+  const settlementLinesLookup = useMemo(() => {
+    const list: Array<{
+      paiementId: string;
+      numeroBordereau: string;
+      datePaiement: string;
+      dateSoins?: string;
+      nomAgent?: string;
+      matricule?: string;
+      montantBrut: number;
+      montantPaye: number;
+      prestationNumero?: string;
+    }> = [];
+
+    (paiements || []).forEach(p => {
+      (p.lignes || []).forEach(lp => {
+        const brut = Number(lp.montantReclame || lp.totalPaye + (lp.ticketModerateur || 0));
+        const net = Number(lp.totalPaye || lp.montantPaye || 0);
+        list.push({
+          paiementId: p.id,
+          numeroBordereau: p.numeroBordereau,
+          datePaiement: p.datePaiement,
+          dateSoins: lp.dateSoins,
+          nomAgent: lp.nomAgent || lp.nomBaseAssurance,
+          matricule: lp.immatriculation,
+          montantBrut: brut,
+          montantPaye: net,
+          prestationNumero: lp.prestationNumero,
+        });
+      });
+    });
+
+    return list;
+  }, [paiements]);
+
   // Compute exact financial metrics for a prestation
   const getPrestationFinancials = (p: Prestation) => {
     const tot = p.montantTotal ?? p.totalPrestation ?? 0;
@@ -270,6 +313,42 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     return { tot, mod, remb, totalPaye, resteAPayer, statut };
   };
 
+  // Prestation match & duplicate reconciliation analysis
+  const getPrestationReconciliationInfo = (p: Prestation) => {
+    const fin = getPrestationFinancials(p);
+    const pDate = p.date ? p.date.split('T')[0] : '';
+    const pTot = fin.tot;
+    const pRemb = fin.remb;
+
+    // Matching settlement lines with same date (dateSoins or datePaiement) AND same amount (gross or net)
+    const matchingSettlements = settlementLinesLookup.filter(sl => {
+      const slDateSoins = sl.dateSoins ? sl.dateSoins.split('T')[0] : '';
+      const slDatePaiement = sl.datePaiement ? sl.datePaiement.split('T')[0] : '';
+      const matchDate = (slDateSoins && slDateSoins === pDate) || (slDatePaiement && slDatePaiement === pDate);
+      const matchAmount = Math.abs(sl.montantBrut - pTot) < 1 || Math.abs(sl.montantPaye - pRemb) < 1 || Math.abs(sl.montantPaye - pTot) < 1;
+      return matchDate && matchAmount;
+    });
+
+    // Potential duplicates / homonym prestations with identical date and same total amount
+    const duplicatePrestations = prestations.filter(other => {
+      if (other.id === p.id) return false;
+      const otherDate = other.date ? other.date.split('T')[0] : '';
+      const otherTot = other.montantTotal ?? other.totalPrestation ?? 0;
+      return otherDate === pDate && Math.abs(otherTot - pTot) < 1;
+    });
+
+    const hasMatch = matchingSettlements.length > 0;
+    const hasDuplicate = duplicatePrestations.length > 0;
+
+    return {
+      hasMatch,
+      matchingSettlements,
+      hasDuplicate,
+      duplicatePrestations,
+      isReconciled: hasMatch || hasDuplicate,
+    };
+  };
+
   // Compute exact financial metrics for a prestation line
   const getLineFinancials = (l: LignePrestation, p: Prestation) => {
     const lBrut = l.totalPrestation || 0;
@@ -282,7 +361,17 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid;
     const statut = l.statut || (isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente');
 
-    return { lBrut, lPart, lARemb, lTotalPaye, lReste, statut };
+    // Check if line matches a settlement line on date and amount
+    const pDate = p.date ? p.date.split('T')[0] : '';
+    const matchingSettlementLine = settlementLinesLookup.find(sl => {
+      const slDateSoins = sl.dateSoins ? sl.dateSoins.split('T')[0] : '';
+      const slDatePaiement = sl.datePaiement ? sl.datePaiement.split('T')[0] : '';
+      const matchDate = (slDateSoins && slDateSoins === pDate) || (slDatePaiement && slDatePaiement === pDate);
+      const matchAmount = Math.abs(sl.montantBrut - lBrut) < 1 || Math.abs(sl.montantPaye - lARemb) < 1 || Math.abs(sl.montantPaye - lBrut) < 1;
+      return matchDate && matchAmount;
+    });
+
+    return { lBrut, lPart, lARemb, lTotalPaye, lReste, statut, matchingSettlementLine };
   };
 
   // Filtered and Sorted List
@@ -309,6 +398,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         matchesSolde = fin.resteAPayer <= 0;
       }
 
+      // Reconciliation filter
+      let matchesReconciliation = true;
+      if (reconciliationFilter === 'MATCH_DATE_MONTANT') {
+        const rec = getPrestationReconciliationInfo(p);
+        matchesReconciliation = rec.hasMatch;
+      } else if (reconciliationFilter === 'DUPLICATES') {
+        const rec = getPrestationReconciliationInfo(p);
+        matchesReconciliation = rec.hasDuplicate;
+      }
+
       // Search term filter
       const personne = getPersonne(p.personneId);
       const searchLower = searchTerm.toLowerCase().trim();
@@ -324,7 +423,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         (p.commentaires && p.commentaires.toLowerCase().includes(searchLower)) ||
         p.lignes.some(l => l.libelle.toLowerCase().includes(searchLower) || l.code.toLowerCase().includes(searchLower));
 
-      return matchesSociete && matchesSousSoc && matchesStatus && matchesDateDebut && matchesDateFin && matchesSolde && matchesSearch;
+      return matchesSociete && matchesSousSoc && matchesStatus && matchesDateDebut && matchesDateFin && matchesSolde && matchesReconciliation && matchesSearch;
     });
 
     // Sorting
@@ -751,6 +850,38 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             ))}
           </div>
 
+          {/* Reconciliation Quick Filter Chips */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-emerald-600" />
+              <span>Rapprochement :</span>
+            </span>
+            <button
+              onClick={() => setReconciliationFilter(prev => prev === 'MATCH_DATE_MONTANT' ? 'ALL' : 'MATCH_DATE_MONTANT')}
+              title="Afficher uniquement les prestations ayant une date et un montant identiques à un règlement"
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
+                reconciliationFilter === 'MATCH_DATE_MONTANT'
+                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+              }`}
+            >
+              <CalendarCheck className="w-3 h-3" />
+              <span>Même Date & Montant (Règlement)</span>
+            </button>
+            <button
+              onClick={() => setReconciliationFilter(prev => prev === 'DUPLICATES' ? 'ALL' : 'DUPLICATES')}
+              title="Afficher les prestations ayant la même date et le même montant qu'une autre facture"
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
+                reconciliationFilter === 'DUPLICATES'
+                  ? 'bg-amber-600 text-white shadow-xs font-bold'
+                  : 'bg-white border border-amber-300 text-amber-700 hover:bg-amber-50'
+              }`}
+            >
+              <AlertTriangle className="w-3 h-3" />
+              <span>Doublons Date & Montant</span>
+            </button>
+          </div>
+
           {/* Filter Controls Actions */}
           <div className="flex items-center gap-2">
             <button
@@ -1043,11 +1174,22 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                   const socName = prestation.societeNom || getSocieteNom(prestation.societeId);
                   
                   const fin = getPrestationFinancials(prestation);
+                  const recInfo = getPrestationReconciliationInfo(prestation);
                   const attachedBordereaux = paymentsMap.prestBordereauxMap[prestation.id] || paymentsMap.prestBordereauxMap[prestation.numeroFacture] || [];
+
+                  // Tooltips for manual reconciliation
+                  const matchTooltip = recInfo.hasMatch 
+                    ? `Même date et montant qu'un règlement enregistré (${recInfo.matchingSettlements.map(s => `Bordereau ${s.numeroBordereau} : ${formatMoney(s.montantPaye)}`).join(', ')})`
+                    : undefined;
+                  const duplicateTooltip = recInfo.hasDuplicate
+                    ? `Attention : ${recInfo.duplicatePrestations.length} autre(s) facture(s) avec la même date (${formatDate(prestation.date)}) et le même montant (${formatMoney(fin.tot)}) : ${recInfo.duplicatePrestations.map(d => d.numeroFacture).join(', ')}`
+                    : undefined;
 
                   return (
                     <React.Fragment key={prestation.id}>
-                      <tr className="hover:bg-slate-50/70 transition">
+                      <tr className={`transition hover:bg-slate-50/80 ${
+                        recInfo.hasMatch ? 'bg-emerald-50/20' : recInfo.hasDuplicate ? 'bg-amber-50/20' : ''
+                      }`}>
                         <td className="py-3 px-2 text-center">
                           <button
                             onClick={() => toggleRow(prestation.id)}
@@ -1058,7 +1200,27 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                           </button>
                         </td>
                         <td className="py-3 px-3 text-slate-600 font-medium whitespace-nowrap">
-                          {formatDate(prestation.date)}
+                          <div className="flex items-center gap-1">
+                            <span className={
+                              recInfo.hasMatch 
+                                ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' 
+                                : recInfo.hasDuplicate 
+                                ? 'border-b-2 border-dashed border-amber-500 text-amber-900 font-semibold' 
+                                : ''
+                            } title={matchTooltip || duplicateTooltip}>
+                              {formatDate(prestation.date)}
+                            </span>
+                            {recInfo.hasMatch && (
+                              <span title={matchTooltip} className="inline-flex items-center text-emerald-600">
+                                <Sparkles className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            {recInfo.hasDuplicate && (
+                              <span title={duplicateTooltip} className="inline-flex items-center text-amber-500">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-3 font-bold text-indigo-700 whitespace-nowrap">
                           {prestation.numeroFacture}
@@ -1072,7 +1234,27 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                           <div className="text-[10px] text-indigo-600 font-medium">{prestation.sousSociete}</div>
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-slate-900 whitespace-nowrap">
-                          {formatMoney(fin.tot)}
+                          <div className="flex items-center justify-end gap-1">
+                            <span className={
+                              recInfo.hasMatch 
+                                ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900' 
+                                : recInfo.hasDuplicate 
+                                ? 'border-b-2 border-dashed border-amber-500 text-amber-900' 
+                                : ''
+                            } title={matchTooltip || duplicateTooltip}>
+                              {formatMoney(fin.tot)}
+                            </span>
+                            {recInfo.hasMatch && (
+                              <span title={matchTooltip} className="text-[10px] px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 font-semibold">
+                                Match
+                              </span>
+                            )}
+                            {recInfo.hasDuplicate && (
+                              <span title={duplicateTooltip} className="text-[10px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">
+                                Doublon
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-3 text-right text-amber-700 font-medium whitespace-nowrap">
                           {formatMoney(fin.mod)}
@@ -1159,17 +1341,29 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                 <tbody className="divide-y divide-slate-100">
                                   {prestation.lignes.map(ligne => {
                                     const lFin = getLineFinancials(ligne, prestation);
+                                    const actMatchTooltip = lFin.matchingSettlementLine 
+                                      ? `Concordance trouvée : Règlement bordereau ${lFin.matchingSettlementLine.numeroBordereau} (${formatMoney(lFin.matchingSettlementLine.montantPaye)})`
+                                      : undefined;
 
                                     return (
-                                      <tr key={ligne.id} className="hover:bg-slate-50">
+                                      <tr key={ligne.id} className={`hover:bg-slate-50 ${lFin.matchingSettlementLine ? 'bg-emerald-50/30' : ''}`}>
                                         <td className="py-2 px-2 font-mono font-bold text-indigo-700">
-                                          {ligne.code}
+                                          <div className="flex items-center gap-1">
+                                            <span>{ligne.code}</span>
+                                            {lFin.matchingSettlementLine && (
+                                              <span title={actMatchTooltip} className="inline-flex items-center text-emerald-600">
+                                                <Sparkles className="w-3 h-3" />
+                                              </span>
+                                            )}
+                                          </div>
                                         </td>
                                         <td className="py-2 px-2 text-slate-700">
                                           {ligne.libelle || 'Acte de soins'}
                                         </td>
                                         <td className="py-2 px-2 text-right font-medium text-slate-900">
-                                          {formatMoney(lFin.lBrut)}
+                                          <span className={lFin.matchingSettlementLine ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={actMatchTooltip}>
+                                            {formatMoney(lFin.lBrut)}
+                                          </span>
                                         </td>
                                         <td className="py-2 px-2 text-right text-amber-700 font-medium">
                                           {formatMoney(lFin.lPart)}

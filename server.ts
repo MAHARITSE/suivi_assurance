@@ -16,10 +16,19 @@ function getGenAI(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!aiClient) {
-    aiClient = new GoogleGenAI({ apiKey });
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
   return aiClient;
 }
+
+const waitMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function startServer() {
   const app = express();
@@ -147,7 +156,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
 6. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
 
           let responseText = '';
-          const candidateModels = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+          const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
           for (const modelName of candidateModels) {
             try {
               const aiResp = await ai.models.generateContent({
@@ -169,7 +178,12 @@ RÈGLES CRUCIALES D'EXTRACTION :
               responseText = aiResp.text || '';
               if (responseText) break;
             } catch (mErr: any) {
-              console.warn(`Model ${modelName} attempt failed:`, mErr?.message || mErr);
+              const is503 = mErr?.message?.includes('503') || mErr?.status === 'UNAVAILABLE' || mErr?.status === 503;
+              console.warn(`Model ${modelName} attempt failed (503=${is503}):`, mErr?.message || mErr);
+              if (is503) {
+                // Brief pause before trying next candidate to allow transient spike to pass
+                await waitMs(600);
+              }
             }
           }
 
