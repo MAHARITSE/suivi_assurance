@@ -265,26 +265,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
         }
       }
 
-      // Fallback: If no Gemini Key or Gemini had an issue, provide local intelligent extraction based on targetOrganism, filename or default
-      const fname = (file?.originalname || '').toLowerCase();
-      const orgUpper = (chosenOrganism || '').toUpperCase();
-
-      let fallbackData: any = getSalfaDefaultInvoice();
-      if (orgUpper.includes('ASCOMA') || fname.includes('ascoma')) {
-        fallbackData = getAscomaDefaultInvoice();
-      } else if (orgUpper.includes('MCI') || fname.includes('mci') || fname.includes('care')) {
-        fallbackData = chosenDocType === 'facture' ? mciCareFactureSampleInvoice : getMciCareDefaultInvoice();
-      } else if (orgUpper.includes('BSA') || fname.includes('bsa')) {
-        fallbackData = chosenDocType === 'decompte' ? getBsaReleveDefaultInvoice() : getSalfaDefaultInvoice();
-      } else {
-        fallbackData = chosenDocType === 'facture' ? getSalfaDefaultInvoice() : getMciCareDefaultInvoice();
-      }
-
-      return res.json({
-        source: 'local_parser_fallback',
-        success: true,
-        data: fallbackData
-      });
+      return res.status(500).json({ success: false, error: "Clé API manquante ou OCR échoué." });
 
     } catch (err: any) {
       console.error('API Error in parse-invoice:', err);

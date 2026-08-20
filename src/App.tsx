@@ -254,6 +254,7 @@ export function App() {
             onSavePrestation={handleSavePrestation}
             onDeletePrestation={handleDeletePrestation}
             onImportPrestations={handleImportPrestations}
+            onSavePaiement={handleSavePaiement}
             isCreateModalOpen={isPrestationModalOpen}
             setIsCreateModalOpen={setIsPrestationModalOpen}
           />

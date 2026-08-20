@@ -30,11 +30,13 @@ import {
   ArrowDown,
   RotateCcw,
   SlidersHorizontal,
-  DollarSign
+  DollarSign,
+  Edit2,
+  Ban
 } from 'lucide-react';
 import { Prestation, LignePrestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
-import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
+import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPrestationsPdf } from '../utils/recouvrementPdf';
 import { SalfaImportModal } from './SalfaImportModal';
 import * as XLSX from 'xlsx';
 
@@ -48,6 +50,7 @@ interface PrestationsViewProps {
   onSavePrestation: (prestation: Prestation) => void;
   onDeletePrestation: (id: string) => void;
   onImportPrestations?: (newPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
+  onSavePaiement?: (paiement: Paiement, updatedPrestations: Prestation[]) => void;
   isCreateModalOpen: boolean;
   setIsCreateModalOpen: (open: boolean) => void;
 }
@@ -99,6 +102,10 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [viewingPrestation, setViewingPrestation] = useState<Prestation | null>(null);
   const [editingPrestation, setEditingPrestation] = useState<Prestation | null>(null);
   const [isSalfaModalOpen, setIsSalfaModalOpen] = useState<boolean>(false);
+  const [lineEditContext, setLineEditContext] = useState<{ prestation: Prestation, ligne: LignePrestation } | null>(null);
+  const [lineExcludeContext, setLineExcludeContext] = useState<{ prestation: Prestation, ligne: LignePrestation, maxExclu: number } | null>(null);
+  const [lineExcludeForm, setLineExcludeForm] = useState({ montant: 0, motif: '' });
+  const [selectedPrestations, setSelectedPrestations] = useState<Set<string>>(new Set());
 
   // Sync prop selectedSocieteId
   React.useEffect(() => {
@@ -118,6 +125,14 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       titreEtablissement: 'SALFA - Établissement Médical & Soins',
       seuilMois: 3,
       nomFiltreSociete: selectedSocObj ? selectedSocObj.nom : 'Toutes les assurances'
+    });
+  };
+
+  const handleExportRecouvrementPdfSelected = () => {
+    if (selectedPrestations.size === 0) return;
+    const prestationsList = filteredAndSortedList.filter(p => selectedPrestations.has(p.id));
+    generateSelectedPrestationsPdf(prestationsList, paiements, societes, personnes, {
+      titreEtablissement: 'SALFA - Établissement Médical & Soins'
     });
   };
 
@@ -218,6 +233,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const paymentsMap = useMemo(() => {
     const prestPaidMap: Record<string, number> = {};
     const linePaidMap: Record<string, number> = {};
+    const prestExcluMap: Record<string, number> = {};
+    const lineExcluMap: Record<string, number> = {};
     const prestBordereauxMap: Record<string, Array<{ 
       bordereau: string; 
       date: string; 
@@ -233,29 +250,36 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         const pId = lp.prestationId;
         const lId = lp.lignePrestationId;
         const amount = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
+        const exclu = Number(lp.montantExclu || 0);
 
-        if (amount > 0) {
+        if (amount > 0 || exclu > 0) {
           if (pId) {
-            prestPaidMap[pId] = (prestPaidMap[pId] || 0) + amount;
-            if (!prestBordereauxMap[pId]) prestBordereauxMap[pId] = [];
-            prestBordereauxMap[pId].push({
-              bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
-              date: pm.datePaiement,
-              mode: pm.modePaiement || 'Virement',
-              montant: amount,
-              nomAgent: lp.nomAgent || lp.nomBaseAssurance,
-              acteCode: lp.actesPayes?.[0]?.code || 'ACTE',
-              acteLibelle: lp.actesPayes?.[0]?.libelle || lp.actesPayes?.[0]?.code || 'Règlement acte'
-            });
+            if (amount > 0) {
+              prestPaidMap[pId] = (prestPaidMap[pId] || 0) + amount;
+              if (!prestBordereauxMap[pId]) prestBordereauxMap[pId] = [];
+              prestBordereauxMap[pId].push({
+                bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
+                date: pm.datePaiement,
+                mode: pm.modePaiement || 'Virement',
+                montant: amount,
+                nomAgent: lp.nomAgent || lp.nomBaseAssurance,
+                acteCode: lp.actesPayes?.[0]?.code || 'ACTE',
+                acteLibelle: lp.actesPayes?.[0]?.libelle || lp.actesPayes?.[0]?.code || 'Règlement acte'
+              });
+            }
+            if (exclu > 0) {
+              prestExcluMap[pId] = (prestExcluMap[pId] || 0) + exclu;
+            }
           }
           if (lId) {
-            linePaidMap[lId] = (linePaidMap[lId] || 0) + amount;
+            if (amount > 0) linePaidMap[lId] = (linePaidMap[lId] || 0) + amount;
+            if (exclu > 0) lineExcluMap[lId] = (lineExcluMap[lId] || 0) + exclu;
           }
         }
       });
     });
 
-    return { prestPaidMap, linePaidMap, prestBordereauxMap };
+    return { prestPaidMap, linePaidMap, prestExcluMap, lineExcluMap, prestBordereauxMap };
   }, [paiements]);
 
   // Fast lookup map for settlement lines across all paiements for manual reconciliation
@@ -304,21 +328,27 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const remb = p.montantARembourser ?? Math.max(0, tot - mod);
 
     const paidFromPaiements = paymentsMap.prestPaidMap[p.id] || 0;
+    const excluFromPaiements = paymentsMap.prestExcluMap[p.id] || 0;
     const paidFromLines = (p.lignes || []).reduce((sum, l) => {
       const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
       const lPaidStored = l.totalPaye || 0;
       return sum + Math.max(lPaidStored, lPaidFromP);
     }, 0);
+    const excluFromLines = (p.lignes || []).reduce((sum, l) => {
+      const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
+      return sum + lExcluFromP;
+    }, 0);
     const paidFromPrestation = p.totalPaye || 0;
 
     const totalPaye = Math.max(paidFromPaiements, paidFromLines, paidFromPrestation);
-    const resteAPayer = Math.max(0, remb - totalPaye);
+    const totalExclu = Math.max(excluFromPaiements, excluFromLines);
+    const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
 
     const isFullyPaid = totalPaye >= remb && remb > 0;
     const isPartiallyPaid = totalPaye > 0 && !isFullyPaid;
-    const statut = p.statut === 'Rejeté' ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente';
+    const statut = p.statut === 'Rejeté' || (totalExclu >= remb && remb > 0) ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente';
 
-    return { tot, mod, remb, totalPaye, resteAPayer, statut };
+    return { tot, mod, remb, totalPaye, totalExclu, resteAPayer, statut };
   };
 
   // Prestation match & duplicate reconciliation analysis
@@ -371,11 +401,13 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const lPart = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes?.length || 1));
     const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
     const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
+    const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
     const lTotalPaye = Math.max(l.totalPaye || 0, lPaidFromP);
-    const lReste = Math.max(0, lARemb - lTotalPaye);
+    // Deduct exclusions from Reste à Payer since they are rejected
+    const lReste = Math.max(0, lARemb - lTotalPaye - lExcluFromP);
     const isFullyPaid = lTotalPaye >= lARemb && lARemb > 0;
     const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid;
-    const statut = l.statut || (isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente');
+    const statut = l.statut || (isFullyPaid ? 'Payé' : (lExcluFromP >= lARemb) ? 'Rejeté' : isPartiallyPaid ? 'Partiellement payé' : 'En attente');
 
     // Check if line matches a settlement line on date and amount
     const pDate = p.date ? p.date.split('T')[0] : '';
@@ -779,6 +811,20 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           </button>
 
           <button
+            onClick={handleExportRecouvrementPdfSelected}
+            disabled={selectedPrestations.size === 0}
+            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border shadow-xs transition ${
+              selectedPrestations.size > 0 
+                ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 cursor-pointer' 
+                : 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed opacity-50'
+            }`}
+            title="Exporter l'état de recouvrement détaillé des factures sélectionnées avec leurs actes"
+          >
+            <FileText className={`w-3.5 h-3.5 ${selectedPrestations.size > 0 ? 'text-amber-600' : 'text-slate-400'}`} />
+            <span>Export Sélection Détaillé ({selectedPrestations.size})</span>
+          </button>
+
+          <button
             id="btn-export-prestations-xlsx"
             onClick={handleExportExcel}
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-xs transition cursor-pointer"
@@ -1029,6 +1075,20 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
               <tr>
+                <th className="py-3 px-2 w-8">
+                  <input 
+                    type="checkbox" 
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    checked={filteredAndSortedList.length > 0 && selectedPrestations.size === filteredAndSortedList.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPrestations(new Set(filteredAndSortedList.map(p => p.id)));
+                      } else {
+                        setSelectedPrestations(new Set());
+                      }
+                    }}
+                  />
+                </th>
                 <th className="py-3 px-2 w-8"></th>
                 
                 {/* Date Soins */}
@@ -1147,7 +1207,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredAndSortedList.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-10 text-center text-slate-400 space-y-2">
+                  <td colSpan={13} className="py-10 text-center text-slate-400 space-y-2">
                     <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
                     <div>Aucun dossier de prestation ne correspond aux filtres sélectionnés.</div>
                     {activeFiltersCount > 0 && (
@@ -1185,6 +1245,19 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                       <tr className={`transition hover:bg-slate-50/80 ${
                         recInfo.hasMatch ? 'bg-emerald-50/20' : recInfo.hasDuplicate ? 'bg-amber-50/20' : ''
                       }`}>
+                        <td className="py-3 px-2 text-center">
+                          <input 
+                            type="checkbox" 
+                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            checked={selectedPrestations.has(prestation.id)}
+                            onChange={(e) => {
+                              const newSet = new Set(selectedPrestations);
+                              if (e.target.checked) newSet.add(prestation.id);
+                              else newSet.delete(prestation.id);
+                              setSelectedPrestations(newSet);
+                            }}
+                          />
+                        </td>
                         <td className="py-3 px-2 text-center">
                           <button
                             onClick={() => toggleRow(prestation.id)}
@@ -1312,7 +1385,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                       {/* Nested Expandable Sub-Table of Medical Acts (Base 2) & Attached Payments */}
                       {isExpanded && (
                         <tr className="bg-slate-50/90 border-y border-slate-200/80">
-                          <td colSpan={12} className="p-4 pl-12 space-y-3">
+                          <td colSpan={13} className="p-4 pl-12 space-y-3">
                             <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-2">
                               <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                                 <span className="flex items-center gap-1.5 text-indigo-700">
@@ -1331,6 +1404,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                     <th className="py-2 px-2 text-right">Somme Payée</th>
                                     <th className="py-2 px-2 text-right">Reste à Payer</th>
                                     <th className="py-2 px-2 text-center">Statut</th>
+                                    <th className="py-2 px-2 text-center">Actions</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -1378,12 +1452,34 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                           <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold ${
                                             lFin.statut === 'Payé'
                                               ? 'bg-emerald-100 text-emerald-800'
+                                              : lFin.statut === 'Rejeté'
+                                              ? 'bg-rose-100 text-rose-800'
                                               : lFin.statut === 'Partiellement payé'
                                               ? 'bg-sky-100 text-sky-800'
                                               : 'bg-amber-100 text-amber-800'
                                           }`}>
                                             {lFin.statut}
                                           </span>
+                                        </td>
+                                        <td className="py-2 px-2 text-center">
+                                          <div className="flex items-center justify-center gap-2">
+                                            <button 
+                                              onClick={(e) => { e.stopPropagation(); setLineEditContext({ prestation, ligne }); }}
+                                              className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition" 
+                                              title="Modifier la ligne"
+                                            >
+                                              <Edit2 className="w-3.5 h-3.5" />
+                                            </button>
+                                            {lFin.lReste > 0 && (
+                                              <button 
+                                                onClick={(e) => { e.stopPropagation(); setLineExcludeContext({ prestation, ligne, maxExclu: lFin.lReste }); setLineExcludeForm({ montant: lFin.lReste, motif: 'Rejet direct' }); }}
+                                                className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                                title="Envoyer en exclusion / rejet"
+                                              >
+                                                <Ban className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
+                                          </div>
                                         </td>
                                       </tr>
                                     );
@@ -1433,7 +1529,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             </tbody>
             <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
               <tr>
-                <td colSpan={5} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
+                <td colSpan={6} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
                   Total de la sélection ({stats.count}) :
                 </td>
                 <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">

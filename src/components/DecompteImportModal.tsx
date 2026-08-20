@@ -646,6 +646,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     setIsProcessing(true);
