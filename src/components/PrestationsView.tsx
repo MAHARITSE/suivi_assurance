@@ -775,7 +775,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             title="Exporter l'état de recouvrement des factures en retard de plus de 3 mois au format PDF"
           >
             <FileText className="w-3.5 h-3.5 text-rose-600" />
-            <span>Export PDF Recouvrement (> 3 mois)</span>
+            <span>Export PDF Recouvrement (&gt; 3 mois)</span>
           </button>
 
           <button
@@ -1530,6 +1530,31 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 })
               )}
             </tbody>
+            <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
+              <tr>
+                <td colSpan={5} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
+                  Total de la sélection ({stats.count}) :
+                </td>
+                <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">
+                  {formatMoney(stats.totalFacture)}
+                </td>
+                <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap">
+                  {formatMoney(stats.totalTicketMod)}
+                </td>
+                <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap">
+                  {formatMoney(stats.totalARembourser)}
+                </td>
+                <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap">
+                  {formatMoney(stats.totalPaye)}
+                </td>
+                <td className="py-3 px-3 text-right whitespace-nowrap">
+                  <span className={stats.totalReste > 0 ? 'text-rose-700' : 'text-slate-400'}>
+                    {formatMoney(stats.totalReste)}
+                  </span>
+                </td>
+                <td colSpan={2} className="py-3 px-3"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
 

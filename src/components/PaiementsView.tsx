@@ -1035,10 +1035,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             id="btn-export-paiements-recouvrement-pdf"
             onClick={handleExportRecouvrementPdf}
             className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 shadow-xs transition cursor-pointer"
-            title="Exporter l'état de recouvrement des créances échues (> 3 mois) au format PDF"
+            title="Exporter l'état de recouvrement des créances échues (&gt; 3 mois) au format PDF"
           >
             <FileText className="w-3.5 h-3.5 text-rose-600" />
-            <span>Export PDF Recouvrement (> 3 mois)</span>
+            <span>Export PDF Recouvrement (&gt; 3 mois)</span>
           </button>
 
           <button
