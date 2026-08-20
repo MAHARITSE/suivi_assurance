@@ -9,6 +9,18 @@ import {
   Plus, 
   ArrowRight
 } from 'lucide-react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip as RechartsTooltip, 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell 
+} from 'recharts';
 import { Prestation, Paiement, Societe, Personne, ActiveTab } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
 
@@ -22,6 +34,20 @@ interface DashboardProps {
   onOpenNewPrestation: () => void;
   onOpenNewPaiement: () => void;
 }
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-lg text-xs">
+        <p className="font-bold text-slate-700 mb-1">{label || payload[0].name}</p>
+        <p className="text-indigo-600 font-semibold">
+          {formatMoney(payload[0].value)}
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 
 export const Dashboard: React.FC<DashboardProps> = ({
   prestations,
@@ -53,6 +79,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Helper getters
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société Inconnue';
   const getPersonneNom = (id: string) => personnes.find(p => p.id === id)?.nomPrenom || 'Assuré Inconnu';
+
+  // --- Charts Data Preparation ---
+  const caParSocieteMap = filteredPrestations.reduce((acc, p) => {
+    const societeNom = getSocieteNom(p.societeId);
+    if (!acc[societeNom]) acc[societeNom] = 0;
+    acc[societeNom] += p.totalPrestation;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const caParSocieteData = Object.entries(caParSocieteMap)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+
+  const COLORS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#f97316'];
+
+  const monthlyDataMap = filteredPrestations.reduce((acc, p) => {
+    const dateObj = new Date(p.date);
+    const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+    // Ex: "janv. 26"
+    const monthLabel = dateObj.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+    
+    if (!acc[monthKey]) {
+      acc[monthKey] = { label: monthLabel, monthKey, total: 0 };
+    }
+    acc[monthKey].total += p.totalPrestation;
+    return acc;
+  }, {} as Record<string, { label: string; monthKey: string; total: number }>);
+
+  const monthlyData = Object.values(monthlyDataMap)
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  // ------------------------------
 
   return (
     <div id="dashboard-view" className="space-y-6">
@@ -140,6 +197,84 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Pie Chart: Répartition CA par Société */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col">
+          <h3 className="font-bold text-slate-900 text-sm mb-4">Répartition par Société</h3>
+          <div className="flex-1 min-h-[250px]">
+            {caParSocieteData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={caParSocieteData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {caParSocieteData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip content={<CustomTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                Aucune donnée disponible
+              </div>
+            )}
+          </div>
+          {/* Custom minimal legend */}
+          {caParSocieteData.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
+              {caParSocieteData.slice(0, 8).map((entry, index) => (
+                <div key={entry.name} className="flex items-center text-[11px] text-slate-600">
+                  <span className="w-2.5 h-2.5 rounded-full mr-1.5 shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }}></span>
+                  <span className="truncate max-w-[120px]" title={entry.name}>{entry.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Bar Chart: Évolution mensuelle */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col">
+          <h3 className="font-bold text-slate-900 text-sm mb-4">Évolution Mensuelle</h3>
+          <div className="flex-1 min-h-[250px]">
+            {monthlyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis 
+                    dataKey="label" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 11, fill: '#64748b' }} 
+                    dy={10} 
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 11, fill: '#64748b' }} 
+                    tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}
+                  />
+                  <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: '#f1f5f9' }} />
+                  <Bar dataKey="total" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                Aucune donnée disponible
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Recent Prestations Table */}
       <div className="grid grid-cols-1 gap-6">
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4">
@@ -200,46 +335,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      {/* Recent Payments / Bordereaux */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div>
-            <h3 className="font-bold text-slate-900 text-sm">Bordereaux de Règlements Récents</h3>
-            <p className="text-xs text-slate-500">Rapprochement financier des paiements reçus des compagnies d'assurance</p>
-          </div>
-          <button
-            onClick={() => onNavigate('paiements')}
-            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center"
-          >
-            Tous les Règlements <ArrowRight className="w-3 h-3 ml-1" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredPaiements.slice(0, 3).map(paiement => (
-            <div key={paiement.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-indigo-900 text-sm">{paiement.numeroBordereau}</span>
-                <span className="text-xs text-slate-500">{formatDate(paiement.datePaiement)}</span>
-              </div>
-              <div className="text-xs text-slate-600">
-                <span className="font-medium text-slate-800">Société:</span> {getSocieteNom(paiement.societeId)}
-              </div>
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 text-xs">
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Total Réglé</span>
-                  <span className="font-bold text-emerald-600">{formatMoney(paiement.totalPaye)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Ticket Modérateur</span>
-                  <span className="font-semibold text-amber-700">{formatMoney(paiement.totalModerateur)}</span>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </div>

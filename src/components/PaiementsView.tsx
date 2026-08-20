@@ -1061,51 +1061,6 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         </div>
       </div>
 
-      {/* Summary KPI Cards Ribbon */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Bordereaux</div>
-          <div className="text-lg font-bold text-slate-900 mt-0.5">{stats.count}</div>
-          <div className="text-[10px] text-slate-400">règlements listés</div>
-        </div>
-
-        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Réclamé</div>
-          <div className="text-sm font-bold text-slate-900 mt-0.5 truncate">{formatMoney(stats.totalReclame)}</div>
-          <div className="text-[10px] text-slate-400">émis aux assureurs</div>
-        </div>
-
-        <div className="bg-white p-3 rounded-xl border border-emerald-200/80 bg-emerald-50/20 shadow-xs">
-          <div className="text-[11px] font-medium text-emerald-700 uppercase tracking-wider">Total Réglé</div>
-          <div className="text-sm font-bold text-emerald-700 mt-0.5 truncate">{formatMoney(stats.totalPaye)}</div>
-          <div className="text-[10px] text-emerald-600">virement & chèques</div>
-        </div>
-
-        <div className="bg-white p-3 rounded-xl border border-amber-200/70 bg-amber-50/20 shadow-xs">
-          <div className="text-[11px] font-medium text-amber-700 uppercase tracking-wider">Ticket Modérateur</div>
-          <div className="text-sm font-bold text-amber-800 mt-0.5 truncate">{formatMoney(stats.totalModerateur)}</div>
-          <div className="text-[10px] text-amber-600">part affilié</div>
-        </div>
-
-        <div className={`bg-white p-3 rounded-xl border shadow-xs ${stats.totalExclu > 0 ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200'}`}>
-          <div className={`text-[11px] font-medium uppercase tracking-wider ${stats.totalExclu > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
-            Exclusions / Rejets
-          </div>
-          <div className={`text-sm font-bold mt-0.5 truncate ${stats.totalExclu > 0 ? 'text-rose-700' : 'text-slate-700'}`}>
-            {formatMoney(stats.totalExclu)}
-          </div>
-          <div className={`text-[10px] ${stats.totalExclu > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-            {stats.totalExclu > 0 ? 'hors couverture' : 'aucun rejet'}
-          </div>
-        </div>
-
-        <div className="bg-white p-3 rounded-xl border border-indigo-200/70 bg-indigo-50/20 shadow-xs">
-          <div className="text-[11px] font-medium text-indigo-700 uppercase tracking-wider">Couverture</div>
-          <div className="text-lg font-bold text-indigo-800 mt-0.5">{stats.tauxCouverture}%</div>
-          <div className="text-[10px] text-indigo-600">taux d'encaissement</div>
-        </div>
-      </div>
-
       {/* Main Multi-criteria Filter Bar */}
       <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
@@ -1714,69 +1669,34 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   })
                 )}
               </tbody>
+              <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
+                <tr>
+                  <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
+                    Total de la sélection ({stats.count}) :
+                  </td>
+                  <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">
+                    {formatMoney(stats.totalReclame)}
+                  </td>
+                  <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap">
+                    {formatMoney(stats.totalModerateur)}
+                  </td>
+                  <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap">
+                    {formatMoney(Math.max(0, stats.totalReclame - stats.totalModerateur))}
+                  </td>
+                  <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap">
+                    {formatMoney(stats.totalPaye)}
+                  </td>
+                  <td className="py-3 px-3 text-right whitespace-nowrap">
+                    <span className={Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye) > 0 ? 'text-rose-700' : 'text-slate-400'}>
+                      {formatMoney(Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye))}
+                    </span>
+                  </td>
+                  <td colSpan={3} className="py-3 px-3 text-right text-rose-700 whitespace-nowrap">
+                    {formatMoney(stats.totalExclu)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
-          </div>
-
-          {/* Pied de tableau / Synthèse Financière (Bordereaux) */}
-          <div className="border-t border-slate-200 bg-slate-50/90 p-4 rounded-b-xl">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              {/* Dossiers */}
-              <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
-                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Dossiers</div>
-                <div className="text-xl font-bold text-slate-900 mt-1">{stats.count}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">factures listées</div>
-              </div>
-
-              {/* Total Facturé */}
-              <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
-                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Facturé</div>
-                <div className="text-base font-bold text-slate-900 mt-1 font-mono">{formatMoney(stats.totalReclame)}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">montant brut</div>
-              </div>
-
-              {/* Ticket Modérateur */}
-              <div className="bg-white rounded-xl p-3.5 border border-amber-200/70 bg-amber-50/20 shadow-2xs">
-                <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">Ticket Modérateur</div>
-                <div className="text-base font-bold text-amber-900 mt-1 font-mono">{formatMoney(stats.totalModerateur)}</div>
-                <div className="text-[10px] text-amber-600/80 mt-0.5">part affilié</div>
-              </div>
-
-              {/* À Rembourser */}
-              <div className="bg-white rounded-xl p-3.5 border border-indigo-200/70 bg-indigo-50/20 shadow-2xs">
-                <div className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider">À Rembourser</div>
-                <div className="text-base font-bold text-indigo-900 mt-1 font-mono">{formatMoney(Math.max(0, stats.totalReclame - stats.totalModerateur))}</div>
-                <div className="text-[10px] text-indigo-600/80 mt-0.5">charge assureur</div>
-              </div>
-
-              {/* Total Réglé */}
-              <div className="bg-white rounded-xl p-3.5 border border-emerald-200/70 bg-emerald-50/20 shadow-2xs">
-                <div className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Total Réglé</div>
-                <div className="text-base font-bold text-emerald-700 mt-1 font-mono">{formatMoney(stats.totalPaye)}</div>
-                <div className="text-[10px] text-emerald-600/80 mt-0.5">déjà payé</div>
-              </div>
-
-              {/* Reste à Payer */}
-              {(() => {
-                const diff = Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye);
-                return (
-                  <div className={`rounded-xl p-3.5 border shadow-2xs ${
-                    diff > 0 
-                      ? 'bg-rose-50/60 border-rose-200' 
-                      : 'bg-emerald-50/60 border-emerald-200'
-                  }`}>
-                    <div className={`text-[11px] font-semibold uppercase tracking-wider ${diff > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      Reste à Payer
-                    </div>
-                    <div className={`text-base font-bold mt-1 font-mono ${diff > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      {formatMoney(diff)}
-                    </div>
-                    <div className={`text-[10px] mt-0.5 ${diff > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
-                      {diff === 0 ? 'entièrement soldé' : 'à recouvrer'}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
           </div>
         </div>
       ) : (
@@ -2050,75 +1970,46 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   })
                 )}
               </tbody>
+              {(() => {
+                const totReclame = groupedPaymentActs.reduce((s, g) => s + g.totalReclame, 0);
+                const totMod = groupedPaymentActs.reduce((s, g) => s + g.ticketModerateur, 0);
+                const totRemb = Math.max(0, totReclame - totMod);
+                const totPaye = groupedPaymentActs.reduce((s, g) => s + g.totalPaye, 0);
+                const totReste = Math.max(0, totRemb - totPaye);
+                const totExclu = groupedPaymentActs.reduce((s, g) => s + g.totalExclu, 0);
+
+                return (
+                  <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
+                    <tr>
+                      <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
+                        Total de la sélection ({groupedPaymentActs.length}) :
+                      </td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">
+                        {formatMoney(totReclame)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap">
+                        {formatMoney(totMod)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap">
+                        {formatMoney(totRemb)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap">
+                        {formatMoney(totPaye)}
+                      </td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <span className={totReste > 0 ? 'text-rose-700' : 'text-slate-400'}>
+                          {formatMoney(totReste)}
+                        </span>
+                      </td>
+                      <td colSpan={3} className="py-3 px-3 text-right text-rose-700 whitespace-nowrap">
+                        {formatMoney(totExclu)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
-
-          {/* Pied de tableau / Synthèse Financière (Groupes Actes) */}
-          {(() => {
-            const totReclame = groupedPaymentActs.reduce((s, g) => s + g.totalReclame, 0);
-            const totMod = groupedPaymentActs.reduce((s, g) => s + g.ticketModerateur, 0);
-            const totRemb = Math.max(0, totReclame - totMod);
-            const totPaye = groupedPaymentActs.reduce((s, g) => s + g.totalPaye, 0);
-            const totReste = Math.max(0, totRemb - totPaye);
-
-            return (
-              <div className="border-t border-slate-200 bg-slate-50/90 p-4 rounded-b-xl">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {/* Dossiers / Groupes */}
-                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
-                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Dossiers</div>
-                    <div className="text-xl font-bold text-slate-900 mt-1">{groupedPaymentActs.length}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">groupes listés</div>
-                  </div>
-
-                  {/* Total Facturé */}
-                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
-                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Facturé</div>
-                    <div className="text-base font-bold text-slate-900 mt-1 font-mono">{formatMoney(totReclame)}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">montant brut</div>
-                  </div>
-
-                  {/* Ticket Modérateur */}
-                  <div className="bg-white rounded-xl p-3.5 border border-amber-200/70 bg-amber-50/20 shadow-2xs">
-                    <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">Ticket Modérateur</div>
-                    <div className="text-base font-bold text-amber-900 mt-1 font-mono">{formatMoney(totMod)}</div>
-                    <div className="text-[10px] text-amber-600/80 mt-0.5">part affilié</div>
-                  </div>
-
-                  {/* À Rembourser */}
-                  <div className="bg-white rounded-xl p-3.5 border border-indigo-200/70 bg-indigo-50/20 shadow-2xs">
-                    <div className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider">À Rembourser</div>
-                    <div className="text-base font-bold text-indigo-900 mt-1 font-mono">{formatMoney(totRemb)}</div>
-                    <div className="text-[10px] text-indigo-600/80 mt-0.5">charge assureur</div>
-                  </div>
-
-                  {/* Total Réglé */}
-                  <div className="bg-white rounded-xl p-3.5 border border-emerald-200/70 bg-emerald-50/20 shadow-2xs">
-                    <div className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Total Réglé</div>
-                    <div className="text-base font-bold text-emerald-700 mt-1 font-mono">{formatMoney(totPaye)}</div>
-                    <div className="text-[10px] text-emerald-600/80 mt-0.5">déjà payé</div>
-                  </div>
-
-                  {/* Reste à Payer */}
-                  <div className={`rounded-xl p-3.5 border shadow-2xs ${
-                    totReste > 0 
-                      ? 'bg-rose-50/60 border-rose-200' 
-                      : 'bg-emerald-50/60 border-emerald-200'
-                  }`}>
-                    <div className={`text-[11px] font-semibold uppercase tracking-wider ${totReste > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      Reste à Payer
-                    </div>
-                    <div className={`text-base font-bold mt-1 font-mono ${totReste > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      {formatMoney(totReste)}
-                    </div>
-                    <div className={`text-[10px] mt-0.5 ${totReste > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
-                      {totReste === 0 ? 'entièrement soldé' : 'à recouvrer'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
         </div>
       )}
 

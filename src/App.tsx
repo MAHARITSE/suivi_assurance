@@ -19,7 +19,7 @@ import {
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('prestations');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
 
   // Persistence directly aligned and purged for BSA Invoice dataset
