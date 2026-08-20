@@ -301,16 +301,16 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         } else {
           const textResp = await response.text();
           console.warn('Réponse non-JSON du serveur:', textResp.substring(0, 150));
-          json = { success: true, data: getFallbackFacture(file.name) };
+          throw new Error('Réponse serveur invalide (non-JSON). Veuillez vérifier le fichier.');
+        }
+
+        if (json && json.success === false) {
+          throw new Error(json.error || "L'extraction IA de la facture a échoué. Veuillez vérifier vos clés API.");
         }
 
         const data: ParsedFactureAssurance = json?.data || json;
         if (!data || !Array.isArray(data.lignes) || data.lignes.length === 0) {
-          const fallback = getFallbackFacture(file.name);
-          setParsedInvoice(fallback);
-          const initialSelected: Record<number, boolean> = {};
-          fallback.lignes.forEach((_, i) => { initialSelected[i] = true; });
-          setSelectedLines(initialSelected);
+          throw new Error("Aucune ligne de prestation valide n'a pu être extraite de ce document.");
         } else {
           setParsedInvoice(data);
           const initialSelected: Record<number, boolean> = {};
@@ -320,12 +320,8 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         setIsProcessing(false);
       }
     } catch (err: any) {
-      console.warn('Erreur analyse PDF:', err);
-      const fallback = getFallbackFacture(file?.name || '');
-      setParsedInvoice(fallback);
-      const initialSelected: Record<number, boolean> = {};
-      fallback.lignes.forEach((_, i) => { initialSelected[i] = true; });
-      setSelectedLines(initialSelected);
+      console.error('Erreur analyse PDF:', err);
+      setErrorMessage(err.message || "Erreur lors de l'analyse du document.");
       setIsProcessing(false);
     }
   };
@@ -358,6 +354,31 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     const createdSocietes: Societe[] = [];
     const createdPersonnes: Personne[] = [];
 
+    const isRealMatricule = (mat: string) => {
+      const m = (mat || '').trim();
+      return m !== '' && !m.toUpperCase().startsWith('MAT-');
+    };
+
+    const getBestMatricule = (mat1: string, mat2: string) => {
+      if (isRealMatricule(mat1)) return mat1;
+      if (isRealMatricule(mat2)) return mat2;
+      return mat1 || mat2;
+    };
+
+    // Build a map of patient name to the best matricule found in this uploaded document
+    const fileBestMatricules: Record<string, string> = {};
+    chosenLignes.forEach(l => {
+      const nameKey = (l.nomPrenom || '').trim().toLowerCase();
+      const mat = (l.matricule || '').replace(/\s+/g, '');
+      if (nameKey) {
+        if (!fileBestMatricules[nameKey]) {
+          fileBestMatricules[nameKey] = mat;
+        } else {
+          fileBestMatricules[nameKey] = getBestMatricule(fileBestMatricules[nameKey], mat);
+        }
+      }
+    });
+
     const newPrestations: Prestation[] = chosenLignes.map((ligne, idx) => {
       const prestId = generateId(`prest-salfa-${idx}`);
       const mainSocName = ligne.societeAffiliee || parsedInvoice.clientDoit || 'BSA';
@@ -381,16 +402,46 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       }
 
       // Patient match / create
-      const cleanMatricule = (ligne.matricule || '').replace(/\s+/g, '');
+      const nameKey = (ligne.nomPrenom || '').trim().toLowerCase();
+      const fileMat = fileBestMatricules[nameKey] || '';
+
+      // Find existing person by name first
       let matchedPer = personnes.find(p => 
-        (cleanMatricule && p.matricule.replace(/\s+/g, '').toLowerCase() === cleanMatricule.toLowerCase()) ||
-        (ligne.nomPrenom && p.nomPrenom.toLowerCase().includes(ligne.nomPrenom.toLowerCase()))
+        ligne.nomPrenom && (
+          p.nomPrenom.toLowerCase() === ligne.nomPrenom.toLowerCase() ||
+          p.nomPrenom.toLowerCase().includes(ligne.nomPrenom.toLowerCase()) ||
+          ligne.nomPrenom.toLowerCase().includes(p.nomPrenom.toLowerCase())
+        )
       );
+
+      const rowMatricule = fileMat || (ligne.matricule || '').replace(/\s+/g, '');
+      if (!matchedPer && rowMatricule) {
+        matchedPer = personnes.find(p => 
+          p.matricule.replace(/\s+/g, '').toLowerCase() === rowMatricule.toLowerCase()
+        );
+      }
+
+      let finalMatricule = rowMatricule;
+      if (matchedPer) {
+        finalMatricule = getBestMatricule(matchedPer.matricule, finalMatricule);
+        
+        // If we found a real/better matricule, update the existing person record in the parent state
+        if (isRealMatricule(finalMatricule) && !isRealMatricule(matchedPer.matricule)) {
+          matchedPer.matricule = finalMatricule;
+          // Add to createdPersonnes to propagate the update back to App.tsx
+          if (!createdPersonnes.some(p => p.id === matchedPer!.id)) {
+            createdPersonnes.push({
+              ...matchedPer,
+              matricule: finalMatricule
+            });
+          }
+        }
+      }
 
       if (!matchedPer && autoCreateMissingPersonnes) {
         matchedPer = {
           id: generateId(`per-new-${idx}`),
-          matricule: cleanMatricule || `MAT-${100000 + idx}`,
+          matricule: finalMatricule || `MAT-${100000 + idx}`,
           nomPrenom: ligne.nomPrenom,
           societeId: matchedSoc?.id || societes[0]?.id || 'soc-1',
           qualite: (ligne.ayantDroit ? 'Ayant droit' : 'Adhérent Principal') as any,
@@ -444,7 +495,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         sousSociete: sousSoc,
         personneId: matchedPer?.id || personnes[0]?.id || 'per-1',
         nomAgent: ligne.nomPrenom,
-        matricule: cleanMatricule || matchedPer?.matricule || '',
+        matricule: finalMatricule || matchedPer?.matricule || '',
         totalPrestation: ligne.montantBrut,
         montantTotal: ligne.montantBrut,
         participation: ligne.participation,
@@ -515,6 +566,17 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* Permanent Info Banner: Unique SALFA Format */}
+          <div className="flex items-start gap-3 rounded-xl bg-indigo-50/50 border border-indigo-100 p-4 text-xs text-indigo-900 shadow-2xs">
+            <Info className="h-5 w-5 shrink-0 text-indigo-600 mt-0.5" />
+            <div>
+              <h4 className="font-bold text-indigo-950 mb-1">ℹ️ Format Unique de Facturation SALFA</h4>
+              <p className="leading-relaxed">
+                Les factures de prestations de soins suivent <strong>un format unique émis par l'Hôpital SALFA</strong> à destination de ses différents clients assureurs (<strong>BSA, ASCOMA, MCI Care</strong>, etc.). Le système extrait automatiquement les assurés, leurs sous-sociétés d'affiliation et le détail complet des actes médicaux depuis ce format type.
+              </p>
+            </div>
+          </div>
+
           {errorMessage && (
             <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800">
               <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
@@ -705,6 +767,34 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
           {parsedInvoice && (
             <div className="space-y-4">
+              {/* Conditional format check warning banner */}
+              {(() => {
+                const isSalfaDoc = 
+                  parsedInvoice.etablissement?.toLowerCase().includes('salfa') || 
+                  parsedInvoice.etablissement?.toLowerCase().includes('loterana') ||
+                  parsedInvoice.etablissement?.toLowerCase().includes('lutherienne') ||
+                  parsedInvoice.numeroFacture?.toLowerCase().includes('salfa') ||
+                  parsedInvoice.numeroFacture?.toLowerCase().includes('fa-') ||
+                  parsedInvoice.lignes?.some(l => l.observations?.toLowerCase().includes('salfa'));
+                
+                if (!isSalfaDoc) {
+                  return (
+                    <div className="flex items-start gap-3 rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 shadow-2xs">
+                      <Info className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+                      <div>
+                        <h4 className="font-bold text-amber-950 mb-1">⚠️ Info : Format non standard</h4>
+                        <p className="leading-relaxed">
+                          Ce document ne semble pas provenir de la facturation standard de <strong>l'Hôpital SALFA</strong>. 
+                          Rappel : L'importation de prestations est spécifiquement optimisée pour le format de facture unique émis par SALFA vers ses clients (BSA, ASCOMA, MCI Care). 
+                          Vous pouvez continuer l'importation, mais veillez à vérifier attentivement les données extraites ci-dessous.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               {/* Document Overview Header */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
                 <div>

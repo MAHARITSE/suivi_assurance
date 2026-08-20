@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { ascomaSampleInvoice, mciCareSampleInvoice, mciCareFactureSampleInvoice, bsaReleveSampleInvoice } from './src/data/insuranceSampleDocuments';
 import { salfaSampleInvoice } from './src/data/salfaInvoiceSample';
 
@@ -175,7 +175,7 @@ Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte
 }
 
 RÈGLES CRUCIALES D'EXTRACTION :
-1. Extraction complète : Extrais TOUTES les lignes du document sans en oublier une seule (qu'il y ait 10, 25 ou 45 lignes).
+1. EXTRACTION MULTI-PAGES OBLIGATOIRE : Ce document contient souvent plusieurs pages. Extrais ABSOLUMENT TOUTES les lignes de TOUTES LES PAGES jusqu'à la fin. Il est normal d'avoir plus de 100 lignes. N'abrège jamais le tableau !
 2. Colonne "Acte médicale/Prix" (Multiples Actes) : Un montant ou patient peut avoir PLUSIEURS actes médicaux sous la colonne "Acte médicale/Prix" (ex: "DENT : 50 000,00 \n MEDIC : 12 000,00" ou "CONS : 20 000,00 / MEDIC : 26 200,00 / LABO : 3 000,00"). Extrais TOUS les sous-actes distinctement dans la liste "actes", chacun avec son code (ex: CONS, MEDIC/PHAR, LABO, DENT, HOSP, SOINS, ECHO, STOCK), son libellé et son montant individuel.
 3. Analyse des parenthèses et sous-sociétés : Les mentions entre parenthèses dans la colonne client ou assuré indiquent des **sous-sociétés** (ex: "(BFV)", "(ACCES BANQUES)", "(BAOBAB BANQUE)", "(SIPEM)", "(CAISSE D'ÉPARGNE)", "(ORANGE)", "(WILDLIFE CONSERVATION)", "(ADRA MADAGASCAR)"). Place-les impérativement dans le champ "sousSociete".
 4. Dates : Convertis TOUTES les dates au format ISO 'YYYY-MM-DD' (ex: 21/04/2026 -> 2026-04-21, 01/04/26 -> 2026-04-01).
@@ -191,8 +191,79 @@ RÈGLES CRUCIALES D'EXTRACTION :
 7. Règle absolue pour BSA et Relevés Médicaux : Le vrai nom de la personne à extraire dans "nomPrenom" est TOUJOURS le nom de la personne soignée alignée à la date du soin (le Patient / Ayant-droit / Bénéficiaire / Personne soignée), et NON le nom aligné à l'adhésion/contrat si les deux diffèrent. Si l'adhérent/titulaire est différent, mentionne-le dans "observations" (ex: "Adhérent : NOM_ADHERENT").
 8. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
 
+          const invoiceSchema = {
+            type: Type.OBJECT,
+            properties: {
+              documentType: { type: Type.STRING, description: "Type de document: 'facture' ou 'decompte'." },
+              clientDoit: { type: Type.STRING, description: "Nom de l'organisme / assurance principale (ex: MCI CARE, ASCOMA, BSA, etc.)" },
+              garant: { type: Type.STRING, description: "Nom du garant / souscripteur" },
+              etablissement: { type: Type.STRING, description: "Nom de l'établissement prestataire" },
+              numeroFacture: { type: Type.STRING, description: "Numéro de facture ou référence" },
+              numeroBordereau: { type: Type.STRING, description: "Numéro de bordereau / lot" },
+              moisPriseEnCharge: { type: Type.STRING, description: "Mois ou période de prise en charge" },
+              dateEmission: { type: Type.STRING, description: "Date d'émission au format YYYY-MM-DD" },
+              dateComptable: { type: Type.STRING },
+              banqueReglement: { type: Type.STRING },
+              rib: { type: Type.STRING },
+              totalMontantBrut: { type: Type.NUMBER },
+              totalExclu: { type: Type.NUMBER },
+              totalBaseReglement: { type: Type.NUMBER },
+              totalParticipation: { type: Type.NUMBER },
+              totalNetAPayer: { type: Type.NUMBER },
+              remise: { type: Type.NUMBER },
+              sommeLettres: { type: Type.STRING },
+              lignes: {
+                type: Type.ARRAY,
+                description: "Liste complète de toutes les lignes de soins/prestations du document.",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    numeroLigne: { type: Type.INTEGER },
+                    dateSoins: { type: Type.STRING, description: "Date de soins (format YYYY-MM-DD)" },
+                    matricule: { type: Type.STRING },
+                    nomPrenom: { type: Type.STRING, description: "Nom complet du bénéficiaire / patient" },
+                    ayantDroit: { type: Type.STRING },
+                    societeAffiliee: { type: Type.STRING, description: "Société affiliée ou garant principal" },
+                    sousSociete: { type: Type.STRING, description: "Sous-société extraite des parenthèses" },
+                    prestataireNom: { type: Type.STRING },
+                    numeroFactureOrigine: { type: Type.STRING },
+                    actes: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          code: { type: Type.STRING, description: "Code de l'acte (CONS, MEDIC, LABO, DENT, HOSP, RADI, SOINS, STOCK)" },
+                          libelle: { type: Type.STRING, description: "Libellé de l'acte" },
+                          montant: { type: Type.NUMBER, description: "Montant de cet acte individuel" }
+                        },
+                        required: ["code", "montant"]
+                      }
+                    },
+                    actesTexte: { type: Type.STRING },
+                    montantBrut: { type: Type.NUMBER },
+                    montantExclu: { type: Type.NUMBER },
+                    baseReglement: { type: Type.NUMBER },
+                    participation: { type: Type.NUMBER },
+                    netAPayer: { type: Type.NUMBER },
+                    observations: { type: Type.STRING }
+                  },
+                  required: ["numeroLigne", "nomPrenom", "montantBrut", "netAPayer"]
+                }
+              }
+            },
+            required: ["documentType", "clientDoit", "lignes"]
+          };
+
           let responseText = '';
-          const candidateModels = ['gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+          const candidateModels = [
+            'gemini-3.7-flash', 
+            'gemini-3.1-pro-preview', 
+            'gemini-2.5-flash', 
+            'gemini-3.1-flash-lite', 
+            'gemini-flash-latest'
+          ];
+          const errors: string[] = [];
+
           for (const modelName of candidateModels) {
             try {
               const aiResp = await ai.models.generateContent({
@@ -208,6 +279,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
                 ],
                 config: {
                   responseMimeType: 'application/json',
+                  responseSchema: invoiceSchema,
                   maxOutputTokens: 65536,
                   temperature: 0.1,
                 }
@@ -215,10 +287,12 @@ RÈGLES CRUCIALES D'EXTRACTION :
               responseText = aiResp.text || '';
               if (responseText) break;
             } catch (mErr: any) {
-              const is503 = mErr?.message?.includes('503') || mErr?.status === 'UNAVAILABLE' || mErr?.status === 503;
-              console.warn(`Model ${modelName} attempt failed (503=${is503}):`, mErr?.message || mErr);
+              const errMsg = mErr?.message || String(mErr);
+              errors.push(`${modelName}: ${errMsg}`);
+              const is503 = errMsg.includes('503') || mErr?.status === 'UNAVAILABLE' || mErr?.status === 503;
+              console.warn(`Model ${modelName} attempt failed (503=${is503}):`, errMsg);
               if (is503) {
-                await waitMs(600);
+                await waitMs(1000); // Wait slightly longer for demand spikes
               }
             }
           }
@@ -261,12 +335,37 @@ RÈGLES CRUCIALES D'EXTRACTION :
               });
             }
           }
+
+          // If all models in candidate loop failed
+          if (errors.length > 0) {
+            const hasQuotaOrDemandErr = errors.some(e => 
+              e.includes('503') || 
+              e.includes('429') || 
+              e.includes('quota') || 
+              e.includes('limit') || 
+              e.includes('UNAVAILABLE') || 
+              e.includes('RESOURCE_EXHAUSTED')
+            );
+            if (hasQuotaOrDemandErr) {
+              return res.status(429).json({
+                success: false,
+                error: "Les services d'analyse IA de Google (Gemini) rencontrent actuellement une forte demande ou une limite de quota temporaire. Veuillez patienter 10 à 15 secondes puis réessayer, ou utilisez les exemples de démonstration préchargés si le problème persiste."
+              });
+            }
+            return res.status(500).json({
+              success: false,
+              error: `L'extraction IA de la facture a échoué. Détails des tentatives : ${errors.join(' | ')}`
+            });
+          }
         } catch (geminiErr: any) {
-          console.warn('Gemini extraction error, falling back to local extractor:', geminiErr?.message || geminiErr);
+          console.warn('Gemini extraction error:', geminiErr?.message || geminiErr);
         }
       }
 
-      return res.status(500).json({ success: false, error: "Clé API manquante ou OCR échoué." });
+      return res.status(500).json({ 
+        success: false, 
+        error: ai ? "L'extraction par Intelligence Artificielle a échoué ou aucun texte n'a pu être extrait." : "Clé API Gemini non configurée. Veuillez ajouter votre clé GEMINI_API_KEY dans l'onglet Paramètres > Secrets pour activer l'extraction automatique." 
+      });
 
     } catch (err: any) {
       console.error('API Error in parse-invoice:', err);

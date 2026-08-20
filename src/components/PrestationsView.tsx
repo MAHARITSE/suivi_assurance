@@ -79,6 +79,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   onSavePrestation,
   onDeletePrestation,
   onImportPrestations,
+  onSavePaiement,
   isCreateModalOpen,
   setIsCreateModalOpen,
 }) => {

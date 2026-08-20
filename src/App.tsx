@@ -27,10 +27,11 @@ export function App() {
     localStorage.removeItem('suivi_assurance_societes');
     localStorage.removeItem('suivi_assurance_bsa_v3_societes');
     const saved = localStorage.getItem('suivi_assurance_bsa_clean_societes');
+    const allowedIds = ['soc-bsa', 'soc-mci', 'soc-ascoma'];
     if (saved) {
       try {
         const parsed: Societe[] = JSON.parse(saved);
-        return parsed.filter(s => s.id !== 'soc-salfa' && !s.code?.toLowerCase().includes('salfa') && !s.nom?.toLowerCase().includes('hopitaly loterana'));
+        return parsed.filter(s => allowedIds.includes(s.id));
       } catch {
         return initialSocietes;
       }
@@ -173,10 +174,26 @@ export function App() {
     newPersonnes?: Personne[]
   ) => {
     if (newSocietes && newSocietes.length > 0) {
-      setSocietes(prev => [...prev, ...newSocietes]);
+      setSocietes(prev => {
+        const copy = [...prev];
+        newSocietes.forEach(ns => {
+          const idx = copy.findIndex(s => s.id === ns.id);
+          if (idx >= 0) copy[idx] = ns;
+          else copy.push(ns);
+        });
+        return copy;
+      });
     }
     if (newPersonnes && newPersonnes.length > 0) {
-      setPersonnes(prev => [...prev, ...newPersonnes]);
+      setPersonnes(prev => {
+        const copy = [...prev];
+        newPersonnes.forEach(np => {
+          const idx = copy.findIndex(p => p.id === np.id);
+          if (idx >= 0) copy[idx] = np;
+          else copy.push(np);
+        });
+        return copy;
+      });
     }
     setPrestations(prev => [...newPrestations, ...prev]);
     setActiveTab('prestations');
@@ -189,10 +206,26 @@ export function App() {
     newPersonnes?: Personne[]
   ) => {
     if (newSocietes && newSocietes.length > 0) {
-      setSocietes(prev => [...prev, ...newSocietes]);
+      setSocietes(prev => {
+        const copy = [...prev];
+        newSocietes.forEach(ns => {
+          const idx = copy.findIndex(s => s.id === ns.id);
+          if (idx >= 0) copy[idx] = ns;
+          else copy.push(ns);
+        });
+        return copy;
+      });
     }
     if (newPersonnes && newPersonnes.length > 0) {
-      setPersonnes(prev => [...prev, ...newPersonnes]);
+      setPersonnes(prev => {
+        const copy = [...prev];
+        newPersonnes.forEach(np => {
+          const idx = copy.findIndex(p => p.id === np.id);
+          if (idx >= 0) copy[idx] = np;
+          else copy.push(np);
+        });
+        return copy;
+      });
     }
     setPaiements(prev => [newPaiement, ...prev]);
     setPrestations(updatedPrestations);

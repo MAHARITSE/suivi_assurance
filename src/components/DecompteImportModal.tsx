@@ -99,13 +99,13 @@ export interface SettlementRowItem {
 
 export function normalizeActFamilyCode(rawCode: string): string {
   const c = (rawCode || '').toUpperCase().trim();
-  if (c.includes('PHAR') || c.includes('MEDIC') || c.includes('MED') || c === 'PH' || c.includes('PHARMACIE') || c.includes('ARTICLE')) return 'MEDIC';
-  if (c.includes('CONS') || c.includes('CG') || c.includes('VISITE')) return 'CONS';
-  if (c.includes('LABO') || c.includes('EB') || c.includes('ANALYSE') || c.includes('BIOLOGIE') || c.includes('TDR')) return 'LABO';
-  if (c.includes('DENT') || c === 'DC' || c === 'DK' || c.includes('DENTAIRE') || c.includes('ODONTO')) return 'DENT';
-  if (c.includes('ECHO') || c.includes('RADI') || c.includes('RADIO') || c.includes('IMAG')) return 'ECHO';
-  if (c.includes('SOIN') || c === 'SI' || c.includes('PANSEMENT')) return 'SOINS';
-  if (c.includes('HOSP') || c.includes('CHIR') || c.includes('SEJOUR')) return 'HOSP';
+  if (c.includes('PHAR') || c.includes('MEDIC') || c.includes('MED') || c === 'PH' || c.includes('PHARMACIE') || c.includes('ARTICLE') || c.includes('DROGUERIE')) return 'MEDIC';
+  if (c.includes('CONS') || c.includes('CG') || c.includes('VISITE') || c.includes('GENERALISTE') || c.includes('MEDECIN') || c === 'CS') return 'CONS';
+  if (c.includes('LABO') || c.includes('EB') || c.includes('ANALYSE') || c.includes('BIOLOGIE') || c.includes('TDR') || c.includes('EXAMEN') || c.includes('BIO')) return 'LABO';
+  if (c.includes('DENT') || c === 'DC' || c === 'DK' || c.includes('DENTAIRE') || c.includes('ODONTO') || c.includes('EXTRACTION')) return 'DENT';
+  if (c.includes('ECHO') || c.includes('RADI') || c.includes('RADIO') || c.includes('IMAG') || c.includes('ENDOSCOPIE') || c.includes('SCANNER')) return 'ECHO';
+  if (c.includes('SOIN') || c === 'SI' || c.includes('PANSEMENT') || c.includes('INJECTION') || c.includes('PERFUSION') || c === 'AMI') return 'SOINS';
+  if (c.includes('HOSP') || c.includes('CHIR') || c.includes('SEJOUR') || c.includes('ACCOUCHEMENT') || c.includes('MATERNITE') || c.includes('BLOC')) return 'HOSP';
   if (c.includes('STOCK')) return 'STOCK';
   return c || 'ACTE';
 }
@@ -487,7 +487,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           const actMontant = act.montant || Math.round(l.montantBrut / (l.actes?.length || 1));
           const partRatio = l.montantBrut > 0 ? actMontant / l.montantBrut : 1 / (l.actes?.length || 1);
           const actPart = Math.round((l.participation || 0) * partRatio);
-          const actNet = Math.max(0, actMontant - actPart);
+          const actExclu = Math.round((l.montantExclu || 0) * partRatio);
+          const actNet = (l.actes?.length === 1 && l.netAPayer !== undefined)
+            ? l.netAPayer
+            : Math.max(0, actMontant - actPart - actExclu);
 
           rawItems.push({
             originalIndex: idx,
@@ -498,7 +501,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             actCode: act.code || 'CONS',
             actLibelle: act.libelle || act.code || 'Acte de soins',
             montantBrut: actMontant,
-            montantExclu: 0,
+            montantExclu: actExclu,
             participation: actPart,
             netAPayer: actNet,
             observations: l.observations || '',
