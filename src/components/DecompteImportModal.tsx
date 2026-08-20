@@ -804,10 +804,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           json = await response.json();
         } else {
           console.warn('Non-JSON response from /api/parse-invoice');
-          json = { success: true, data: getAppropriateDecompteFallback(file.name, chosenOrg) };
+          throw new Error('Réponse invalide du serveur (non-JSON). Veuillez vérifier le fichier.');
         }
 
-        const data: ParsedFactureAssurance = json?.data || json || getAppropriateDecompteFallback(file.name, chosenOrg);
+        const data: ParsedFactureAssurance = json?.data || json;
+        if (!data || !data.lignes) throw new Error(json?.error || 'Format de données invalide après analyse.');
         if (chosenOrg && (!data.clientDoit || data.clientDoit === 'Organisme' || (data.clientDoit.includes('BSA') && chosenOrg.includes('MCI')))) {
           data.clientDoit = chosenOrg;
         }
@@ -815,7 +816,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       }
     } catch (err: any) {
       console.warn('Decompte OCR error:', err);
-      processLoadedDocument(getAppropriateDecompteFallback(file?.name || '', chosenOrg));
+      setErrorMessage(err.message || 'Erreur lors de l\'extraction des données du document. Assurez-vous que l\'image ou le PDF est lisible.');
+      setIsProcessing(false);
     }
   };
 
