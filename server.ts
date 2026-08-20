@@ -127,7 +127,7 @@ async function startServer() {
 
           const prompt = `Tu es un expert comptable et actuaire spécialisé dans l'analyse de factures et décomptes de règlement d'assurance santé à Madagascar (spécifiquement MCI CARE, ASCOMA / Gras Savoye, BSA / ASK GS, ARO, AXA, etc.).${organismGuidance}
 
-Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte de règlement tiers payant ou relevé de remboursements) et extrait rigoureusement TOUTES les informations et lignes de soins dans une structure JSON valide selon le schéma suivant :
+Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte de règlement tiers payant ou relevé de remboursements) et extrait rigoureusement TOUTES les informations et lignes de soins dans une structure JSON valide selon le schéma suivant.\n!!! TRÈS IMPORTANT !!! LE DOCUMENT EST UN PDF MULTI-PAGES. TU DOIS IMPÉRATIVEMENT EXTRAIRE LES LIGNES DE TOUTES LES PAGES JUSQU'AU TOTAL FINAL. NE T'ARRÊTE PAS À LA PAGE 1 :
 
 {
   "documentType": "facture" ou "decompte",
@@ -192,7 +192,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
 8. Réponds STRICTEMENT en JSON pur sans markdown backticks.`;
 
           let responseText = '';
-          const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+          const candidateModels = ['gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-2.5-flash'];
           for (const modelName of candidateModels) {
             try {
               const aiResp = await ai.models.generateContent({
@@ -208,6 +208,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
                 ],
                 config: {
                   responseMimeType: 'application/json',
+                  maxOutputTokens: 65536,
                   temperature: 0.1,
                 }
               });
