@@ -1,9 +1,8 @@
 export function formatMoney(amount: number | undefined | null): string {
   if (amount === undefined || amount === null || isNaN(amount)) return '0 Ar';
-  return new Intl.NumberFormat('fr-MG', {
-    style: 'decimal',
-    maximumFractionDigits: 0,
-  }).format(amount) + ' Ar';
+  const parts = Math.round(amount).toString().split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return parts.join('.') + ' Ar';
 }
 
 export function normalizeDateISO(dateStr: string | undefined | null): string {
