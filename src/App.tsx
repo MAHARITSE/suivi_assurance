@@ -26,6 +26,15 @@ export function App() {
   const [societes, setSocietes] = useState<Societe[]>(() => {
     localStorage.removeItem('suivi_assurance_societes');
     localStorage.removeItem('suivi_assurance_bsa_v3_societes');
+    const saved = localStorage.getItem('suivi_assurance_bsa_clean_societes');
+    if (saved) {
+      try {
+        const parsed: Societe[] = JSON.parse(saved);
+        return parsed.filter(s => s.id !== 'soc-salfa' && !s.code?.toLowerCase().includes('salfa') && !s.nom?.toLowerCase().includes('hopitaly loterana'));
+      } catch {
+        return initialSocietes;
+      }
+    }
     return initialSocietes;
   });
 

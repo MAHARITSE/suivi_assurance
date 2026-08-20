@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
 import * as XLSX from 'xlsx';
 
@@ -687,6 +688,20 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     };
   }, [filteredAndSortedPaiements]);
 
+  // Données de recouvrement (> 3 mois / 90 jours de retard)
+  const recouvrementData = useMemo(() => {
+    return calculateRecouvrementData(prestations, paiements, societes, personnes, 3, filterSocieteId);
+  }, [prestations, paiements, societes, personnes, filterSocieteId]);
+
+  const handleExportRecouvrementPdf = () => {
+    const selectedSocObj = societes.find(s => s.id === filterSocieteId);
+    generateRecouvrementPdf(recouvrementData, {
+      titreEtablissement: 'SALFA - Établissement Médical & Soins',
+      seuilMois: 3,
+      nomFiltreSociete: selectedSocObj ? selectedSocObj.nom : 'Toutes les assurances'
+    });
+  };
+
   // Form State for Saisie de Paiement
   const [targetSocieteId, setTargetSocieteId] = useState<string>(
     selectedSocieteId !== 'ALL' ? selectedSocieteId : societes[0]?.id || ''
@@ -1014,6 +1029,16 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             <span>Importer Décompte</span>
+          </button>
+
+          <button
+            id="btn-export-paiements-recouvrement-pdf"
+            onClick={handleExportRecouvrementPdf}
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 shadow-xs transition cursor-pointer"
+            title="Exporter l'état de recouvrement des créances échues (> 3 mois) au format PDF"
+          >
+            <FileText className="w-3.5 h-3.5 text-rose-600" />
+            <span>Export PDF Recouvrement (> 3 mois)</span>
           </button>
 
           <button
@@ -1691,6 +1716,68 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Pied de tableau / Synthèse Financière (Bordereaux) */}
+          <div className="border-t border-slate-200 bg-slate-50/90 p-4 rounded-b-xl">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {/* Dossiers */}
+              <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Dossiers</div>
+                <div className="text-xl font-bold text-slate-900 mt-1">{stats.count}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">factures listées</div>
+              </div>
+
+              {/* Total Facturé */}
+              <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Facturé</div>
+                <div className="text-base font-bold text-slate-900 mt-1 font-mono">{formatMoney(stats.totalReclame)}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">montant brut</div>
+              </div>
+
+              {/* Ticket Modérateur */}
+              <div className="bg-white rounded-xl p-3.5 border border-amber-200/70 bg-amber-50/20 shadow-2xs">
+                <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">Ticket Modérateur</div>
+                <div className="text-base font-bold text-amber-900 mt-1 font-mono">{formatMoney(stats.totalModerateur)}</div>
+                <div className="text-[10px] text-amber-600/80 mt-0.5">part affilié</div>
+              </div>
+
+              {/* À Rembourser */}
+              <div className="bg-white rounded-xl p-3.5 border border-indigo-200/70 bg-indigo-50/20 shadow-2xs">
+                <div className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider">À Rembourser</div>
+                <div className="text-base font-bold text-indigo-900 mt-1 font-mono">{formatMoney(Math.max(0, stats.totalReclame - stats.totalModerateur))}</div>
+                <div className="text-[10px] text-indigo-600/80 mt-0.5">charge assureur</div>
+              </div>
+
+              {/* Total Réglé */}
+              <div className="bg-white rounded-xl p-3.5 border border-emerald-200/70 bg-emerald-50/20 shadow-2xs">
+                <div className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Total Réglé</div>
+                <div className="text-base font-bold text-emerald-700 mt-1 font-mono">{formatMoney(stats.totalPaye)}</div>
+                <div className="text-[10px] text-emerald-600/80 mt-0.5">déjà payé</div>
+              </div>
+
+              {/* Reste à Payer */}
+              {(() => {
+                const diff = Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye);
+                return (
+                  <div className={`rounded-xl p-3.5 border shadow-2xs ${
+                    diff > 0 
+                      ? 'bg-rose-50/60 border-rose-200' 
+                      : 'bg-emerald-50/60 border-emerald-200'
+                  }`}>
+                    <div className={`text-[11px] font-semibold uppercase tracking-wider ${diff > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      Reste à Payer
+                    </div>
+                    <div className={`text-base font-bold mt-1 font-mono ${diff > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      {formatMoney(diff)}
+                    </div>
+                    <div className={`text-[10px] mt-0.5 ${diff > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
+                      {diff === 0 ? 'entièrement soldé' : 'à recouvrer'}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
         </div>
       ) : (
         /* Grouped View: Regroupé par Personne + Date + Mêmes Actes */
@@ -1965,6 +2052,73 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Pied de tableau / Synthèse Financière (Groupes Actes) */}
+          {(() => {
+            const totReclame = groupedPaymentActs.reduce((s, g) => s + g.totalReclame, 0);
+            const totMod = groupedPaymentActs.reduce((s, g) => s + g.ticketModerateur, 0);
+            const totRemb = Math.max(0, totReclame - totMod);
+            const totPaye = groupedPaymentActs.reduce((s, g) => s + g.totalPaye, 0);
+            const totReste = Math.max(0, totRemb - totPaye);
+
+            return (
+              <div className="border-t border-slate-200 bg-slate-50/90 p-4 rounded-b-xl">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {/* Dossiers / Groupes */}
+                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Dossiers</div>
+                    <div className="text-xl font-bold text-slate-900 mt-1">{groupedPaymentActs.length}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">groupes listés</div>
+                  </div>
+
+                  {/* Total Facturé */}
+                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-2xs">
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Facturé</div>
+                    <div className="text-base font-bold text-slate-900 mt-1 font-mono">{formatMoney(totReclame)}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">montant brut</div>
+                  </div>
+
+                  {/* Ticket Modérateur */}
+                  <div className="bg-white rounded-xl p-3.5 border border-amber-200/70 bg-amber-50/20 shadow-2xs">
+                    <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">Ticket Modérateur</div>
+                    <div className="text-base font-bold text-amber-900 mt-1 font-mono">{formatMoney(totMod)}</div>
+                    <div className="text-[10px] text-amber-600/80 mt-0.5">part affilié</div>
+                  </div>
+
+                  {/* À Rembourser */}
+                  <div className="bg-white rounded-xl p-3.5 border border-indigo-200/70 bg-indigo-50/20 shadow-2xs">
+                    <div className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider">À Rembourser</div>
+                    <div className="text-base font-bold text-indigo-900 mt-1 font-mono">{formatMoney(totRemb)}</div>
+                    <div className="text-[10px] text-indigo-600/80 mt-0.5">charge assureur</div>
+                  </div>
+
+                  {/* Total Réglé */}
+                  <div className="bg-white rounded-xl p-3.5 border border-emerald-200/70 bg-emerald-50/20 shadow-2xs">
+                    <div className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Total Réglé</div>
+                    <div className="text-base font-bold text-emerald-700 mt-1 font-mono">{formatMoney(totPaye)}</div>
+                    <div className="text-[10px] text-emerald-600/80 mt-0.5">déjà payé</div>
+                  </div>
+
+                  {/* Reste à Payer */}
+                  <div className={`rounded-xl p-3.5 border shadow-2xs ${
+                    totReste > 0 
+                      ? 'bg-rose-50/60 border-rose-200' 
+                      : 'bg-emerald-50/60 border-emerald-200'
+                  }`}>
+                    <div className={`text-[11px] font-semibold uppercase tracking-wider ${totReste > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      Reste à Payer
+                    </div>
+                    <div className={`text-base font-bold mt-1 font-mono ${totReste > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      {formatMoney(totReste)}
+                    </div>
+                    <div className={`text-[10px] mt-0.5 ${totReste > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
+                      {totReste === 0 ? 'entièrement soldé' : 'à recouvrer'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

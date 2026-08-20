@@ -30,16 +30,6 @@ export const initialSocietes: Societe[] = [
     email: 'sante@ascoma.mg',
     adresse: 'Antananarivo, Madagascar',
     tauxCouvertureDefaut: 90,
-  },
-  {
-    id: 'soc-salfa',
-    nom: 'SALFA - HOPITALY LOTERANA TOLIARY TANAMBAO',
-    code: 'SALFA',
-    contact: 'Département de Santé - Facturation Tiers-Payant',
-    telephone: '+261 38 34 092 61 / 034 50 670 90',
-    email: 'facturation.toliara@salfa.mg',
-    adresse: 'BP 99, Tanambao, Toliara, Madagascar',
-    tauxCouvertureDefaut: 100,
   }
 ];
 

@@ -264,10 +264,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
+  const activeSocietesList = useMemo(() => {
+    return societes.filter(s => s.id !== 'soc-salfa' && !s.code?.toLowerCase().includes('salfa') && !s.nom?.toLowerCase().includes('hopitaly loterana'));
+  }, [societes]);
+
   const getEffectiveInsurance = () => {
     if (selectedInsurance === 'CUSTOM') return customInsurance.trim();
     if (selectedInsurance === 'AUTO') return '';
-    return selectedInsurance;
+    const matched = activeSocietesList.find(s => s.id === selectedInsurance || s.nom === selectedInsurance);
+    return matched ? matched.nom : selectedInsurance;
   };
 
   const handleResetAndBack = () => {
@@ -1143,29 +1148,44 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   </span>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {[
-                    { id: 'AUTO', label: '⚡ Auto-détection' },
-                    { id: 'MCI CARE', label: '🏥 MCI CARE' },
-                    { id: 'BSA', label: '🏢 BSA / ASK GS' },
-                    { id: 'ASCOMA', label: '📋 ASCOMA' },
-                    { id: 'ARO', label: '🛡️ ARO' },
-                    { id: 'AXA', label: '🏛️ AXA' },
-                    { id: 'CUSTOM', label: '✏️ Autre / Saisie...' },
-                  ].map((opt) => (
+                <div className="flex flex-wrap items-center gap-1.5 max-h-36 overflow-y-auto p-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedInsurance('AUTO')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      selectedInsurance === 'AUTO'
+                        ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                        : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
+                    }`}
+                  >
+                    ⚡ Auto-détection
+                  </button>
+                  {activeSocietesList.map((soc) => (
                     <button
-                      key={opt.id}
+                      key={soc.id}
                       type="button"
-                      onClick={() => setSelectedInsurance(opt.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                        selectedInsurance === opt.id
+                      onClick={() => setSelectedInsurance(soc.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                        selectedInsurance === soc.id
                           ? 'bg-indigo-600 text-white shadow-xs font-bold'
                           : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
                       }`}
                     >
-                      {opt.label}
+                      <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+                      <span>{soc.nom}</span>
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedInsurance('CUSTOM')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      selectedInsurance === 'CUSTOM'
+                        ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                        : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
+                    }`}
+                  >
+                    ✏️ Autre / Saisie...
+                  </button>
                 </div>
 
                 {selectedInsurance === 'CUSTOM' && (

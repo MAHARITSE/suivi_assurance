@@ -92,8 +92,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   onImportPrestations,
 }) => {
   const [importMode, setImportMode] = useState<'excel' | 'pdf' | 'sample'>('excel');
-  const [selectedInsurance, setSelectedInsurance] = useState<string>('AUTO');
-  const [customInsurance, setCustomInsurance] = useState<string>('');
   const [parsedInvoice, setParsedInvoice] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -103,16 +101,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
-  const getEffectiveInsurance = () => {
-    if (selectedInsurance === 'CUSTOM') return customInsurance.trim();
-    if (selectedInsurance === 'AUTO') return '';
-    return selectedInsurance;
-  };
-
-  const getFallbackFacture = () => {
-    const eff = getEffectiveInsurance().toUpperCase();
-    if (eff.includes('MCI') || eff.includes('CARE')) return mciCareFactureSampleInvoice;
-    if (eff.includes('ASCOMA')) return ascomaSampleInvoice;
+  const getFallbackFacture = (filename?: string) => {
+    const low = (filename || '').toLowerCase();
+    if (low.includes('mci') || low.includes('care')) return mciCareFactureSampleInvoice;
+    if (low.includes('ascoma')) return ascomaSampleInvoice;
     return salfaSampleInvoice;
   };
 
@@ -138,7 +130,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     setIsProcessing(true);
     setErrorMessage(null);
     setTimeout(() => {
-      const sample = getFallbackFacture();
+      const sample = salfaSampleInvoice;
       setParsedInvoice(sample);
       const initialSelected: Record<number, boolean> = {};
       sample.lignes.forEach((_, idx) => {
@@ -155,8 +147,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
     setIsProcessing(true);
     setErrorMessage(null);
-
-    const chosenOrg = getEffectiveInsurance();
 
     try {
       if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
@@ -175,7 +165,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             }
 
             let inferredFactureNum = '';
-            let inferredClient = chosenOrg || 'BSA';
+            let inferredClient = 'BSA';
 
             const lignes = jsonRows.map((row, idx) => {
               const getVal = (keys: string[]) => {
@@ -234,7 +224,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               const montantBrut = Number(getVal(['Montant_Total_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Total', 'Total Prestation', 'Montant Facture', 'Fr. Réels'])) || 0;
               const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation', 'Franchise'])) || 0;
               const netAPayer = Number(getVal(['Prise_En_Charge_Net', 'Net A Payer', 'Net Payé', 'Montant Remboursé', 'Prise En Charge', 'Montant Réglé'])) || (montantBrut - participation);
-              const socName = chosenOrg || String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || 'BSA').trim();
+              const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || 'BSA').trim();
               if (socName) inferredClient = socName;
 
               const actesRaw = String(getVal(['Acte_Medicale_Prix', 'Acte médicale/Prix', 'Acte médicale / Prix', 'Acte medicale/Prix', 'Actes Médicaux', 'Actes', 'Prestations', 'Detail Actes Medicaux']) || 'CONS : ' + montantBrut);
@@ -296,10 +286,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         const formData = new FormData();
         formData.append('file', file);
         formData.append('docType', 'facture');
-        if (chosenOrg) {
-          formData.append('targetOrganism', chosenOrg);
-          formData.append('insuranceType', chosenOrg);
-        }
 
         const response = await fetch('/api/parse-invoice', {
           method: 'POST',
@@ -314,20 +300,17 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         } else {
           const textResp = await response.text();
           console.warn('Réponse non-JSON du serveur:', textResp.substring(0, 150));
-          json = { success: true, data: getFallbackFacture() };
+          json = { success: true, data: getFallbackFacture(file.name) };
         }
 
         const data: ParsedFactureAssurance = json?.data || json;
         if (!data || !Array.isArray(data.lignes) || data.lignes.length === 0) {
-          const fallback = getFallbackFacture();
+          const fallback = getFallbackFacture(file.name);
           setParsedInvoice(fallback);
           const initialSelected: Record<number, boolean> = {};
           fallback.lignes.forEach((_, i) => { initialSelected[i] = true; });
           setSelectedLines(initialSelected);
         } else {
-          if (chosenOrg && (!data.clientDoit || data.clientDoit === 'Organisme' || data.clientDoit === 'BSA' && chosenOrg.includes('MCI'))) {
-            data.clientDoit = chosenOrg;
-          }
           setParsedInvoice(data);
           const initialSelected: Record<number, boolean> = {};
           data.lignes.forEach((_, i) => { initialSelected[i] = true; });
@@ -337,7 +320,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       }
     } catch (err: any) {
       console.warn('Erreur analyse PDF:', err);
-      const fallback = getFallbackFacture();
+      const fallback = getFallbackFacture(file?.name || '');
       setParsedInvoice(fallback);
       const initialSelected: Record<number, boolean> = {};
       fallback.lignes.forEach((_, i) => { initialSelected[i] = true; });
@@ -540,56 +523,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
           {!parsedInvoice && (
             <div className="space-y-4">
-              {/* Insurance / Client Pre-Selection Selector */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
-                    <ShieldCheck className="h-4 w-4 text-indigo-600" />
-                    <span>Organisme d'assurance / Client cible :</span>
-                  </div>
-                  <span className="text-[11px] text-slate-500">
-                    {selectedInsurance === 'AUTO' ? '⚡ Détection auto par IA' : `Sélection forcée : ${getEffectiveInsurance() || 'Personnalisé'}`}
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {[
-                    { id: 'AUTO', label: '⚡ Auto-détection', color: 'slate' },
-                    { id: 'MCI CARE', label: '🏥 MCI CARE', color: 'indigo' },
-                    { id: 'BSA', label: '🏢 BSA / ASK GS', color: 'emerald' },
-                    { id: 'ASCOMA', label: '📋 ASCOMA', color: 'blue' },
-                    { id: 'ARO', label: '🛡️ ARO', color: 'purple' },
-                    { id: 'AXA', label: '🏛️ AXA', color: 'amber' },
-                    { id: 'CUSTOM', label: '✏️ Autre / Saisie...', color: 'slate' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setSelectedInsurance(opt.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                        selectedInsurance === opt.id
-                          ? 'bg-indigo-600 text-white shadow-xs font-bold'
-                          : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-
-                {selectedInsurance === 'CUSTOM' && (
-                  <div className="pt-1">
-                    <input
-                      type="text"
-                      value={customInsurance}
-                      onChange={(e) => setCustomInsurance(e.target.value)}
-                      placeholder="Entrez le nom exact de l'assurance ou client..."
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-
               {/* Import Mode Selector */}
               <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-xl">
                 <button
