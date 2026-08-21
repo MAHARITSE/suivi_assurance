@@ -12,7 +12,8 @@ import {
   FileSpreadsheet,
   ScanLine,
   Check,
-  RotateCcw
+  RotateCcw,
+  Building
 } from 'lucide-react';
 import { Prestation, LignePrestation, Societe, Personne, Famille, ParsedFactureAssurance } from '../types';
 import { formatMoney, generateId, normalizeDateISO } from '../utils/formatters';
@@ -25,6 +26,7 @@ interface SalfaImportModalProps {
   societes: Societe[];
   personnes: Personne[];
   familles: Famille[];
+  defaultSocieteId?: string;
   onImportPrestations: (newPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
 }
 
@@ -83,18 +85,32 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   societes,
   personnes,
   familles,
+  defaultSocieteId,
   onImportPrestations,
 }) => {
   const [importMode, setImportMode] = useState<'pdf' | 'excel'>('pdf');
+  const [targetSocietyName, setTargetSocietyName] = useState<string>(societes[0]?.nom || 'MCI CARE');
   const [parsedInvoice, setParsedInvoice] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
   const [autoCreateMissingSocietes, setAutoCreateMissingSocietes] = useState(true);
   const [autoCreateMissingPersonnes, setAutoCreateMissingPersonnes] = useState(true);
+  const [missingSocPrompt, setMissingSocPrompt] = useState<{ socName: string } | null>(null);
   const [selectedLines, setSelectedLines] = useState<Record<number, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      const found = societes.find(s => s.id === defaultSocieteId);
+      if (found) {
+        setTargetSocietyName(found.nom);
+      } else if (societes.length > 0) {
+        setTargetSocietyName(societes[0].nom);
+      }
+    }
+  }, [isOpen, defaultSocieteId, societes]);
 
   const handleResetAndBack = () => {
     setParsedInvoice(null);
@@ -137,7 +153,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             }
 
             let inferredFactureNum = '';
-            let inferredClient = 'MCI CARE';
+            let inferredClient = targetSocietyName || societes[0]?.nom || 'MCI CARE';
 
             const lignes = jsonRows.map((row, idx) => {
               const getVal = (keys: string[]) => {
@@ -193,7 +209,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               const montantBrut = Number(getVal(['Montant_Total_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Total', 'Total Prestation', 'Montant Facture', 'Fr. Réels'])) || 0;
               const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation', 'Franchise'])) || 0;
               const netAPayer = Number(getVal(['Prise_En_Charge_Net', 'Net A Payer', 'Net Payé', 'Montant Remboursé', 'Prise En Charge', 'Montant Réglé'])) || (montantBrut - participation);
-              const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || 'MCI CARE').trim();
+              const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || targetSocietyName).trim();
               if (socName) inferredClient = socName;
 
               const actesRaw = String(getVal(['Acte_Medicale_Prix', 'Acte médicale/Prix', 'Acte médicale / Prix', 'Acte medicale/Prix', 'Actes Médicaux', 'Actes', 'Prestations', 'Detail Actes Medicaux']) || 'CONS : ' + montantBrut);
@@ -343,7 +359,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     }));
   };
 
-  const handleValidateImport = () => {
+  const executeImportWithSociety = (approvedSocName?: string) => {
     if (!parsedInvoice) return;
 
     const chosenLignes = parsedInvoice.lignes.filter((_, idx) => selectedLines[idx]);
@@ -352,8 +368,32 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       return;
     }
 
+    const docSocName = (parsedInvoice.clientDoit || chosenLignes[0]?.societeAffiliee || 'MCI CARE').trim();
+
+    let matchedSoc = societes.find(s => 
+      s.nom.toLowerCase().trim() === docSocName.toLowerCase() ||
+      s.code.toLowerCase().trim() === docSocName.toLowerCase() ||
+      s.nom.toLowerCase().includes(docSocName.toLowerCase()) ||
+      docSocName.toLowerCase().includes(s.nom.toLowerCase())
+    );
+
     const createdSocietes: Societe[] = [];
     const createdPersonnes: Personne[] = [];
+
+    if (!matchedSoc) {
+      if (approvedSocName) {
+        matchedSoc = {
+          id: generateId(`soc-new-${Date.now()}`),
+          nom: approvedSocName,
+          code: approvedSocName.substring(0, 4).toUpperCase(),
+          tauxCouvertureDefaut: 100,
+        };
+        createdSocietes.push(matchedSoc);
+      } else {
+        setMissingSocPrompt({ socName: docSocName });
+        return;
+      }
+    }
 
     const isRealMatricule = (mat: string) => {
       const m = (mat || '').trim();
@@ -381,26 +421,8 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
     const newPrestations: Prestation[] = chosenLignes.map((ligne, idx) => {
       const prestId = generateId(`prest-salfa-${idx}`);
-      const mainSocName = 'MCI CARE';
+      const mainSocName = docSocName;
       const sousSoc = ligne.sousSociete || '';
-
-      // Society match / create (MCI CARE as main entity)
-      let matchedSoc = societes.find(s => 
-        s.nom.toLowerCase().includes('mci care') ||
-        s.code.toLowerCase().includes('mci') ||
-        s.nom.toLowerCase().includes(mainSocName.toLowerCase()) ||
-        s.code.toLowerCase() === mainSocName.toLowerCase()
-      );
-
-      if (!matchedSoc && autoCreateMissingSocietes) {
-        matchedSoc = {
-          id: generateId(`soc-new-${idx}`),
-          nom: 'MCI CARE',
-          code: 'MCI CARE',
-          tauxCouvertureDefaut: 100,
-        };
-        createdSocietes.push(matchedSoc);
-      }
 
       // Patient match / create
       const nameKey = (ligne.nomPrenom || '').trim().toLowerCase();
@@ -518,6 +540,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     onImportPrestations(newPrestations, createdSocietes, createdPersonnes);
     handleResetAndBack();
     onClose();
+  };
+
+  const handleValidateImport = () => {
+    executeImportWithSociety();
   };
 
   const selectedCount = parsedInvoice ? parsedInvoice.lignes.filter((_, i) => selectedLines[i]).length : 0;
@@ -832,8 +858,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               {/* Financial Recap Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
                 <div>
-                  <span className="text-slate-500 block">Organisme / Client</span>
-                  <strong className="text-slate-900 font-bold text-sm">{parsedInvoice.clientDoit}</strong>
+                  <span className="text-slate-500 block mb-1 font-medium">Organisme / Client</span>
+                  <strong className="text-slate-900 font-extrabold text-sm block truncate" title={parsedInvoice.clientDoit}>
+                    {parsedInvoice.clientDoit || 'Non spécifié'}
+                  </strong>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Total Facturé (Sélection)</span>
@@ -1029,6 +1057,52 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal for Missing Society */}
+      {missingSocPrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200 shrink-0">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Société non répertoriée</h3>
+                <p className="text-xs text-slate-500">Validation requise avant importation</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-amber-50/70 p-4 border border-amber-200/80 text-xs sm:text-sm text-slate-700 leading-relaxed">
+              La société / l'organisme payeur <strong className="font-bold text-amber-900">« {missingSocPrompt.socName} »</strong> figurant sur ce document ne se trouve pas dans votre liste de sociétés enregistrées.
+              <br /><br />
+              Souhaitez-vous créer automatiquement la société <strong className="font-bold text-slate-900">« {missingSocPrompt.socName} »</strong> pour poursuivre l'importation, ou annuler l'importation ?
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const name = missingSocPrompt.socName;
+                  setMissingSocPrompt(null);
+                  executeImportWithSociety(name);
+                }}
+                className="flex-1 inline-flex justify-center items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-500 transition focus:outline-none cursor-pointer"
+              >
+                <CheckCircle className="h-4 w-4" />
+                Créer et poursuivre
+              </button>
+              <button
+                type="button"
+                onClick={() => setMissingSocPrompt(null)}
+                className="inline-flex justify-center items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition focus:outline-none cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+                Annuler l'importation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

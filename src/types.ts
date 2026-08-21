@@ -187,6 +187,7 @@ export type ActiveTab =
   | 'dashboard'
   | 'prestations'
   | 'paiements'
+  | 'rejets'
   | 'historique'
   | 'societes'
   | 'personnes'

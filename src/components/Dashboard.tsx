@@ -183,7 +183,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
+        <div 
+          onClick={() => onNavigate('rejets')}
+          className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2 cursor-pointer hover:border-rose-300 transition-colors"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Exclusions & Rejets</span>
             <div className="p-2 rounded-lg bg-rose-50 text-rose-600">
@@ -192,7 +195,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="text-2xl font-bold text-rose-600">{formatMoney(totalExclu)}</div>
           <div className="text-xs text-slate-500">
-            Montants non pris en charge ou hors-barème
+            Montants non pris en charge (cliquer pour détails)
           </div>
         </div>
       </div>

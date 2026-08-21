@@ -38,6 +38,15 @@ export interface RecouvrementSummary {
     resteARecouvrer: number;
     maxRetardJours: number;
   }>;
+  parMois: Array<{
+    moisKey: string;
+    moisLibelle: string;
+    dossiersCount: number;
+    totalBrut: number;
+    totalARembourser: number;
+    totalPaye: number;
+    resteARecouvrer: number;
+  }>;
 }
 
 /**
@@ -162,6 +171,58 @@ export function calculateRecouvrementData(
 
   const parSociete = Object.values(socMap).sort((a, b) => b.resteARecouvrer - a.resteARecouvrer);
 
+  // Synthèse par mois (Récapitulatif Mensuel des impayés)
+  const moisMap: Record<string, {
+    moisKey: string;
+    moisLibelle: string;
+    dossiersCount: number;
+    totalBrut: number;
+    totalARembourser: number;
+    totalPaye: number;
+    resteARecouvrer: number;
+  }> = {};
+
+  const MOIS_FR = [
+    'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+    'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+  ];
+
+  function formatMoisFR(key: string): string {
+    if (!key || key === 'Inconnu') return 'Non spécifié';
+    const parts = key.split('-');
+    if (parts.length >= 2) {
+      const year = parts[0];
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      if (monthIdx >= 0 && monthIdx < 12) {
+        return `${MOIS_FR[monthIdx]} ${year}`;
+      }
+    }
+    return key;
+  }
+
+  items.forEach(it => {
+    const mKey = it.dateFacture ? it.dateFacture.substring(0, 7) : 'Inconnu';
+    if (!moisMap[mKey]) {
+      moisMap[mKey] = {
+        moisKey: mKey,
+        moisLibelle: formatMoisFR(mKey),
+        dossiersCount: 0,
+        totalBrut: 0,
+        totalARembourser: 0,
+        totalPaye: 0,
+        resteARecouvrer: 0,
+      };
+    }
+    const m = moisMap[mKey];
+    m.dossiersCount += 1;
+    m.totalBrut += it.montantBrut;
+    m.totalARembourser += it.montantARembourser;
+    m.totalPaye += it.totalPaye;
+    m.resteARecouvrer += it.resteARecouvrer;
+  });
+
+  const parMois = Object.values(moisMap).sort((a, b) => b.moisKey.localeCompare(a.moisKey));
+
   const totalARecouvrer = items.reduce((sum, i) => sum + i.resteARecouvrer, 0);
   const totalBrut = items.reduce((sum, i) => sum + i.montantBrut, 0);
   const totalTicketModerateur = items.reduce((sum, i) => sum + i.ticketModerateur, 0);
@@ -176,7 +237,8 @@ export function calculateRecouvrementData(
     totalARembourser,
     totalPaye,
     dossiersCount: items.length,
-    parSociete
+    parSociete,
+    parMois
   };
 }
 
@@ -293,12 +355,83 @@ export function generateRecouvrementPdf(
 
   let currentY = 60;
 
-  // 4. Tableau Récapitulatif par Société
+  // 1. RÉCAPITULATIF MENSUEL DES IMPAYÉS (Placé obligatoirement en PREMIÈRE PAGE)
+  if (data.parMois && data.parMois.length > 0) {
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('1. Récapitulatif Mensuel des Impayés & Créances en Retard', 14, currentY);
+
+    const moisHeaders = [
+      'Mois / Période',
+      'Factures',
+      'Total Facturé',
+      'Charge Assureur',
+      'Déjà Réglé',
+      'Solde Impayé (Reste à Recouvrer)'
+    ];
+
+    const moisRows = data.parMois.map(m => [
+      m.moisLibelle,
+      String(m.dossiersCount),
+      formatMoney(m.totalBrut),
+      formatMoney(m.totalARembourser),
+      formatMoney(m.totalPaye),
+      formatMoney(m.resteARecouvrer)
+    ]);
+
+    // Ligne de totalisation
+    moisRows.push([
+      'TOTAL GÉNÉRAL',
+      String(data.dossiersCount),
+      formatMoney(data.totalBrut),
+      formatMoney(data.totalARembourser),
+      formatMoney(data.totalPaye),
+      formatMoney(data.totalARecouvrer)
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 3,
+      head: [moisHeaders],
+      body: moisRows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [185, 28, 28], // Rouge accentué pour les impayés
+        textColor: 255,
+        fontSize: 8,
+        fontStyle: 'bold',
+        halign: 'left',
+      },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 1.8,
+        textColor: [30, 41, 59],
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', minCellWidth: 45 },
+        1: { halign: 'center', cellWidth: 20 },
+        2: { halign: 'right', cellWidth: 40 },
+        3: { halign: 'right', cellWidth: 40 },
+        4: { halign: 'right', cellWidth: 40, textColor: [4, 120, 87] },
+        5: { halign: 'right', cellWidth: 48, fontStyle: 'bold', textColor: [185, 28, 28] },
+      },
+      didParseCell: (hookData) => {
+        if (hookData.section === 'body' && hookData.row.index === moisRows.length - 1) {
+          hookData.cell.styles.fontStyle = 'bold';
+          hookData.cell.styles.fillColor = [254, 242, 242];
+        }
+      },
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 7;
+  }
+
+  // 2. Ventilation du Recouvrement par Organisme / Assurance
   if (data.parSociete.length > 0) {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('1. Ventilation du Recouvrement par Organisme / Assurance', 14, currentY);
+    doc.text('2. Ventilation du Recouvrement par Organisme / Assurance', 14, currentY);
 
     const recapHeaders = [
       'Organisme / Assurance',
@@ -368,11 +501,15 @@ export function generateRecouvrementPdf(
     currentY = (doc as any).lastAutoTable.finalY + 8;
   }
 
-  // 5. Tableau Détaillé des Factures en Souffrance
+  // Saut de page dédié pour démarrer la liste nominative détaillée proprement en page 2
+  doc.addPage();
+  currentY = 20;
+
+  // 3. Tableau Détaillé des Factures en Souffrance
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text('2. Liste Nominative Détaillée des Factures à Recouvrer (> 3 mois)', 14, currentY);
+  doc.text('3. Liste Nominative Détaillée des Factures à Recouvrer (> 3 mois)', 14, currentY);
 
   const detailHeaders = [
     'N° Facture',
@@ -510,21 +647,14 @@ export function generateSelectedPrestationsPdf(
   doc.text(`Édité le : ${dateGeneration}`, 283, 11, { align: 'right' });
 
   doc.setTextColor(185, 28, 28);
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
-  doc.text('ÉTAT DE RECOUVREMENT DÉTAILLÉ (SÉLECTION)', 14, 28);
+  doc.text('ÉTAT DE RECOUVREMENT & RÉCAPITULATIF DES IMPAYÉS (SÉLECTION)', 14, 28);
 
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(71, 85, 105);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Détail des factures sélectionnées avec leurs actes médicaux`, 14, 34);
-
-  // Synthèse data
-  let totalFacture = 0;
-  let totalTicket = 0;
-  let totalRemb = 0;
-  let totalPayeAll = 0;
-  let totalResteAll = 0;
+  doc.text(`Synthèse mensuelle et détail des prestations sélectionnées (${prestations.length} dossier(s))`, 14, 34);
 
   // Calculs paiements
   const paiementsParPrestation: Record<string, number> = {};
@@ -540,28 +670,71 @@ export function generateSelectedPrestationsPdf(
     });
   });
 
+  // Synthèse globale & Regroupements (Mois & Société)
+  let totalFacture = 0;
+  let totalTicket = 0;
+  let totalRemb = 0;
+  let totalPayeAll = 0;
+  let totalResteAll = 0;
+
+  const moisMap: Record<string, {
+    moisKey: string;
+    moisLibelle: string;
+    dossiersCount: number;
+    totalBrut: number;
+    ticket: number;
+    totalARembourser: number;
+    totalPaye: number;
+    resteARecouvrer: number;
+  }> = {};
+
+  const socMap: Record<string, {
+    nom: string;
+    dossiersCount: number;
+    totalBrut: number;
+    totalARembourser: number;
+    totalPaye: number;
+    resteARecouvrer: number;
+  }> = {};
+
+  const MOIS_FR = [
+    'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+    'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+  ];
+
+  function formatMoisFR(key: string): string {
+    if (!key || key === 'Inconnu') return 'Non spécifié';
+    const parts = key.split('-');
+    if (parts.length >= 2) {
+      const year = parts[0];
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      if (monthIdx >= 0 && monthIdx < 12) {
+        return `${MOIS_FR[monthIdx]} ${year}`;
+      }
+    }
+    return key;
+  }
+
   const detailRows: any[] = [];
-  
+
   prestations.forEach(p => {
     const pers = personnes.find(pe => pe.id === p.personneId);
     const soc = societes.find(s => s.id === p.societeId);
-    
+    const socName = p.societeNom || soc?.nom || 'Autre Organisme';
+
     const montantBrut = Number(p.totalPrestation ?? p.montantTotal ?? 0);
     const ticket = Number(p.participation ?? p.ticketModerateur ?? 0);
     const charge = Number(p.montantARembourser ?? Math.max(0, montantBrut - ticket));
-    
-    let excluTotal = 0;
-    
+
     let prestPaye = Math.max(Number(p.totalPaye || 0), paiementsParPrestation[p.id] || 0);
-    
-    // Check lines paye vs exclu
+
     let linesPaye = 0;
     p.lignes.forEach(l => {
-        const lPaye = Math.max(l.totalPaye || 0, paiementsParLigne[l.id] || 0);
-        linesPaye += lPaye;
+      const lPaye = Math.max(l.totalPaye || 0, paiementsParLigne[l.id] || 0);
+      linesPaye += lPaye;
     });
     prestPaye = Math.max(prestPaye, linesPaye);
-    
+
     const prestReste = Math.max(0, charge - prestPaye);
 
     totalFacture += montantBrut;
@@ -570,11 +743,51 @@ export function generateSelectedPrestationsPdf(
     totalPayeAll += prestPaye;
     totalResteAll += prestReste;
 
+    // Regroupement Mois
+    const mKey = p.date ? p.date.substring(0, 7) : 'Inconnu';
+    if (!moisMap[mKey]) {
+      moisMap[mKey] = {
+        moisKey: mKey,
+        moisLibelle: formatMoisFR(mKey),
+        dossiersCount: 0,
+        totalBrut: 0,
+        ticket: 0,
+        totalARembourser: 0,
+        totalPaye: 0,
+        resteARecouvrer: 0,
+      };
+    }
+    const mm = moisMap[mKey];
+    mm.dossiersCount += 1;
+    mm.totalBrut += montantBrut;
+    mm.ticket += ticket;
+    mm.totalARembourser += charge;
+    mm.totalPaye += prestPaye;
+    mm.resteARecouvrer += prestReste;
+
+    // Regroupement Société
+    if (!socMap[socName]) {
+      socMap[socName] = {
+        nom: socName,
+        dossiersCount: 0,
+        totalBrut: 0,
+        totalARembourser: 0,
+        totalPaye: 0,
+        resteARecouvrer: 0,
+      };
+    }
+    const sm = socMap[socName];
+    sm.dossiersCount += 1;
+    sm.totalBrut += montantBrut;
+    sm.totalARembourser += charge;
+    sm.totalPaye += prestPaye;
+    sm.resteARecouvrer += prestReste;
+
     // Ligne principale de la prestation
     detailRows.push([
       { content: p.numeroFacture, styles: { fontStyle: 'bold', textColor: [67, 56, 202] } },
       formatDate(p.date),
-      (p.societeNom || soc?.nom || '') + (p.sousSociete ? ` (${p.sousSociete})` : ''),
+      socName + (p.sousSociete ? ` (${p.sousSociete})` : ''),
       (p.nomAgent || pers?.nomPrenom || ''),
       (p.matricule || pers?.matricule || ''),
       { content: formatMoney(montantBrut), styles: { fontStyle: 'bold' } },
@@ -584,7 +797,7 @@ export function generateSelectedPrestationsPdf(
       { content: formatMoney(prestReste), styles: { fontStyle: 'bold', textColor: [185, 28, 28] } },
     ]);
 
-    // Ajouter les lignes (actes médicaux)
+    // Lignes d'actes
     p.lignes.forEach(l => {
       const lBrut = l.totalPrestation || 0;
       const lTicket = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes.length || 1));
@@ -607,6 +820,21 @@ export function generateSelectedPrestationsPdf(
     });
   });
 
+  // Ligne de TOTAL GÉNÉRAL en bas de la table détaillée
+  detailRows.push([
+    { content: `TOTAL GÉNÉRAL (${prestations.length} Factures)`, styles: { fontStyle: 'bold', fillColor: [254, 242, 242] } },
+    { content: '', styles: { fillColor: [254, 242, 242] } },
+    { content: '', styles: { fillColor: [254, 242, 242] } },
+    { content: '', styles: { fillColor: [254, 242, 242] } },
+    { content: '', styles: { fillColor: [254, 242, 242] } },
+    { content: formatMoney(totalFacture), styles: { fontStyle: 'bold', fillColor: [254, 242, 242] } },
+    { content: formatMoney(totalTicket), styles: { fontStyle: 'bold', textColor: [180, 83, 9], fillColor: [254, 242, 242] } },
+    { content: formatMoney(totalRemb), styles: { fontStyle: 'bold', fillColor: [254, 242, 242] } },
+    { content: formatMoney(totalPayeAll), styles: { fontStyle: 'bold', textColor: [4, 120, 87], fillColor: [254, 242, 242] } },
+    { content: formatMoney(totalResteAll), styles: { fontStyle: 'bold', textColor: [185, 28, 28], fillColor: [254, 242, 242] } },
+  ]);
+
+  // CARTOUCHES KPIS
   const cardY = 38;
   const cardH = 18;
   const cardW = 64;
@@ -653,6 +881,161 @@ export function generateSelectedPrestationsPdf(
 
   let currentY = 60;
 
+  // 1. RÉCAPITULATIF MENSUEL DES IMPAYÉS SUR LA PREMIÈRE PAGE
+  const parMois = Object.values(moisMap).sort((a, b) => b.moisKey.localeCompare(a.moisKey));
+  if (parMois.length > 0) {
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('1. Récapitulatif Mensuel des Impayés & Créances (Sélection)', 14, currentY);
+
+    const moisHeaders = [
+      'Mois / Période',
+      'Factures',
+      'Total Facturé',
+      'Ticket Mod.',
+      'Charge Assureur',
+      'Déjà Réglé',
+      'Solde Impayé (Reste à Recouvrer)'
+    ];
+
+    const moisRows = parMois.map(m => [
+      m.moisLibelle,
+      String(m.dossiersCount),
+      formatMoney(m.totalBrut),
+      formatMoney(m.ticket),
+      formatMoney(m.totalARembourser),
+      formatMoney(m.totalPaye),
+      formatMoney(m.resteARecouvrer)
+    ]);
+
+    // TOTAL GÉNÉRAL en bas du tableau mensuel
+    moisRows.push([
+      'TOTAL GÉNÉRAL',
+      String(prestations.length),
+      formatMoney(totalFacture),
+      formatMoney(totalTicket),
+      formatMoney(totalRemb),
+      formatMoney(totalPayeAll),
+      formatMoney(totalResteAll)
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 3,
+      head: [moisHeaders],
+      body: moisRows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [185, 28, 28],
+        textColor: 255,
+        fontSize: 8,
+        fontStyle: 'bold',
+        halign: 'left',
+      },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 1.8,
+        textColor: [30, 41, 59],
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', minCellWidth: 40 },
+        1: { halign: 'center', cellWidth: 20 },
+        2: { halign: 'right', cellWidth: 35 },
+        3: { halign: 'right', cellWidth: 35 },
+        4: { halign: 'right', cellWidth: 38 },
+        5: { halign: 'right', cellWidth: 38, textColor: [4, 120, 87] },
+        6: { halign: 'right', cellWidth: 45, fontStyle: 'bold', textColor: [185, 28, 28] },
+      },
+      didParseCell: (hookData) => {
+        if (hookData.section === 'body' && hookData.row.index === moisRows.length - 1) {
+          hookData.cell.styles.fontStyle = 'bold';
+          hookData.cell.styles.fillColor = [254, 242, 242];
+        }
+      },
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 7;
+  }
+
+  // 2. VENTILATION PAR ORGANISME SUR LA PREMIÈRE PAGE
+  const parSociete = Object.values(socMap).sort((a, b) => b.resteARecouvrer - a.resteARecouvrer);
+  if (parSociete.length > 0 && currentY < 160) {
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('2. Ventilation par Organisme / Assurance (Sélection)', 14, currentY);
+
+    const recapHeaders = [
+      'Organisme / Assurance',
+      'Dossiers',
+      'Total Facturé',
+      'Charge Assureur',
+      'Déjà Réglé',
+      'Reste Dû'
+    ];
+
+    const recapRows = parSociete.map(s => [
+      s.nom,
+      String(s.dossiersCount),
+      formatMoney(s.totalBrut),
+      formatMoney(s.totalARembourser),
+      formatMoney(s.totalPaye),
+      formatMoney(s.resteARecouvrer)
+    ]);
+
+    // TOTAL GÉNÉRAL
+    recapRows.push([
+      'TOTAL GÉNÉRAL',
+      String(prestations.length),
+      formatMoney(totalFacture),
+      formatMoney(totalRemb),
+      formatMoney(totalPayeAll),
+      formatMoney(totalResteAll)
+    ]);
+
+    autoTable(doc, {
+      startY: currentY + 3,
+      head: [recapHeaders],
+      body: recapRows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [51, 65, 85],
+        textColor: 255,
+        fontSize: 8,
+        fontStyle: 'bold',
+        halign: 'left',
+      },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 1.8,
+        textColor: [30, 41, 59],
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', minCellWidth: 55 },
+        1: { halign: 'center', cellWidth: 20 },
+        2: { halign: 'right', cellWidth: 45 },
+        3: { halign: 'right', cellWidth: 45 },
+        4: { halign: 'right', cellWidth: 45, textColor: [4, 120, 87] },
+        5: { halign: 'right', cellWidth: 50, fontStyle: 'bold', textColor: [185, 28, 28] },
+      },
+      didParseCell: (hookData) => {
+        if (hookData.section === 'body' && hookData.row.index === recapRows.length - 1) {
+          hookData.cell.styles.fontStyle = 'bold';
+          hookData.cell.styles.fillColor = [254, 242, 242];
+        }
+      },
+    });
+  }
+
+  // 3. TABLEAU DÉTAILLÉ NOMINATIF SUR LES PAGES SUIVANTES
+  doc.addPage();
+  currentY = 20;
+
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('3. Liste Nominative Détaillée des Factures & Actes Sélectionnés', 14, currentY);
+
   const detailHeaders = [
     'N° Facture / Code',
     'Date / Libellé Acte',
@@ -667,7 +1050,7 @@ export function generateSelectedPrestationsPdf(
   ];
 
   autoTable(doc, {
-    startY: currentY,
+    startY: currentY + 3,
     head: [detailHeaders],
     body: detailRows,
     theme: 'grid',
@@ -696,9 +1079,14 @@ export function generateSelectedPrestationsPdf(
       9: { halign: 'right', cellWidth: 20 }
     },
     didParseCell: (hookData) => {
-      // Light gray background for act lines
+      // Style des actes sous la prestation
       if (hookData.section === 'body' && hookData.row.raw[0]?.content?.includes('↳')) {
         hookData.cell.styles.fillColor = [248, 250, 252];
+      }
+      // Style de la ligne TOTAL GÉNÉRAL à la fin
+      if (hookData.section === 'body' && hookData.row.index === detailRows.length - 1) {
+        hookData.cell.styles.fontStyle = 'bold';
+        hookData.cell.styles.fillColor = [254, 242, 242];
       }
     }
   });

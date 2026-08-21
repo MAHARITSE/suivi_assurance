@@ -10,6 +10,36 @@ export const initialSocietes: Societe[] = [
     email: 'contact@mcicare.mg',
     adresse: 'Antananarivo, Madagascar',
     tauxCouvertureDefaut: 100,
+  },
+  {
+    id: 'soc-nyhavana',
+    nom: 'NY HAVANA',
+    code: 'NY HAVANA',
+    contact: 'Direction Santé & Sinistres',
+    telephone: '+261 20 22 211 44',
+    email: 'sante@nyhavana.mg',
+    adresse: 'Antananarivo, Madagascar',
+    tauxCouvertureDefaut: 100,
+  },
+  {
+    id: 'soc-bsa',
+    nom: 'BSA',
+    code: 'BSA',
+    contact: 'Direction Médicale',
+    telephone: '+261 20 22 300 00',
+    email: 'contact@bsa.mg',
+    adresse: 'Antananarivo, Madagascar',
+    tauxCouvertureDefaut: 100,
+  },
+  {
+    id: 'soc-ascoma',
+    nom: 'ASCOMA',
+    code: 'ASCOMA',
+    contact: 'Direction Santé',
+    telephone: '+261 20 22 400 00',
+    email: 'sante@ascoma.mg',
+    adresse: 'Antananarivo, Madagascar',
+    tauxCouvertureDefaut: 100,
   }
 ];
 

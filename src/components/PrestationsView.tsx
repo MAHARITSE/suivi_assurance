@@ -195,20 +195,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     }
   }, [selectedSocieteId]);
 
-  // Données de recouvrement (> 3 mois / 90 jours de retard)
-  const recouvrementData = useMemo(() => {
-    return calculateRecouvrementData(prestations, paiements, societes, personnes, 3, filterSocieteId);
-  }, [prestations, paiements, societes, personnes, filterSocieteId]);
-
-  const handleExportRecouvrementPdf = () => {
-    const selectedSocObj = societes.find(s => s.id === filterSocieteId);
-    generateRecouvrementPdf(recouvrementData, {
-      titreEtablissement: 'SALFA - Établissement Médical & Soins',
-      seuilMois: 3,
-      nomFiltreSociete: selectedSocObj ? selectedSocObj.nom : 'Toutes les assurances'
-    });
-  };
-
   const handleExportRecouvrementPdfSelected = () => {
     if (selectedPrestations.size === 0) return;
     const prestationsList = filteredAndSortedList.filter(p => selectedPrestations.has(p.id));
@@ -1424,17 +1410,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                   </button>
 
                   <button
-                    onClick={() => { setShowExportMenu(false); handleExportRecouvrementPdf(); }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 flex items-center space-x-2 cursor-pointer"
-                  >
-                    <FileText className="w-4 h-4 text-rose-600" />
-                    <div>
-                      <div className="font-semibold">PDF Recouvrement (&gt; 3 mois)</div>
-                      <div className="text-[10px] text-slate-400">État de relance pour les impayés</div>
-                    </div>
-                  </button>
-
-                  <button
                     onClick={() => { setShowExportMenu(false); handleExportRecouvrementPdfSelected(); }}
                     disabled={selectedPrestations.size === 0}
                     className={`w-full text-left px-3.5 py-2 flex items-center space-x-2 ${
@@ -1446,7 +1421,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                     <FileText className={`w-4 h-4 ${selectedPrestations.size > 0 ? 'text-amber-600' : 'text-slate-300'}`} />
                     <div>
                       <div className="font-semibold">PDF Sélection Détaillé ({selectedPrestations.size})</div>
-                      <div className="text-[10px] text-slate-400">Rapport personnalisé avec actes</div>
+                      <div className="text-[10px] text-slate-400">Rapport personnalisé avec récap mensuel & actes</div>
                     </div>
                   </button>
                 </div>
@@ -2731,6 +2706,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         societes={societes}
         personnes={personnes}
         familles={familles}
+        defaultSocieteId={filterSocieteId !== 'ALL' ? filterSocieteId : (selectedSocieteId !== 'ALL' ? selectedSocieteId : undefined)}
         onImportPrestations={(newPrests, newSocs, newPers) => {
           if (onImportPrestations) {
             onImportPrestations(newPrests, newSocs, newPers);

@@ -4,6 +4,7 @@ import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
 import { PrestationsView } from './components/PrestationsView';
 import { PaiementsView } from './components/PaiementsView';
+import { RejetsView } from './components/RejetsView';
 import { HistoriqueView } from './components/HistoriqueView';
 import { SocietesView } from './components/SocietesView';
 import { PersonnesView } from './components/PersonnesView';
@@ -22,17 +23,20 @@ export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
 
-  // Persistence initialized with MCI CARE and empty insured database
+  // Persistence initialized with restored initial societes (MCI CARE, NY HAVANA, BSA, ASCOMA)
   const [societes, setSocietes] = useState<Societe[]>(() => {
     localStorage.removeItem('suivi_assurance_societes');
     localStorage.removeItem('suivi_assurance_bsa_v3_societes');
     localStorage.removeItem('suivi_assurance_bsa_clean_societes');
-    localStorage.removeItem('suivi_assurance_nyhavana_societes');
-    const saved = localStorage.getItem('suivi_assurance_mcicare_societes');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_societes') || localStorage.getItem('suivi_assurance_nyhavana_societes');
     if (saved) {
       try {
         const parsed: Societe[] = JSON.parse(saved);
-        if (parsed.length > 0) return parsed;
+        if (parsed.length > 0) {
+          const existingNames = new Set(parsed.map(s => s.nom.toUpperCase().trim()));
+          const missing = initialSocietes.filter(s => !existingNames.has(s.nom.toUpperCase().trim()));
+          return [...parsed, ...missing];
+        }
       } catch {
         return initialSocietes;
       }
@@ -359,6 +363,18 @@ export function App() {
             onImportPaiements={handleImportPaiements}
             isCreateModalOpen={isPaiementModalOpen}
             setIsCreateModalOpen={setIsPaiementModalOpen}
+          />
+        )}
+
+        {activeTab === 'rejets' && (
+          <RejetsView
+            prestations={prestations}
+            paiements={paiements}
+            societes={societes}
+            personnes={personnes}
+            familles={familles}
+            selectedSocieteId={selectedSocieteId}
+            onSavePrestation={handleSavePrestation}
           />
         )}
 

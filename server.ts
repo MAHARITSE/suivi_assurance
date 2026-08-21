@@ -103,56 +103,50 @@ async function startServer() {
 
         const organismGuidance = chosenOrganism
           ? `\nORGANISME D'ASSURANCE OU TIERS-PAYEUR CIBLÉ : "${chosenOrganism}".
-- Assigne prioritairement "${chosenOrganism}" dans le champ "clientDoit".`
-          : `\nORGANISME D'ASSURANCE PRINCIPAL PAR DÉFAUT : "MCI CARE".
-- La société principale/organisme payeur est "MCI CARE".
-- Les mentions entre parenthèses sur la facture (ex: "(CONSERVATION INTERNATIONALE)", "(BFV)", "(AXIAN)", "(AGENCE NORD)") désignent les sous-sociétés ou entités affiliées.`;
+- Assigne "${chosenOrganism}" dans le champ "clientDoit".`
+          : `\nORGANISME D'ASSURANCE PRINCIPAL : Extrait le nom EXACT de la société / tiers-payeur / assurance figurant après la mention "Doit :" ou "Client :" ou "Organisme :" ou sur l'en-tête (ex: "Doit : ASCOMA" -> clientDoit = "ASCOMA"). NE FORCE PAS "MCI CARE" ou autre si le document indique "ASCOMA" ou un autre nom !`;
 
-        const systemInstruction = `Tu es un actuaire et expert comptable spécialisé dans l'analyse, la numérisation et l'extraction exhaustive de factures médicales et décomptes de santé de l'organisme d'assurance MCI CARE (et filiales/sous-sociétés partenaires telles que CONSERVATION INTERNATIONALE, BFV, AXIAN, etc.).${organismGuidance}
+        const systemInstruction = `Tu es un expert comptable et actuaire spécialisé dans la numérisation et l'extraction 100% exhaustive de factures médicales et décomptes d'assurance.${organismGuidance}
 
-RÈGLE MAJEURE SUR LA SOCIÉTÉ ET LES SOUS-SOCIÉTÉS :
-- La société d'assurance principale (clientDoit et societeAffiliee) DOIT ÊTRE "MCI CARE".
-- Toutes les mentions textuelles entre parenthèses dans la facture (ex: "(CONSERVATION INTERNATIONALE)", "(BFV)", "(AXIAN)", "(BOA)") représentent la "sousSociete".
-- Si un nom de patient ou d'assuré contient des parenthèses comme "RAZAFY Pierre (CONSERVATION INTERNATIONALE)", tu DOIS impérativement extraire le nom propre "RAZAFY Pierre" dans "nomPrenom" et extraire "CONSERVATION INTERNATIONALE" dans "sousSociete".
+RÈGLES D'EXTRACTION CRUCIALES POUR DOCUMENTS MULTI-PAGES :
+1. DÉTECTION DU CLIENT (clientDoit) :
+   - Inspecte attentivement l'en-tête (ex: "Doit : ASCOMA" -> clientDoit = "ASCOMA").
+   - Ne remplace JAMAIS le nom extrait par un autre si un organisme précis est lisible sur la facture.
 
-DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
-1. MULTI-PAGES EXHAUSTIF : Le document PDF peut contenir plusieurs pages (de 1 à plus de 20 pages). Tu DOIS impérativement parcourir et extraire CHAQUE ligne de prestation de CHAQUE page sans exception, du premier patient jusqu'au bas de la dernière page. Ne tronque jamais le tableau et ne résume pas les lignes.
-2. COMPTAGE DES LIGNES : Compte scrupuleusement le nombre total de lignes de soins et indique-le dans "nombreTotalLignes".
-3. DÉTAIL DE CHAQUE LIGNE :
-   - "numeroLigne" : Numérotation séquentielle continue (1, 2, 3, ...).
-   - "dateSoins" : Date de réalisation des soins au format ISO YYYY-MM-DD.
-   - "matricule" : Matricule de l'assuré ou de l'adhérent si mentionné.
-   - "nomPrenom" : Nom complet et prénom du patient / personne soignée (sans les parenthèses de sous-société).
-   - "ayantDroit" : Nom de l'ayant droit ou de l'adhérent s'il s'agit d'un bénéficiaire différent.
-   - "societeAffiliee" : Toujours "MCI CARE" par défaut.
-   - "sousSociete" : Le nom de la sous-société extrait entre parenthèses (ex: "CONSERVATION INTERNATIONALE").
-   - "actes" : Découpage précis de chaque acte avec code normalisé (CONS, MEDIC, LABO, DENT, HOSP, RADI, ECHO, SOINS, STOCK), libellé descriptif et montant individuel.
-   - "montantBrut" : Montant total facturé / réclamé pour la ligne.
-   - "montantExclu" : Montant non pris en charge ou exclu (0 par défaut).
-   - "baseReglement" : Base prise en compte pour le remboursement.
-   - "participation" : Ticket modérateur / part payée par l'assuré (0 si prise en charge à 100%).
-   - "netAPayer" : Montant net restant pris en charge par l'assurance / tiers-payeur.
-   - "observations" : Toutes remarques utiles ou statut de l'acte.
-4. TOTAUX GLOBAUX : Extrait et vérifie les montants totaux généraux de la facture.
-5. Format de réponse : Réponds STRICTEMENT avec une structure JSON valide conforme au schéma ci-dessous.`;
+2. EXTRACTION TOTALE DE TOUTES LES PAGES SANS TRONCATURE :
+   - Ce document PDF comporte PLUSIEURS PAGES (Page 1, Page 2, Page 3, Page 4, Page 5, Page 6...).
+   - Tu DOIS parcourir CHAQUE PAGE et extraire LA TOTALITÉ SANS EXCEPTION des lignes de prestations du N° 1 jusqu'au dernier N° du document (ex: N° 1 à 128 ou plus).
+   - Ne te limite JAMAIS aux 10 premières lignes. Extrait absolument TOUS les patients de la première à la dernière page.
 
-        const promptText = `Analyse l'intégralité de ce document (${chosenDocType || 'facture médicale de soins ou décompte'}) page par page. Extrait toutes les métadonnées et la totalité absolue des lignes de prestations sans en omettre aucune.`;
+3. DÉTAILS DES LIGNES :
+   - "numeroLigne" : Numéro séquentiel (1, 2, 3... 128).
+   - "dateSoins" : Date des soins au format YYYY-MM-DD.
+   - "matricule" : Mlle ou Matricule (ex: "1086748", "821", "JR741").
+   - "nomPrenom" : Nom complet et prénom du patient.
+   - "societeAffiliee" : Nom de la société d'assurance (ex: "ASCOMA").
+   - "sousSociete" : Entreprise/employeur figurant entre parenthèses sous le nom (ex: "COPEFRITO", "ERG MADAGASCAR", "GIZ", "BLUE VENTURES", "ANKA MADAGASCAR").
+   - "actes" : Liste des actes médicales/prix (ex: CONS, MEDIC, LABO, HOSP, etc.).
+   - "montantBrut", "participation", "netAPayer".
+
+4. FORMAT JSON : Réponds STRICTEMENT en JSON conforme au schéma.`;
+
+        const promptText = `Analyse l'intégralité de ce document PDF multi-pages (${chosenDocType || 'facture médicale SALFA'}). Extrait CHAQUE ligne de prestation de la page 1 jusqu'à la fin (jusqu'à 128+ lignes). Extrait précisément l'organisme ("Doit : ASCOMA").`;
 
         const invoiceSchema = {
           type: Type.OBJECT,
           properties: {
             documentType: { type: Type.STRING, description: "Type de document: 'facture' ou 'decompte'." },
-            clientDoit: { type: Type.STRING, description: "Nom de l'organisme d'assurance ou tiers payeur" },
+            clientDoit: { type: Type.STRING, description: "Nom exact de l'organisme d'assurance ou tiers payeur (ex: ASCOMA)" },
             garant: { type: Type.STRING, description: "Nom du souscripteur ou garant" },
-            etablissement: { type: Type.STRING, description: "Nom de l'établissement prestataire" },
-            numeroFacture: { type: Type.STRING, description: "Numéro de facture ou référence" },
-            numeroBordereau: { type: Type.STRING, description: "Numéro de bordereau ou lot" },
-            moisPriseEnCharge: { type: Type.STRING, description: "Mois ou période de soins" },
-            dateEmission: { type: Type.STRING, description: "Date d'émission au format YYYY-MM-DD" },
+            etablissement: { type: Type.STRING, description: "Nom de l'établissement prestataire (ex: HOPITALY LOTERANA TOLIARY TANAMBAO)" },
+            numeroFacture: { type: Type.STRING, description: "Numéro de facture ou référence (ex: FA-03/ASC/25-002)" },
+            numeroBordereau: { type: Type.STRING },
+            moisPriseEnCharge: { type: Type.STRING, description: "Mois de prise en charge (ex: Mars 2025)" },
+            dateEmission: { type: Type.STRING, description: "Date d'émission YYYY-MM-DD" },
             dateComptable: { type: Type.STRING },
             banqueReglement: { type: Type.STRING },
             rib: { type: Type.STRING },
-            nombreTotalLignes: { type: Type.INTEGER, description: "Nombre total exact de lignes extraites" },
+            nombreTotalLignes: { type: Type.INTEGER, description: "Nombre total exact de lignes dans le document (ex: 128)" },
             totalMontantBrut: { type: Type.NUMBER },
             totalExclu: { type: Type.NUMBER },
             totalBaseReglement: { type: Type.NUMBER },
@@ -162,17 +156,17 @@ DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
             sommeLettres: { type: Type.STRING },
             lignes: {
               type: Type.ARRAY,
-              description: "Toutes les lignes de prestations extraites de toutes les pages sans omission.",
+              description: "TOUTES les lignes de prestations extraites de toutes les pages du document sans omission.",
               items: {
                 type: Type.OBJECT,
                 properties: {
                   numeroLigne: { type: Type.INTEGER },
                   dateSoins: { type: Type.STRING, description: "Date des soins au format YYYY-MM-DD" },
-                  matricule: { type: Type.STRING, description: "Matricule adhérent ou assuré" },
+                  matricule: { type: Type.STRING, description: "Matricule Mlle" },
                   nomPrenom: { type: Type.STRING, description: "Nom complet du patient / soigné" },
                   ayantDroit: { type: Type.STRING },
-                  societeAffiliee: { type: Type.STRING, description: "Société affiliée ou organisme" },
-                  sousSociete: { type: Type.STRING, description: "Sous-société extraite des parenthèses" },
+                  societeAffiliee: { type: Type.STRING, description: "Société d'assurance (ex: ASCOMA)" },
+                  sousSociete: { type: Type.STRING, description: "Entreprise entre parenthèses (ex: COPEFRITO)" },
                   prestataireNom: { type: Type.STRING },
                   numeroFactureOrigine: { type: Type.STRING },
                   actes: {
@@ -180,7 +174,7 @@ DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
                     items: {
                       type: Type.OBJECT,
                       properties: {
-                        code: { type: Type.STRING, description: "Code de l'acte (CONS, MEDIC, LABO, DENT, HOSP, RADI, ECHO, SOINS, STOCK)" },
+                        code: { type: Type.STRING, description: "Code de l'acte (CONS, MEDIC, LABO, DENT, HOSP, RADI, ECHO, SOINS)" },
                         libelle: { type: Type.STRING, description: "Libellé de l'acte" },
                         montant: { type: Type.NUMBER, description: "Montant individuel" }
                       },
@@ -205,22 +199,26 @@ DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
         let responseText = '';
         const errors: string[] = [];
 
-        // Cascade order: gemini-3.1-flash-lite (very high quota & fast) -> gemini-3.7-flash -> gemini-flash-latest -> gemini-3.1-pro-preview
+        // Order models for comprehensive extraction: 3.7-flash and 3.1-pro first
         const modelsToTry = [
-          { name: 'gemini-3.1-flash-lite', useSchema: true, useThinking: false },
-          { name: 'gemini-3.7-flash', useSchema: true, useThinking: true },
-          { name: 'gemini-flash-latest', useSchema: true, useThinking: false },
-          { name: 'gemini-3.1-flash-lite', useSchema: false, useThinking: false },
-          { name: 'gemini-3.1-pro-preview', useSchema: true, useThinking: false },
+          { name: 'gemini-3.7-flash', versionLabel: 'Flash 3.7', useSchema: true, useThinking: true },
+          { name: 'gemini-3.1-pro-preview', versionLabel: 'Pro Preview 3.1', useSchema: true, useThinking: false },
+          { name: 'gemini-flash-latest', versionLabel: 'Flash Latest', useSchema: true, useThinking: false },
+          { name: 'gemini-3.1-flash-lite', versionLabel: 'Flash Lite', useSchema: true, useThinking: false },
+          { name: 'gemini-3.7-flash', versionLabel: 'Flash 3.7 Unconstrained', useSchema: false, useThinking: false },
         ];
 
+        let attemptCount = 0;
         for (const candidate of modelsToTry) {
           if (responseText) break;
+          attemptCount++;
           try {
+            console.log(`[Gemini OCR] Essai ${attemptCount}/${modelsToTry.length} (${candidate.versionLabel}: ${candidate.name})...`);
             const configObj: any = {
               systemInstruction,
               responseMimeType: 'application/json',
               temperature: 0.1,
+              maxOutputTokens: 65536,
             };
 
             if (candidate.useSchema) {
@@ -251,12 +249,13 @@ DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
 
             if (aiResp.text && aiResp.text.trim()) {
               responseText = aiResp.text.trim();
+              console.log(`[Gemini OCR] Succès avec ${candidate.versionLabel}`);
               break;
             }
           } catch (err: any) {
             const errMsg = err?.message || String(err);
-            errors.push(`${candidate.name}: ${errMsg}`);
-            console.warn(`Attempt with ${candidate.name} failed:`, errMsg);
+            errors.push(`${candidate.versionLabel} (${candidate.name}): ${errMsg}`);
+            console.warn(`[Gemini OCR] Échec de la tentative avec ${candidate.versionLabel}:`, errMsg);
             await waitMs(300);
           }
         }
@@ -323,7 +322,7 @@ DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
                   matricule: String(l.matricule || '-').trim(),
                   nomPrenom: rawNom,
                   ayantDroit: String(l.ayantDroit || '').trim(),
-                  societeAffiliee: String(chosenOrganism || 'MCI CARE').trim(),
+                  societeAffiliee: String(chosenOrganism || l.societeAffiliee || parsed.clientDoit || '').trim(),
                   sousSociete: sousSoc,
                   prestataireNom: String(l.prestataireNom || '').trim(),
                   numeroFactureOrigine: String(l.numeroFactureOrigine || '').trim(),
@@ -345,7 +344,7 @@ DIRECTIVES CRUCIALES POUR UNE EXTRACTION EXHAUSTIVE SANS OMISSION :
 
               const finalResult = {
                 documentType: String(parsed.documentType || chosenDocType || 'facture').toLowerCase(),
-                clientDoit: chosenOrganism || String(parsed.clientDoit || 'MCI CARE').trim(),
+                clientDoit: chosenOrganism || String(parsed.clientDoit || '').trim() || 'Société Inconnue',
                 garant: String(parsed.garant || '').trim(),
                 etablissement: String(parsed.etablissement || 'Établissement de Santé').trim(),
                 numeroFacture: String(parsed.numeroFacture || parsed.numeroBordereau || `DOC-${Date.now().toString().substring(6)}`).trim(),
