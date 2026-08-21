@@ -20,6 +20,7 @@ import {
 } from './data/initialData';
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
 import { generateMySQLDump } from './utils/sqlExporter';
+import { fetchWampData, saveWampData, deleteWampData } from './utils/wampApi';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -106,6 +107,29 @@ export function App() {
   const [isPrestationModalOpen, setIsPrestationModalOpen] = useState(false);
   const [isPaiementModalOpen, setIsPaiementModalOpen] = useState(false);
 
+  // Sync with WAMP API on load if present
+  useEffect(() => {
+    async function syncFromWamp() {
+      try {
+        const [sData, pData, fData, prData, paData] = await Promise.all([
+          fetchWampData('societes'),
+          fetchWampData('personnes'),
+          fetchWampData('familles'),
+          fetchWampData('prestations'),
+          fetchWampData('paiements')
+        ]);
+        if (sData && sData.length > 0) setSocietes(sData);
+        if (pData && pData.length > 0) setPersonnes(pData);
+        if (fData && fData.length > 0) setFamilles(fData);
+        if (prData && prData.length > 0) setPrestations(prData);
+        if (paData && paData.length > 0) setPaiements(paData);
+      } catch {
+        // Ignore errors when running outside WAMP
+      }
+    }
+    syncFromWamp();
+  }, []);
+
   // Sync to localStorage
   useEffect(() => {
     localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
@@ -129,6 +153,7 @@ export function App() {
 
   // Handlers for Prestations
   const handleSavePrestation = (prestation: Prestation) => {
+    saveWampData('prestations', prestation);
     setPrestations(prev => {
       const idx = prev.findIndex(p => p.id === prestation.id);
       if (idx >= 0) {
@@ -141,11 +166,17 @@ export function App() {
   };
 
   const handleDeletePrestation = (id: string) => {
+    deleteWampData('prestations', id);
     setPrestations(prev => prev.filter(p => p.id !== id));
   };
 
   // Handlers for Paiements
   const handleSavePaiement = (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
+    saveWampData('paiements', newPaiement);
+    if (updatedPrestations && updatedPrestations.length > 0) {
+      updatedPrestations.forEach(up => saveWampData('prestations', up));
+    }
+
     setPaiements(prev => {
       const idx = prev.findIndex(p => p.id === newPaiement.id);
       if (idx >= 0) {
@@ -172,11 +203,13 @@ export function App() {
   };
 
   const handleDeletePaiement = (id: string) => {
+    deleteWampData('paiements', id);
     setPaiements(prev => prev.filter(p => p.id !== id));
   };
 
   // Handlers for Societes
   const handleSaveSociete = (societe: Societe) => {
+    saveWampData('societes', societe);
     setSocietes(prev => {
       const idx = prev.findIndex(s => s.id === societe.id);
       if (idx >= 0) {
@@ -189,11 +222,13 @@ export function App() {
   };
 
   const handleDeleteSociete = (id: string) => {
+    deleteWampData('societes', id);
     setSocietes(prev => prev.filter(s => s.id !== id));
   };
 
   // Handlers for Personnes
   const handleSavePersonne = (personne: Personne) => {
+    saveWampData('personnes', personne);
     setPersonnes(prev => {
       const idx = prev.findIndex(p => p.id === personne.id);
       if (idx >= 0) {
@@ -206,11 +241,13 @@ export function App() {
   };
 
   const handleDeletePersonne = (id: string) => {
+    deleteWampData('personnes', id);
     setPersonnes(prev => prev.filter(p => p.id !== id));
   };
 
   // Handlers for Familles
   const handleSaveFamille = (famille: Famille) => {
+    saveWampData('familles', famille);
     setFamilles(prev => {
       const idx = prev.findIndex(f => f.id === famille.id);
       if (idx >= 0) {
@@ -223,6 +260,7 @@ export function App() {
   };
 
   const handleDeleteFamille = (id: string) => {
+    deleteWampData('familles', id);
     setFamilles(prev => prev.filter(f => f.id !== id));
   };
 
@@ -233,6 +271,7 @@ export function App() {
     newPersonnes?: Personne[]
   ) => {
     if (newSocietes && newSocietes.length > 0) {
+      newSocietes.forEach(ns => saveWampData('societes', ns));
       setSocietes(prev => {
         const copy = [...prev];
         newSocietes.forEach(ns => {
@@ -244,6 +283,7 @@ export function App() {
       });
     }
     if (newPersonnes && newPersonnes.length > 0) {
+      newPersonnes.forEach(np => saveWampData('personnes', np));
       setPersonnes(prev => {
         const copy = [...prev];
         newPersonnes.forEach(np => {
@@ -254,6 +294,7 @@ export function App() {
         return copy;
       });
     }
+    newPrestations.forEach(p => saveWampData('prestations', p));
     setPrestations(prev => [...newPrestations, ...prev]);
     setActiveTab('prestations');
   };
@@ -264,7 +305,12 @@ export function App() {
     newSocietes?: Societe[],
     newPersonnes?: Personne[]
   ) => {
+    saveWampData('paiements', newPaiement);
+    if (updatedPrestations && updatedPrestations.length > 0) {
+      updatedPrestations.forEach(up => saveWampData('prestations', up));
+    }
     if (newSocietes && newSocietes.length > 0) {
+      newSocietes.forEach(ns => saveWampData('societes', ns));
       setSocietes(prev => {
         const copy = [...prev];
         newSocietes.forEach(ns => {
@@ -276,6 +322,7 @@ export function App() {
       });
     }
     if (newPersonnes && newPersonnes.length > 0) {
+      newPersonnes.forEach(np => saveWampData('personnes', np));
       setPersonnes(prev => {
         const copy = [...prev];
         newPersonnes.forEach(np => {
