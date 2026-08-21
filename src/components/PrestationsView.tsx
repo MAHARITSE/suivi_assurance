@@ -41,7 +41,6 @@ import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPre
 import { SalfaImportModal } from './SalfaImportModal';
 import { FacturesGroupedTable } from './prestations/FacturesGroupedTable';
 import { FactureDetailModal } from './prestations/FactureDetailModal';
-import { PrestationsStickyFooter } from './prestations/PrestationsStickyFooter';
 import * as XLSX from 'xlsx';
 
 export type PrestationViewMode = 'detaillee' | 'factures';
@@ -1335,7 +1334,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   };
 
   return (
-    <div id="prestations-view" className="space-y-4 pb-24">
+    <div id="prestations-view" className="space-y-4 pb-6 w-full">
       {/* Action Header with View Mode Switcher & Streamlined Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
@@ -2170,24 +2169,26 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             </tbody>
             <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
               <tr>
-                <td colSpan={6} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
-                  Total de la sélection ({stats.count}) :
+                <td colSpan={6} className="py-3 px-3 text-right uppercase tracking-wider text-slate-700 font-bold">
+                  {selectedPrestations.size > 0 
+                    ? `Total de la sélection (${selectedPrestations.size} / ${stats.count}) :`
+                    : `Total général (${stats.count} dossiers) :`}
                 </td>
-                <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">
-                  {formatMoney(stats.totalFacture)}
+                <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900 font-mono font-bold">
+                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalFacture : stats.totalFacture)}
                 </td>
-                <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap">
-                  {formatMoney(stats.totalTicketMod)}
+                <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap font-mono font-bold">
+                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalTicketMod : stats.totalTicketMod)}
                 </td>
-                <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap">
-                  {formatMoney(stats.totalARembourser)}
+                <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap font-mono font-bold">
+                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalARembourser : stats.totalARembourser)}
                 </td>
-                <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap">
-                  {formatMoney(stats.totalPaye)}
+                <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap font-mono font-bold">
+                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalPaye : stats.totalPaye)}
                 </td>
-                <td className="py-3 px-3 text-right whitespace-nowrap">
-                  <span className={stats.totalReste > 0 ? 'text-rose-700' : 'text-slate-400'}>
-                    {formatMoney(stats.totalReste)}
+                <td className="py-3 px-3 text-right whitespace-nowrap font-mono font-bold">
+                  <span className={(selectedPrestations.size > 0 ? selectedStats.totalReste : stats.totalReste) > 0 ? 'text-rose-700' : 'text-slate-400'}>
+                    {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalReste : stats.totalReste)}
                   </span>
                 </td>
                 <td colSpan={2} className="py-3 px-3"></td>
@@ -2737,43 +2738,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             newPrests.forEach(p => onSavePrestation(p));
           }
         }}
-      />
-
-      {/* Sticky Bottom Totals Summary Bar - Toujours visible en bas de la fenêtre */}
-      <PrestationsStickyFooter
-        viewMode={viewMode}
-        dossiersCount={viewMode === 'factures' ? groupedFacturesTotals.totalAssures : stats.count}
-        facturesCount={groupedFactures.length}
-        totalFacture={
-          selectedPrestations.size > 0 
-            ? selectedStats.totalFacture 
-            : (viewMode === 'factures' ? groupedFacturesTotals.totalFacture : stats.totalFacture)
-        }
-        totalTicketMod={
-          selectedPrestations.size > 0 
-            ? selectedStats.totalTicketMod 
-            : (viewMode === 'factures' ? groupedFacturesTotals.totalTicketMod : stats.totalTicketMod)
-        }
-        totalARembourser={
-          selectedPrestations.size > 0 
-            ? selectedStats.totalARembourser 
-            : (viewMode === 'factures' ? groupedFacturesTotals.totalARembourser : stats.totalARembourser)
-        }
-        totalPaye={
-          selectedPrestations.size > 0 
-            ? selectedStats.totalPaye 
-            : (viewMode === 'factures' ? groupedFacturesTotals.totalPaye : stats.totalPaye)
-        }
-        totalReste={
-          selectedPrestations.size > 0 
-            ? selectedStats.totalReste 
-            : (viewMode === 'factures' ? groupedFacturesTotals.resteAReclamer : stats.totalReste)
-        }
-        selectedCount={selectedPrestations.size}
-        onSelectAll={() => setSelectedPrestations(new Set(filteredAndSortedList.map(p => p.id)))}
-        onClearSelection={() => setSelectedPrestations(new Set())}
-        onExportPdfSelected={handleExportRecouvrementPdfSelected}
-        onExportExcel={handleExportExcel}
       />
     </div>
   );

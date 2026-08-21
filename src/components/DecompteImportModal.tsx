@@ -42,7 +42,6 @@ import {
   FactureLigneParsed 
 } from '../types';
 import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
-import { ascomaSampleInvoice, mciCareSampleInvoice, bsaReleveSampleInvoice } from '../data/insuranceSampleDocuments';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import * as XLSX from 'xlsx';
 
@@ -108,6 +107,28 @@ export function normalizeActFamilyCode(rawCode: string): string {
   if (c.includes('HOSP') || c.includes('CHIR') || c.includes('SEJOUR') || c.includes('ACCOUCHEMENT') || c.includes('MATERNITE') || c.includes('BLOC')) return 'HOSP';
   if (c.includes('STOCK')) return 'STOCK';
   return c || 'ACTE';
+}
+
+export function isRealMatricule(mat?: string | null): boolean {
+  if (!mat) return false;
+  const clean = mat.trim().toUpperCase();
+  if (
+    !clean ||
+    clean === '-' ||
+    clean === '--' ||
+    clean === 'N/A' ||
+    clean === 'NA' ||
+    clean === 'NON RENSEIGNÉ' ||
+    clean === 'NON RENSEIGNE' ||
+    clean === 'AUCUN' ||
+    clean === 'NULL' ||
+    clean === 'UNDEFINED' ||
+    clean === '.' ||
+    clean === '0'
+  ) {
+    return false;
+  }
+  return clean.length >= 1;
 }
 
 export type ConfrontationType = 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED';
@@ -225,19 +246,6 @@ export function getConfrontationDetails(
   };
 }
 
-function getAppropriateDecompteFallback(filename: string, chosenOrg?: string): ParsedFactureAssurance {
-  const org = (chosenOrg || '').toLowerCase();
-  if (org.includes('ascoma')) return ascomaSampleInvoice;
-  if (org.includes('mci') || org.includes('care')) return mciCareSampleInvoice;
-  if (org.includes('bsa')) return bsaReleveSampleInvoice;
-
-  const low = (filename || '').toLowerCase();
-  if (low.includes('ascoma')) return ascomaSampleInvoice;
-  if (low.includes('mci') || low.includes('care')) return mciCareSampleInvoice;
-  if (low.includes('bsa')) return bsaReleveSampleInvoice;
-  return mciCareSampleInvoice;
-}
-
 export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   isOpen,
   onClose,
@@ -247,12 +255,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   familles,
   onSavePaiement,
 }) => {
-  const [importMode, setImportMode] = useState<'excel' | 'pdf' | 'sample'>('excel');
+  const [importMode, setImportMode] = useState<'excel' | 'pdf'>('excel');
   const [selectedInsurance, setSelectedInsurance] = useState<string>('AUTO');
   const [customInsurance, setCustomInsurance] = useState<string>('');
   const [parsedDoc, setParsedDoc] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
   const [rows, setRows] = useState<SettlementRowItem[]>([]);
   const [confrontFilter, setConfrontFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED'>('ALL');
   const [groupOnImport, setGroupOnImport] = useState<boolean>(true);
@@ -279,6 +288,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setParsedDoc(null);
     setRows([]);
     setErrorMessage(null);
+    setLastUploadedFile(null);
     setSearchingRowId(null);
     setIsProcessing(false);
     setConfrontFilter('ALL');
@@ -637,23 +647,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     }
   };
 
-  const handleLoadPredefined = (type: 'ascoma' | 'mci' | 'bsa') => {
+  const processFile = async (file: File) => {
     setIsProcessing(true);
     setErrorMessage(null);
-    setTimeout(() => {
-      if (type === 'ascoma') processLoadedDocument(ascomaSampleInvoice);
-      else if (type === 'mci') processLoadedDocument(mciCareSampleInvoice);
-      else processLoadedDocument(bsaReleveSampleInvoice);
-    }, 200);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
-    setIsProcessing(true);
-    setErrorMessage(null);
+    setLastUploadedFile(file);
 
     const chosenOrg = getEffectiveInsurance();
 
@@ -729,7 +726,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 }
               }
 
-              const matricule = String(getVal(['Matricule', 'N° Matricule', 'Immatriculation', 'Code']) || '').trim();
+              const matricule = String(getVal([
+                'Matricule', 'N° Matricule', 'N°_Matricule', 'Num_Matricule', 'Num Matricule',
+                'Immatriculation', 'Immat', 'N° Immatriculation', 'Num Immatriculation', 'N°_Immatriculation',
+                'Code', 'Code_Assure', 'Code Assuré', 'Code_Adherent', 'Code Adhérent',
+                'N° Assuré', 'N°_Assuré', 'Numéro Assuré', 'No Assure', 'No_Assure',
+                'Police', 'N° Police', 'N°_Police',
+                'N° Adhérent', 'N°_Adhérent', 'Numéro Adhérent', 'Numéro_Adhérent', 'No Adherent',
+                'Numéro Adhesion', 'N° Adhésion', 'N°_Adhésion', 'Adhesion', 'Identifiant'
+              ]) || '').trim();
               const rawDateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || inferredDateReglement).trim();
               const dateSoins = normalizeDateISO(rawDateSoins);
               const montantBrut = Number(getVal(['Montant_Reclame_Brut', 'Montant_Brut', 'Montant Total Brut', 'Montant Facture', 'Total Prestation', 'Montant Reclame'])) || 0;
@@ -827,9 +832,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             throw new Error("Le fichier est trop volumineux (taille maximale: 25 Mo).");
           }
           if (response.status === 504 || response.status === 408) {
-            throw new Error("Délai de traitement dépassé par le serveur. Veuillez réessayer ou utiliser l'importation par exemple de décompte.");
+            throw new Error("Délai de traitement dépassé par le serveur. Veuillez cliquer sur Réessayer.");
           }
-          throw new Error("L'extraction automatique du décompte n'a pas pu aboutir. Vérifiez que la clé GEMINI_API_KEY est configurée ou utilisez les exemples de décompte prédéfinis.");
+          throw new Error("L'extraction automatique du décompte n'a pas pu aboutir. Veuillez cliquer sur Réessayer l'analyse.");
         }
 
         const data: ParsedFactureAssurance = json?.data || json;
@@ -841,8 +846,25 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       }
     } catch (err: any) {
       console.warn('Decompte extraction error:', err);
-      setErrorMessage(err.message || 'Erreur lors de l\'extraction des données du document. Assurez-vous que le document est lisible.');
+      setErrorMessage(err.message || 'Erreur lors de l\'extraction des données du document. Veuillez réessayer.');
       setIsProcessing(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    processFile(file);
+  };
+
+  const handleRetryLastFile = () => {
+    if (lastUploadedFile) {
+      processFile(lastUploadedFile);
+    } else if (importMode === 'pdf') {
+      fileInputRef.current?.click();
+    } else {
+      excelInputRef.current?.click();
     }
   };
 
@@ -928,6 +950,32 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     return { perfect, sameDate, sameAmount, verify, unlinked, total: rows.length };
   }, [rows]);
 
+  // Statistics for insured matricule updates
+  const matriculeSyncStats = useMemo(() => {
+    let withMatricule = 0;
+    let willUpdateExisting = 0;
+    let willCreateNew = 0;
+
+    rows.forEach(r => {
+      if (isRealMatricule(r.matricule)) {
+        withMatricule++;
+        const normNom = (r.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        const candPerId = r.matchedCandidate?.personneId;
+        const existing = personnes.find(p => (candPerId && p.id === candPerId) || (p.matricule && p.matricule.toLowerCase() === r.matricule.toLowerCase()) || p.nomPrenom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === normNom);
+
+        if (existing) {
+          if (existing.matricule.trim().toLowerCase() !== r.matricule.trim().toLowerCase()) {
+            willUpdateExisting++;
+          }
+        } else {
+          willCreateNew++;
+        }
+      }
+    });
+
+    return { withMatricule, willUpdateExisting, willCreateNew };
+  }, [rows, personnes]);
+
   // Filtered rows for display in table
   const displayedRows = useMemo(() => {
     if (confrontFilter === 'ALL') return rows;
@@ -954,7 +1002,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     );
 
     const createdSocietes: Societe[] = [];
-    const createdPersonnes: Personne[] = [];
+    const finalPersonnesMap = new Map<string, Personne>();
+    personnes.forEach(p => finalPersonnesMap.set(p.id, { ...p }));
 
     if (!matchedSoc) {
       matchedSoc = {
@@ -973,6 +1022,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     selectedRows.forEach((row, idx) => {
       let targetPrestationId = '';
       let targetLigneId = '';
+      const rowMatricule = (row.matricule || '').trim();
+      const hasRealMatricule = isRealMatricule(rowMatricule);
+      const normRowNom = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
       if (row.matchedCandidate) {
         targetPrestationId = row.matchedCandidate.prestationId;
@@ -982,6 +1034,47 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         const pIndex = updatedPrestations.findIndex(p => p.id === targetPrestationId);
         if (pIndex >= 0) {
           const prest = updatedPrestations[pIndex];
+
+          // Locate the insured member's record in dossier
+          let targetPersonne = finalPersonnesMap.get(row.matchedCandidate.personneId) ||
+            finalPersonnesMap.get(prest.personneId) ||
+            Array.from(finalPersonnesMap.values()).find(p => 
+              (hasRealMatricule && p.matricule.toLowerCase() === rowMatricule.toLowerCase()) ||
+              p.nomPrenom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === normRowNom ||
+              (prest.nomAgent && p.nomPrenom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === prest.nomAgent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim())
+            );
+
+          if (targetPersonne) {
+            // Update matricule in the insured person's dossier if the file provides an immatriculation
+            if (hasRealMatricule && targetPersonne.matricule.trim() !== rowMatricule) {
+              targetPersonne = {
+                ...targetPersonne,
+                matricule: rowMatricule,
+                sousSociete: row.sousSociete || targetPersonne.sousSociete
+              };
+              finalPersonnesMap.set(targetPersonne.id, targetPersonne);
+            }
+            if (hasRealMatricule) {
+              prest.matricule = rowMatricule;
+            }
+            prest.personneId = targetPersonne.id;
+          } else {
+            // Create the insured person record if missing
+            const newPer: Personne = {
+              id: generateId(`per-cand-${idx}`),
+              matricule: hasRealMatricule ? rowMatricule : (prest.matricule || `MAT-${1000 + idx}`),
+              nomPrenom: row.nomPrenom || prest.nomAgent || 'Assuré',
+              societeId: matchedSoc?.id || prest.societeId || 'soc-1',
+              sousSociete: row.sousSociete || prest.sousSociete || undefined,
+              qualite: 'Adhérent Principal'
+            };
+            finalPersonnesMap.set(newPer.id, newPer);
+            prest.personneId = newPer.id;
+            if (hasRealMatricule) {
+              prest.matricule = rowMatricule;
+            }
+          }
+
           const updatedLignes = prest.lignes.map(l => {
             if (l.id === targetLigneId) {
               const newTotalPaye = (l.totalPaye || 0) + row.netAPayer;
@@ -1018,21 +1111,31 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         targetPrestationId = generateId(`prest-autogen-${idx}`);
         targetLigneId = generateId(`lig-autogen-${idx}`);
 
-        // Find or create patient
-        let matchedPer = personnes.find(p => 
-          (row.matricule && p.matricule.toLowerCase() === row.matricule.toLowerCase()) ||
-          (row.nomPrenom && p.nomPrenom.toLowerCase().includes(row.nomPrenom.toLowerCase()))
+        // Find or create patient and update their dossier if immatriculation is found
+        let targetPersonne = Array.from(finalPersonnesMap.values()).find(p => 
+          (hasRealMatricule && p.matricule.toLowerCase() === rowMatricule.toLowerCase()) ||
+          p.nomPrenom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === normRowNom
         );
 
-        if (!matchedPer) {
-          matchedPer = {
+        if (targetPersonne) {
+          if (hasRealMatricule && targetPersonne.matricule.trim() !== rowMatricule) {
+            targetPersonne = {
+              ...targetPersonne,
+              matricule: rowMatricule,
+              sousSociete: row.sousSociete || targetPersonne.sousSociete
+            };
+            finalPersonnesMap.set(targetPersonne.id, targetPersonne);
+          }
+        } else {
+          targetPersonne = {
             id: generateId(`per-new-${idx}`),
-            matricule: row.matricule || `MAT-${idx + 100}`,
+            matricule: hasRealMatricule ? rowMatricule : `MAT-${idx + 100}`,
             nomPrenom: row.nomPrenom,
             societeId: matchedSoc?.id || 'soc-1',
+            sousSociete: row.sousSociete || undefined,
             qualite: 'Adhérent Principal'
           };
-          createdPersonnes.push(matchedPer);
+          finalPersonnesMap.set(targetPersonne.id, targetPersonne);
         }
 
         const isAutoRejet = row.netAPayer === 0 && row.montantExclu > 0;
@@ -1044,9 +1147,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           societeId: matchedSoc?.id || 'soc-1',
           societeNom: matchedSoc?.nom || socName,
           sousSociete: row.sousSociete || 'Département',
-          personneId: matchedPer.id,
+          personneId: targetPersonne.id,
           nomAgent: row.nomPrenom,
-          matricule: row.matricule || matchedPer.matricule,
+          matricule: hasRealMatricule ? rowMatricule : targetPersonne.matricule,
           totalPrestation: row.montantBrut,
           montantTotal: row.montantBrut,
           participation: row.participation,
@@ -1082,7 +1185,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         prestationId: targetPrestationId,
         prestationNumero: row.matchedCandidate?.prestationNum || `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
         dateSoins: row.dateSoins,
-        immatriculation: row.matricule || '-',
+        immatriculation: rowMatricule || '-',
         nomBaseAssurance: row.nomPrenom,
         nomAgent: row.nomPrenom,
         totalPaye: row.netAPayer,
@@ -1118,7 +1221,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       lignes: newLignesPaiement
     };
 
-    onSavePaiement(nouveauPaiement, updatedPrestations, createdSocietes, createdPersonnes);
+    const finalPersonnesList = Array.from(finalPersonnesMap.values());
+    onSavePaiement(nouveauPaiement, updatedPrestations, createdSocietes, finalPersonnesList);
     handleResetAndBack();
     onClose();
   };
@@ -1169,9 +1273,45 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         {/* Modal Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {errorMessage && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 font-medium">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{errorMessage}</span>
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                <div>
+                  <div className="font-bold text-rose-950">Échec du traitement</div>
+                  <div className="mt-0.5">{errorMessage}</div>
+                  {lastUploadedFile && (
+                    <div className="text-[11px] text-rose-700/80 font-mono mt-1">
+                      Fichier : {lastUploadedFile.name} ({(lastUploadedFile.size / 1024).toFixed(1)} Ko)
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-2 border-t border-rose-200">
+                <button
+                  type="button"
+                  onClick={handleRetryLastFile}
+                  disabled={isProcessing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold hover:bg-indigo-500 transition cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
+                  <span>{isProcessing ? 'Nouvelle tentative...' : 'Réessayer'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMessage(null);
+                    if (importMode === 'pdf') {
+                      fileInputRef.current?.click();
+                    } else {
+                      excelInputRef.current?.click();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-medium transition cursor-pointer"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>Choisir un autre fichier</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1235,7 +1375,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       type="text"
                       value={customInsurance}
                       onChange={(e) => setCustomInsurance(e.target.value)}
-                      placeholder="Entrez le nom exact de l'organisme payeur (ex: NY HAVANA, ALLIANZ, OMNIS)..."
+                      placeholder="Entrez le nom exact de l'organisme payeur (ex: MCI CARE, ALLIANZ, OMNIS)..."
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
@@ -1244,11 +1384,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
               {/* Import Mode Tabs */}
               <div className="flex items-center justify-center">
-                <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-semibold">
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold w-full max-w-md">
                   <button
                     type="button"
                     onClick={() => setImportMode('excel')}
-                    className={`flex items-center gap-2 rounded-lg px-4 py-2 transition ${
+                    className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2 transition cursor-pointer ${
                       importMode === 'excel'
                         ? 'bg-white text-emerald-800 shadow-xs font-bold'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1261,7 +1401,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setImportMode('pdf')}
-                    className={`flex items-center gap-2 rounded-lg px-4 py-2 transition ${
+                    className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2 transition cursor-pointer ${
                       importMode === 'pdf'
                         ? 'bg-white text-indigo-700 shadow-xs font-bold'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1269,19 +1409,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   >
                     <ScanLine className="h-4 w-4 text-indigo-600" />
                     <span>Scan PDF / Image OCR</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setImportMode('sample')}
-                    className={`flex items-center gap-2 rounded-lg px-4 py-2 transition ${
-                      importMode === 'sample'
-                        ? 'bg-white text-slate-900 shadow-xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Sparkles className="h-4 w-4 text-amber-500" />
-                    <span>Décomptes Prédéfinis (Démo)</span>
                   </button>
                 </div>
               </div>
@@ -1299,7 +1426,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     <button
                       type="button"
                       onClick={downloadDecomptesExcelTemplate}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 font-bold hover:bg-emerald-100 text-xs shrink-0 shadow-2xs transition"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 font-bold hover:bg-emerald-100 text-xs shrink-0 shadow-2xs transition cursor-pointer"
                     >
                       <Download className="h-3.5 w-3.5" />
                       <span>Télécharger Modèle Excel</span>
@@ -1313,8 +1440,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       e.preventDefault();
                       const file = e.dataTransfer.files?.[0];
                       if (file) {
-                        const event = { target: { files: [file] } } as any;
-                        handleFileUpload(event);
+                        processFile(file);
                       }
                     }}
                     className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
@@ -1357,8 +1483,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     e.preventDefault();
                     const file = e.dataTransfer.files?.[0];
                     if (file) {
-                      const event = { target: { files: [file] } } as any;
-                      handleFileUpload(event);
+                      processFile(file);
                     }
                   }}
                   className="flex min-h-56 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/20 p-8 text-center transition hover:border-indigo-500 hover:bg-indigo-50/40"
@@ -1371,7 +1496,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       {isProcessing ? 'Traitement IA et confrontation des actes...' : 'Déposez votre décompte numérisé (PDF ou Image)'}
                     </h4>
                     <p className="text-xs text-slate-500 mt-1 max-w-md">
-                      Reconnaît les formats ASCOMA, MCI CARE, BSA, associe chaque ligne à l'acte prescrit et met à jour le solde restant.
+                      Reconnaît les formats de décompte, associe chaque ligne à l'acte prescrit et met à jour le solde restant.
                     </p>
                   </div>
                   <input
@@ -1389,57 +1514,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   >
                     Parcourir un fichier PDF ou Image
                   </button>
-                </div>
-              )}
-
-              {/* MODE: SAMPLE PRESETS */}
-              {importMode === 'sample' && (
-                <div className="space-y-3">
-                  <div className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-emerald-600" />
-                    <span>Choisir un décompte réel pré-chargé :</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => handleLoadPredefined('ascoma')}
-                      disabled={isProcessing}
-                      className="flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 text-left transition hover:bg-indigo-50 hover:border-indigo-300 cursor-pointer"
-                    >
-                      <div>
-                        <div className="text-xs font-bold text-indigo-950">ASCOMA Tiers Payant</div>
-                        <div className="text-[11px] text-slate-500">Réf 69235 (23 actes • 1 344 683 Ar)</div>
-                      </div>
-                      <ArrowRight className="h-4 w-4 text-indigo-600" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleLoadPredefined('mci')}
-                      disabled={isProcessing}
-                      className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-left transition hover:bg-blue-50 hover:border-blue-300 cursor-pointer"
-                    >
-                      <div>
-                        <div className="text-xs font-bold text-blue-950">MCI CARE (Groupe Axian)</div>
-                        <div className="text-[11px] text-slate-500">Pharmacie & Sous-factures (474 600 Ar)</div>
-                      </div>
-                      <ArrowRight className="h-4 w-4 text-blue-600" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleLoadPredefined('bsa')}
-                      disabled={isProcessing}
-                      className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 text-left transition hover:bg-emerald-50 hover:border-emerald-300 cursor-pointer"
-                    >
-                      <div>
-                        <div className="text-xs font-bold text-emerald-950">BSA / ASK GS (Relevé)</div>
-                        <div className="text-[11px] text-slate-500">Lot 890621 (45 actes • 761 150 Ar)</div>
-                      </div>
-                      <ArrowRight className="h-4 w-4 text-emerald-600" />
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -1470,6 +1544,25 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <strong className="text-emerald-700 font-bold text-sm">{formatMoney(parsedDoc.totalNetAPayer)}</strong>
                 </div>
               </div>
+
+              {/* Matricule synchronization informational banner */}
+              {matriculeSyncStats.withMatricule > 0 && (
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-300 bg-emerald-50/90 px-4 py-2.5 text-xs text-emerald-950 shadow-2xs">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white shrink-0 shadow-2xs">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-emerald-950">
+                      Mise à jour automatique du dossier des assurés :
+                    </div>
+                    <div className="text-[11px] text-emerald-800">
+                      <strong>{matriculeSyncStats.withMatricule}</strong> immatriculation(s) détectée(s) dans le fichier.
+                      {matriculeSyncStats.willUpdateExisting > 0 && ` ${matriculeSyncStats.willUpdateExisting} dossier(s) d'assuré(s) existant(s) seront automatiquement actualisé(s) avec leur nouvelle immatriculation.`}
+                      {matriculeSyncStats.willCreateNew > 0 && ` ${matriculeSyncStats.willCreateNew} nouvelle(s) fiche(s) assuré(s) seront créée(s) avec leur immatriculation.`}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Grouping Toggle Banner (Same Person + Same Date + Same Act) */}
               <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-xs">
@@ -1679,8 +1772,40 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           {/* Adherent / Patient */}
                           <td className="py-2.5 px-3">
                             <div className="font-semibold text-slate-900">{row.nomPrenom}</div>
-                            <div className="text-[11px] text-slate-500 font-mono">
-                              Mat: {row.matricule || '-'} {row.sousSociete ? `• (${row.sousSociete})` : ''}
+                            <div className="text-[11px] text-slate-600 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
+                              {isRealMatricule(row.matricule) ? (
+                                (() => {
+                                  const normNom = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+                                  const candPerId = matched?.personneId;
+                                  const existing = personnes.find(p => (candPerId && p.id === candPerId) || (p.matricule && p.matricule.toLowerCase() === row.matricule.toLowerCase()) || p.nomPrenom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === normNom);
+                                  
+                                  if (existing && existing.matricule.trim().toLowerCase() !== row.matricule.trim().toLowerCase()) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300" title={`Ancien matricule: ${existing.matricule || 'aucun'} ➔ Mise à jour vers: ${row.matricule}`}>
+                                        <span>🔄 Maj Immat :</span>
+                                        <span className="font-mono">{row.matricule}</span>
+                                      </span>
+                                    );
+                                  } else if (existing) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                        <span>✓ Immat :</span>
+                                        <span className="font-mono">{row.matricule}</span>
+                                      </span>
+                                    );
+                                  } else {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                        <span>✨ Nouveau :</span>
+                                        <span className="font-mono">{row.matricule}</span>
+                                      </span>
+                                    );
+                                  }
+                                })()
+                              ) : (
+                                <span className="text-slate-400 text-[10px]">Mat: -</span>
+                              )}
+                              {row.sousSociete ? <span className="text-slate-500 font-sans">({row.sousSociete})</span> : ''}
                             </div>
                             {row.articlesCount && row.articlesCount > 1 ? (
                               <div className="mt-1">

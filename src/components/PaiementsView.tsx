@@ -37,7 +37,6 @@ import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from 
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
-import { PaiementsStickyFooter } from './paiements/PaiementsStickyFooter';
 import * as XLSX from 'xlsx';
 
 type PaiementSortField = 'datePaiement' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
@@ -983,7 +982,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   };
 
   return (
-    <div className="space-y-4 pb-20">
+    <div className="space-y-4 pb-6 w-full">
       {/* View Header with View Mode Switcher & Streamlined Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
@@ -2499,17 +2498,6 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             onSavePaiement(newPaiement, updatedPrestations);
           }
         }}
-      />
-
-      {/* Sticky Bottom Summary Bar */}
-      <PaiementsStickyFooter
-        viewMode={viewMode === 'bordereaux' ? 'bordereaux' : 'groupes'}
-        count={viewMode === 'bordereaux' ? filteredAndSortedPaiements.length : groupedPaymentActs.length}
-        totalReclame={stats.totalReclame}
-        totalModerateur={stats.totalModerateur}
-        totalPaye={stats.totalPaye}
-        totalExclu={stats.totalExclu}
-        onExportExcel={handleExportExcel}
       />
     </div>
   );

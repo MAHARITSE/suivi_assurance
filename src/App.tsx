@@ -22,16 +22,17 @@ export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
 
-  // Persistence directly aligned and purged for BSA Invoice dataset
+  // Persistence initialized with MCI CARE and empty insured database
   const [societes, setSocietes] = useState<Societe[]>(() => {
     localStorage.removeItem('suivi_assurance_societes');
     localStorage.removeItem('suivi_assurance_bsa_v3_societes');
-    const saved = localStorage.getItem('suivi_assurance_bsa_clean_societes');
-    const allowedIds = ['soc-bsa', 'soc-mci', 'soc-ascoma'];
+    localStorage.removeItem('suivi_assurance_bsa_clean_societes');
+    localStorage.removeItem('suivi_assurance_nyhavana_societes');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_societes');
     if (saved) {
       try {
         const parsed: Societe[] = JSON.parse(saved);
-        return parsed.filter(s => allowedIds.includes(s.id));
+        if (parsed.length > 0) return parsed;
       } catch {
         return initialSocietes;
       }
@@ -42,12 +43,24 @@ export function App() {
   const [personnes, setPersonnes] = useState<Personne[]>(() => {
     localStorage.removeItem('suivi_assurance_personnes');
     localStorage.removeItem('suivi_assurance_bsa_v3_personnes');
+    localStorage.removeItem('suivi_assurance_bsa_clean_personnes');
+    localStorage.removeItem('suivi_assurance_nyhavana_personnes');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_personnes');
+    if (saved) {
+      try {
+        const parsed: Personne[] = JSON.parse(saved);
+        return parsed;
+      } catch {
+        return initialPersonnes;
+      }
+    }
     return initialPersonnes;
   });
 
   const [familles, setFamilles] = useState<Famille[]>(() => {
     localStorage.removeItem('suivi_assurance_familles');
     localStorage.removeItem('suivi_assurance_bsa_v3_familles');
+    localStorage.removeItem('suivi_assurance_nyhavana_familles');
     return initialFamilles;
   });
 
@@ -55,12 +68,31 @@ export function App() {
     localStorage.removeItem('suivi_assurance_prestations');
     localStorage.removeItem('suivi_assurance_bsa_v3_prestations');
     localStorage.removeItem('suivi_assurance_bsa_clean_prestations');
+    localStorage.removeItem('suivi_assurance_nyhavana_prestations');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_prestations');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return [];
+      }
+    }
     return [];
   });
 
   const [paiements, setPaiements] = useState<Paiement[]>(() => {
     localStorage.removeItem('suivi_assurance_paiements');
     localStorage.removeItem('suivi_assurance_bsa_v3_paiements');
+    localStorage.removeItem('suivi_assurance_bsa_clean_paiements');
+    localStorage.removeItem('suivi_assurance_nyhavana_paiements');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_paiements');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return initialPaiements;
+      }
+    }
     return initialPaiements;
   });
 
@@ -70,23 +102,23 @@ export function App() {
 
   // Sync to localStorage
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_bsa_clean_societes', JSON.stringify(societes));
+    localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
   }, [societes]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_bsa_clean_personnes', JSON.stringify(personnes));
+    localStorage.setItem('suivi_assurance_mcicare_personnes', JSON.stringify(personnes));
   }, [personnes]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_bsa_clean_familles', JSON.stringify(familles));
+    localStorage.setItem('suivi_assurance_mcicare_familles', JSON.stringify(familles));
   }, [familles]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_bsa_clean_prestations', JSON.stringify(prestations));
+    localStorage.setItem('suivi_assurance_mcicare_prestations', JSON.stringify(prestations));
   }, [prestations]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_bsa_clean_paiements', JSON.stringify(paiements));
+    localStorage.setItem('suivi_assurance_mcicare_paiements', JSON.stringify(paiements));
   }, [paiements]);
 
   // Handlers for Prestations

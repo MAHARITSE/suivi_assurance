@@ -8,40 +8,40 @@ export function downloadPrestationsExcelTemplate() {
     {
       'Numero_Facture': 'FACT-SALFA-2024-001',
       'Date_Soins': '2024-10-15',
-      'Nom_Agent': 'RABE Jean (BSA Nord)',
-      'Matricule': 'BSA-0452',
-      'Societe': 'BSA',
-      'Sous_Societe': 'BSA Nord',
+      'Nom_Agent': 'RABE Jean (CONSERVATION INTERNATIONALE)',
+      'Matricule': 'MCI-0452',
+      'Societe': 'MCI CARE',
+      'Sous_Societe': 'CONSERVATION INTERNATIONALE',
       'Acte_Medicale_Prix': 'CONS : 40 000; PHAR : 65 000; LABO : 25 000',
       'Montant_Total_Brut': 130000,
-      'Ticket_Moderateur': 26000,
-      'Prise_En_Charge_Net': 104000,
+      'Ticket_Moderateur': 0,
+      'Prise_En_Charge_Net': 130000,
       'Observations': 'Facture mensuelle soins ambulatoires',
     },
     {
       'Numero_Facture': 'FACT-SALFA-2024-002',
       'Date_Soins': '2024-10-16',
-      'Nom_Agent': 'RASOA Marie (Direction)',
-      'Matricule': 'BSA-0118',
-      'Societe': 'BSA',
-      'Sous_Societe': 'Direction',
+      'Nom_Agent': 'RASOA Marie (CONSERVATION INTERNATIONALE)',
+      'Matricule': 'MCI-0118',
+      'Societe': 'MCI CARE',
+      'Sous_Societe': 'CONSERVATION INTERNATIONALE',
       'Acte_Medicale_Prix': 'CONS : 40 000; ECHOG : 80 000',
       'Montant_Total_Brut': 120000,
-      'Ticket_Moderateur': 24000,
-      'Prise_En_Charge_Net': 96000,
+      'Ticket_Moderateur': 0,
+      'Prise_En_Charge_Net': 120000,
       'Observations': 'Suivi médical périodique',
     },
     {
       'Numero_Facture': 'FACT-SALFA-2024-003',
       'Date_Soins': '2024-10-18',
-      'Nom_Agent': 'ANDRY Patrick (Agence Toliara)',
+      'Nom_Agent': 'ANDRY Patrick (CONSERVATION INTERNATIONALE)',
       'Matricule': 'MCI-0882',
       'Societe': 'MCI CARE',
-      'Sous_Societe': 'Agence Toliara',
+      'Sous_Societe': 'CONSERVATION INTERNATIONALE',
       'Acte_Medicale_Prix': 'CONS : 40 000; DENT : 95 000',
       'Montant_Total_Brut': 135000,
-      'Ticket_Moderateur': 27000,
-      'Prise_En_Charge_Net': 108000,
+      'Ticket_Moderateur': 0,
+      'Prise_En_Charge_Net': 135000,
       'Observations': 'Soins dentaires urgents',
     },
   ];
@@ -63,25 +63,25 @@ export function downloadPrestationsExcelTemplate() {
       'Colonne': 'Nom_Agent',
       'Obligatoire': 'Oui',
       'Description': 'Nom et prénom de l\'agent/assuré. La sous-société entre parenthèses est détectée automatiquement',
-      'Exemple': 'RABE Jean (BSA Nord)'
+      'Exemple': 'RABE Jean (CONSERVATION INTERNATIONALE)'
     },
     {
       'Colonne': 'Matricule',
       'Obligatoire': 'Recommandé',
       'Description': 'Identifiant ou matricule de l\'assuré dans son entreprise',
-      'Exemple': 'BSA-0452'
+      'Exemple': 'MCI-0452'
     },
     {
       'Colonne': 'Societe',
       'Obligatoire': 'Oui',
-      'Description': 'Nom de la société / assurance principale (ex: BSA, ASCOMA, MCI CARE)',
-      'Exemple': 'BSA'
+      'Description': 'Nom de la société / assurance principale (MCI CARE)',
+      'Exemple': 'MCI CARE'
     },
     {
       'Colonne': 'Sous_Societe',
       'Obligatoire': 'Non',
-      'Description': 'Branche, agence ou filiale de la société',
-      'Exemple': 'BSA Nord'
+      'Description': 'Sous-société, filiale ou entité figurant entre parenthèses',
+      'Exemple': 'CONSERVATION INTERNATIONALE'
     },
     {
       'Colonne': 'Acte_Medicale_Prix',

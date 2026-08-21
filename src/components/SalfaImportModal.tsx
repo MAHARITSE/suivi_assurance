@@ -3,25 +3,19 @@ import {
   X, 
   Upload, 
   FileText, 
-  Sparkles, 
   RefreshCw, 
   CheckCircle, 
   AlertCircle, 
-  Building2, 
-  Users, 
-  Check, 
   Download, 
   Info, 
   ArrowLeft, 
   FileSpreadsheet,
   ScanLine,
-  FileCode,
-  ShieldCheck
+  Check,
+  RotateCcw
 } from 'lucide-react';
 import { Prestation, LignePrestation, Societe, Personne, Famille, ParsedFactureAssurance } from '../types';
 import { formatMoney, generateId, normalizeDateISO } from '../utils/formatters';
-import { salfaSampleInvoice } from '../data/salfaInvoiceSample';
-import { mciCareFactureSampleInvoice, ascomaSampleInvoice } from '../data/insuranceSampleDocuments';
 import { downloadPrestationsExcelTemplate } from '../utils/excelTemplates';
 import * as XLSX from 'xlsx';
 
@@ -91,28 +85,23 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   familles,
   onImportPrestations,
 }) => {
-  const [importMode, setImportMode] = useState<'excel' | 'pdf' | 'sample'>('excel');
+  const [importMode, setImportMode] = useState<'pdf' | 'excel'>('pdf');
   const [parsedInvoice, setParsedInvoice] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
   const [autoCreateMissingSocietes, setAutoCreateMissingSocietes] = useState(true);
   const [autoCreateMissingPersonnes, setAutoCreateMissingPersonnes] = useState(true);
   const [selectedLines, setSelectedLines] = useState<Record<number, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
-  const getFallbackFacture = (filename?: string) => {
-    const low = (filename || '').toLowerCase();
-    if (low.includes('mci') || low.includes('care')) return mciCareFactureSampleInvoice;
-    if (low.includes('ascoma')) return ascomaSampleInvoice;
-    return salfaSampleInvoice;
-  };
-
   const handleResetAndBack = () => {
     setParsedInvoice(null);
     setSelectedLines({});
     setErrorMessage(null);
     setIsProcessing(false);
+    setLastUploadedFile(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -126,28 +115,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     onClose();
   };
 
-  const handleLoadSample = () => {
+  const processFile = async (file: File) => {
     setIsProcessing(true);
     setErrorMessage(null);
-    setTimeout(() => {
-      const sample = salfaSampleInvoice;
-      setParsedInvoice(sample);
-      const initialSelected: Record<number, boolean> = {};
-      sample.lignes.forEach((_, idx) => {
-        initialSelected[idx] = true;
-      });
-      setSelectedLines(initialSelected);
-      setIsProcessing(false);
-    }, 200);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
-    setIsProcessing(true);
-    setErrorMessage(null);
+    setLastUploadedFile(file);
 
     try {
       if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
@@ -166,7 +137,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             }
 
             let inferredFactureNum = '';
-            let inferredClient = 'BSA';
+            let inferredClient = 'MCI CARE';
 
             const lignes = jsonRows.map((row, idx) => {
               const getVal = (keys: string[]) => {
@@ -186,7 +157,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               const rawFacture = String(getVal(['Numero_Facture', 'NumeroFacture', 'N° Facture', 'Num Facture', 'Facture']) || '').trim();
               if (rawFacture && !inferredFactureNum) inferredFactureNum = rawFacture;
 
-              // 1. Chercher d'abord le nom de la personne soignée / patient aligné à la date du soin
               const nomPatientSoin = String(getVal([
                 'Patient', 'Nom_Patient', 'Nom Patient', 'Nom du Patient', 'Nom_du_Patient',
                 'Beneficiaire', 'Bénéficiaire', 'Nom_Beneficiaire', 'Nom_Bénéficiaire', 'Nom Bénéficiaire', 'Nom Beneficiaire',
@@ -196,22 +166,20 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                 'Malade', 'Nom_Malade', 'Nom Malade'
               ]) || '').trim();
 
-              // 2. Chercher le nom de l'adhérent / titulaire de l'adhésion
               const nomAdherent = String(getVal([
                 'Adherent', 'Adhérent', 'Nom_Adherent', 'Nom_Adhérent', 'Nom Adhérent', 'Nom Adherent', 'Adherent_Nom',
                 'Adhesion', 'Adhésion', 'Titulaire', 'Nom_Titulaire', 'Nom Titulaire'
               ]) || '').trim();
 
-              // 3. Chercher les autres colonnes de nom général
               const nomGeneral = String(getVal([
                 'Nom_Agent', 'Nom Agent', 'Nom et Prénom', 'Nom et Prenom', 'Nom_Prenom', 'Nom', 'Assuré', 'Assure', 'Nom Assuré', 'Nom Assure', 'Nom_Assure'
               ]) || '').trim();
 
-              // Règle BSA : Pour BSA et factures de soins, le vrai nom de la personne à importer est TOUJOURS celui aligné à la date du soin (Patient / Ayant-droit / Soigné) et non celui de l'adhésion
               let rawNom = nomPatientSoin || (nomAdherent && !nomGeneral ? nomAdherent : nomGeneral) || nomAdherent || `Patient ${idx + 1}`;
               let sousSoc = String(getVal(['Sous_Societe', 'Sous-Société', 'Sous Societe', 'Département', 'Section', 'Service']) || '').trim();
 
-              const parenMatch = rawNom.match(/^([^(]+)\s*\(([^)]+)\)$/);
+              // Extract any sub-society within parentheses from patient or agent name (e.g. "RAZAFY Pierre (CONSERVATION INTERNATIONALE)")
+              const parenMatch = rawNom.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
               if (parenMatch) {
                 rawNom = parenMatch[1].trim();
                 if (!sousSoc) {
@@ -225,7 +193,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               const montantBrut = Number(getVal(['Montant_Total_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Total', 'Total Prestation', 'Montant Facture', 'Fr. Réels'])) || 0;
               const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation', 'Franchise'])) || 0;
               const netAPayer = Number(getVal(['Prise_En_Charge_Net', 'Net A Payer', 'Net Payé', 'Montant Remboursé', 'Prise En Charge', 'Montant Réglé'])) || (montantBrut - participation);
-              const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || 'BSA').trim();
+              const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || 'MCI CARE').trim();
               if (socName) inferredClient = socName;
 
               const actesRaw = String(getVal(['Acte_Medicale_Prix', 'Acte médicale/Prix', 'Acte médicale / Prix', 'Acte medicale/Prix', 'Actes Médicaux', 'Actes', 'Prestations', 'Detail Actes Medicaux']) || 'CONS : ' + montantBrut);
@@ -283,7 +251,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         };
         reader.readAsArrayBuffer(file);
       } else {
-        // PDF or image -> Send to AI OCR server endpoint (champ attendu = 'file')
+        // PDF or Image -> Send to AI OCR server endpoint
         const formData = new FormData();
         formData.append('file', file);
         formData.append('docType', 'facture');
@@ -319,14 +287,14 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             throw new Error("Le fichier est trop volumineux (taille maximale: 25 Mo).");
           }
           if (response.status === 504 || response.status === 408) {
-            throw new Error("Délai d'analyse dépassé par le serveur. Veuillez réessayer ou privilégier l'importation via fichier Excel (.xlsx).");
+            throw new Error("Délai d'analyse dépassé par le serveur. Veuillez cliquer sur Réessayer.");
           }
-          throw new Error("L'extraction automatique du document PDF/Image n'a pas pu aboutir. Veuillez vérifier que votre clé GEMINI_API_KEY est configurée, ou utilisez l'import Excel / l'exemple SALFA.");
+          throw new Error("L'extraction automatique du document PDF/Image n'a pas pu aboutir. Veuillez cliquer sur Réessayer l'analyse IA.");
         }
 
         const data: ParsedFactureAssurance = json?.data || json;
         if (!data || !Array.isArray(data.lignes) || data.lignes.length === 0) {
-          throw new Error("Aucune ligne de prestation valide n'a pu être extraite de ce document.");
+          throw new Error("Aucune ligne de prestation n'a pu être extraite. Veuillez vérifier la netteté du document et cliquer sur Réessayer.");
         } else {
           setParsedInvoice(data);
           const initialSelected: Record<number, boolean> = {};
@@ -337,8 +305,25 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       }
     } catch (err: any) {
       console.error('Erreur analyse document:', err);
-      setErrorMessage(err.message || "Erreur lors de l'analyse du document.");
+      setErrorMessage(err.message || "L'analyse du document n'a pas pu aboutir. Veuillez réessayer.");
       setIsProcessing(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    processFile(file);
+  };
+
+  const handleRetryLastFile = () => {
+    if (lastUploadedFile) {
+      processFile(lastUploadedFile);
+    } else if (importMode === 'pdf') {
+      fileInputRef.current?.click();
+    } else {
+      excelInputRef.current?.click();
     }
   };
 
@@ -381,7 +366,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       return mat1 || mat2;
     };
 
-    // Build a map of patient name to the best matricule found in this uploaded document
     const fileBestMatricules: Record<string, string> = {};
     chosenLignes.forEach(l => {
       const nameKey = (l.nomPrenom || '').trim().toLowerCase();
@@ -397,22 +381,23 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
     const newPrestations: Prestation[] = chosenLignes.map((ligne, idx) => {
       const prestId = generateId(`prest-salfa-${idx}`);
-      const mainSocName = ligne.societeAffiliee || parsedInvoice.clientDoit || 'BSA';
-      const sousSoc = ligne.sousSociete || 'Département Général';
+      const mainSocName = 'MCI CARE';
+      const sousSoc = ligne.sousSociete || '';
 
-      // Society match / create
+      // Society match / create (MCI CARE as main entity)
       let matchedSoc = societes.find(s => 
+        s.nom.toLowerCase().includes('mci care') ||
+        s.code.toLowerCase().includes('mci') ||
         s.nom.toLowerCase().includes(mainSocName.toLowerCase()) ||
-        s.code.toLowerCase() === mainSocName.toLowerCase() ||
-        (sousSoc && s.nom.toLowerCase().includes(sousSoc.toLowerCase()))
+        s.code.toLowerCase() === mainSocName.toLowerCase()
       );
 
       if (!matchedSoc && autoCreateMissingSocietes) {
         matchedSoc = {
           id: generateId(`soc-new-${idx}`),
-          nom: sousSoc ? `${mainSocName} (${sousSoc})` : mainSocName,
-          code: (sousSoc || mainSocName).substring(0, 4).toUpperCase(),
-          tauxCouvertureDefaut: 80,
+          nom: 'MCI CARE',
+          code: 'MCI CARE',
+          tauxCouvertureDefaut: 100,
         };
         createdSocietes.push(matchedSoc);
       }
@@ -421,7 +406,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       const nameKey = (ligne.nomPrenom || '').trim().toLowerCase();
       const fileMat = fileBestMatricules[nameKey] || '';
 
-      // Find existing person by name first
       let matchedPer = personnes.find(p => 
         ligne.nomPrenom && (
           p.nomPrenom.toLowerCase() === ligne.nomPrenom.toLowerCase() ||
@@ -441,11 +425,15 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       if (matchedPer) {
         finalMatricule = getBestMatricule(matchedPer.matricule, finalMatricule);
         
-        // If we found a real/better matricule, update the existing person record in the parent state
-        if (isRealMatricule(finalMatricule) && !isRealMatricule(matchedPer.matricule)) {
+        if (isRealMatricule(finalMatricule) && finalMatricule.trim() !== (matchedPer.matricule || '').trim()) {
           matchedPer.matricule = finalMatricule;
-          // Add to createdPersonnes to propagate the update back to App.tsx
-          if (!createdPersonnes.some(p => p.id === matchedPer!.id)) {
+          const existingIdx = createdPersonnes.findIndex(p => p.id === matchedPer!.id);
+          if (existingIdx >= 0) {
+            createdPersonnes[existingIdx] = {
+              ...matchedPer,
+              matricule: finalMatricule
+            };
+          } else {
             createdPersonnes.push({
               ...matchedPer,
               matricule: finalMatricule
@@ -459,7 +447,8 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           id: generateId(`per-new-${idx}`),
           matricule: finalMatricule || `MAT-${100000 + idx}`,
           nomPrenom: ligne.nomPrenom,
-          societeId: matchedSoc?.id || societes[0]?.id || 'soc-1',
+          societeId: matchedSoc?.id || societes[0]?.id || 'soc-mcicare',
+          sousSociete: sousSoc || undefined,
           qualite: (ligne.ayantDroit ? 'Ayant droit' : 'Adhérent Principal') as any,
         };
         createdPersonnes.push(matchedPer);
@@ -471,7 +460,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             const actMontant = a.montant || Math.round(ligne.montantBrut / (ligne.actes?.length || 1));
             const partRatio = ligne.montantBrut > 0 ? actMontant / ligne.montantBrut : 1 / (ligne.actes?.length || 1);
             const actPart = Math.round((ligne.participation || 0) * partRatio);
-            const actPaye = 0; // Not settled yet in Prestations tab!
+            const actPaye = 0;
 
             const actARemb = Math.max(0, actMontant - actPart);
             return {
@@ -532,6 +521,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   };
 
   const selectedCount = parsedInvoice ? parsedInvoice.lignes.filter((_, i) => selectedLines[i]).length : 0;
+  const totalDetectedCount = parsedInvoice ? parsedInvoice.lignes.length : 0;
   const totalSelectedBrut = parsedInvoice
     ? parsedInvoice.lignes.filter((_, i) => selectedLines[i]).reduce((s, l) => s + l.montantBrut, 0)
     : 0;
@@ -554,7 +544,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               <button
                 onClick={handleResetAndBack}
                 title="Retour au choix de document"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 text-xs font-semibold shadow-xs transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 text-xs font-semibold shadow-xs transition cursor-pointer"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Retour</span>
@@ -565,16 +555,16 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                {parsedInvoice ? `Aperçu Facture : ${parsedInvoice.numeroFacture || parsedInvoice.clientDoit}` : 'Importation Facture Médicale SALFA'}
+                {parsedInvoice ? `Aperçu Facture : ${parsedInvoice.numeroFacture || parsedInvoice.clientDoit}` : 'Importation des Prestations de Soins'}
               </h3>
               <p className="text-xs text-slate-500">
-                {parsedInvoice ? `${parsedInvoice.lignes.length} patients extraits • Vérifiez et validez les prestations` : 'Créez directement les dossiers de soins et prestations avec détail des actes par patient.'}
+                {parsedInvoice ? `${totalDetectedCount} lignes de prestations extraites • Vérifiez et confirmez l'importation` : 'Numérisation automatique par IA ou import de fichier Excel.'}
               </p>
             </div>
           </div>
           <button
             onClick={handleClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -582,52 +572,63 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* Permanent Info Banner: Unique SALFA Format */}
-          <div className="flex items-start gap-3 rounded-xl bg-indigo-50/50 border border-indigo-100 p-4 text-xs text-indigo-900 shadow-2xs">
+          {/* Permanent Info Banner */}
+          <div className="flex items-start gap-3 rounded-xl bg-indigo-50/60 border border-indigo-100 p-4 text-xs text-indigo-950 shadow-2xs">
             <Info className="h-5 w-5 shrink-0 text-indigo-600 mt-0.5" />
             <div>
-              <h4 className="font-bold text-indigo-950 mb-1">ℹ️ Format Unique de Facturation SALFA</h4>
-              <p className="leading-relaxed">
-                Les factures de prestations de soins suivent <strong>un format unique émis par l'Hôpital SALFA</strong> à destination de ses différents clients assureurs (<strong>BSA, ASCOMA, MCI Care</strong>, etc.). Le système extrait automatiquement les assurés, leurs sous-sociétés d'affiliation et le détail complet des actes médicaux depuis ce format type.
+              <h4 className="font-bold text-indigo-950 mb-1">Extraction Exhaustive des Prestations</h4>
+              <p className="leading-relaxed text-indigo-900">
+                L'intelligence artificielle analyse scrupuleusement l'ensemble des pages de votre facture numérisée (PDF ou photo) pour extraire la totalité des patients, dates, sous-sociétés et actes de soins associés.
               </p>
             </div>
           </div>
 
+          {/* Error Message with Immediate Retry Button */}
           {errorMessage && (
-            <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-800 shadow-2xs space-y-2.5">
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-900 shadow-2xs space-y-3">
               <div className="flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
-                <span className="font-medium leading-relaxed">{errorMessage}</span>
+                <AlertCircle className="h-5 w-5 shrink-0 text-rose-600 mt-0.5" />
+                <div>
+                  <div className="font-bold text-rose-950 text-sm">Échec de l'extraction</div>
+                  <div className="font-medium text-rose-800 mt-0.5 leading-relaxed">{errorMessage}</div>
+                  {lastUploadedFile && (
+                    <div className="text-[11px] text-rose-700/80 font-mono mt-1">
+                      Fichier sélectionné : {lastUploadedFile.name} ({(lastUploadedFile.size / 1024).toFixed(1)} Ko)
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-rose-200/60">
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-rose-200">
                 <button
                   type="button"
-                  onClick={() => {
-                    setErrorMessage(null);
-                    setImportMode('excel');
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-semibold shadow-xs transition"
+                  onClick={handleRetryLastFile}
+                  disabled={isProcessing}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 font-bold shadow-xs transition cursor-pointer"
                 >
-                  <FileSpreadsheet className="h-3.5 w-3.5" />
-                  <span>Utiliser le Mode Excel (.xlsx)</span>
+                  <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                  <span>{isProcessing ? 'Nouvelle tentative en cours...' : "Réessayer l'extraction IA"}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setErrorMessage(null);
-                    handleLoadSample();
+                    if (importMode === 'pdf') {
+                      fileInputRef.current?.click();
+                    } else {
+                      excelInputRef.current?.click();
+                    }
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 font-semibold transition"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-semibold transition cursor-pointer"
                 >
-                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                  <span>Charger l'exemple SALFA</span>
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>Choisir un autre fichier</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setErrorMessage(null)}
-                  className="ml-auto text-xs text-slate-500 hover:text-slate-700 underline"
+                  className="ml-auto text-xs text-slate-500 hover:text-slate-700 cursor-pointer"
                 >
-                  Fermer
+                  Ignorer
                 </button>
               </div>
             </div>
@@ -635,117 +636,35 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
           {!parsedInvoice && (
             <div className="space-y-4">
-              {/* Import Mode Selector */}
-              <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setImportMode('excel')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
-                    importMode === 'excel'
-                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                  <span>Mode Excel (.xlsx, .csv)</span>
-                </button>
+              {/* Import Mode Selector: PDF (AI) vs Excel */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
                 <button
                   type="button"
                   onClick={() => setImportMode('pdf')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
                     importMode === 'pdf'
-                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                   }`}
                 >
                   <ScanLine className="h-4 w-4 text-indigo-600" />
-                  <span>Mode Scan PDF / Image</span>
+                  <span>Scan PDF / Image (Reconnaissance IA)</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setImportMode('sample')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition ${
-                    importMode === 'sample'
-                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                  onClick={() => setImportMode('excel')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    importMode === 'excel'
+                      ? 'bg-white text-emerald-700 shadow-xs border border-slate-200/80 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                   }`}
                 >
-                  <Sparkles className="h-4 w-4 text-amber-500" />
-                  <span>Exemple Démo SALFA</span>
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                  <span>Fichier Excel (.xlsx, .csv)</span>
                 </button>
               </div>
 
-              {/* Mode: EXCEL */}
-              {importMode === 'excel' && (
-                <div className="space-y-3">
-                  {/* Download Excel Template Banner */}
-                  <div className="flex items-center justify-between rounded-xl bg-emerald-50/80 border border-emerald-200 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700 mt-0.5">
-                        <FileSpreadsheet className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-emerald-950">Modèle Excel pour Prestations SALFA</h4>
-                        <p className="text-xs text-emerald-800 mt-0.5 max-w-lg">
-                          Téléchargez le fichier modèle prêt à remplir contenant toutes les colonnes requises : 
-                          <strong> Numero_Facture, Nom_Agent, Societe, Sous_Societe, Acte_Medicale_Prix, Montants</strong>...
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => downloadPrestationsExcelTemplate()}
-                      className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 shadow-xs shrink-0"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>Télécharger le modèle Excel</span>
-                    </button>
-                  </div>
-
-                  {/* Excel Upload Area */}
-                  <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const file = e.dataTransfer.files?.[0];
-                      if (file) {
-                        const event = { target: { files: [file] } } as any;
-                        handleFileUpload(event);
-                      }
-                    }}
-                    className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
-                  >
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
-                      {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900">
-                        {isProcessing ? 'Lecture du fichier Excel en cours...' : 'Déposez votre fichier Excel de prestations (.xlsx, .xls, .csv)'}
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-1 max-w-md">
-                        Importe chaque agent, sépare la sous-société et découpe automatiquement les actes dans la colonne <strong>Acte médicale / Prix</strong>.
-                      </p>
-                    </div>
-                    <input
-                      type="file"
-                      ref={excelInputRef}
-                      onChange={handleFileUpload}
-                      accept=".xlsx,.xls,.csv"
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => excelInputRef.current?.click()}
-                      disabled={isProcessing}
-                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs"
-                    >
-                      Parcourir un fichier Excel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Mode: PDF / IMAGE OCR */}
+              {/* Mode: PDF / IMAGE OCR (AI) */}
               {importMode === 'pdf' && (
                 <div
                   onDragOver={(e) => e.preventDefault()}
@@ -753,21 +672,20 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     e.preventDefault();
                     const file = e.dataTransfer.files?.[0];
                     if (file) {
-                      const event = { target: { files: [file] } } as any;
-                      handleFileUpload(event);
+                      processFile(file);
                     }
                   }}
-                  className="flex min-h-56 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/20 p-8 text-center transition hover:border-indigo-500 hover:bg-indigo-50/40"
+                  className="flex min-h-60 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/20 p-8 text-center transition hover:border-indigo-500 hover:bg-indigo-50/40"
                 >
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-indigo-600 border border-indigo-100">
                     {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-slate-900">
-                      {isProcessing ? 'Extraction IA de la facture en cours...' : 'Déposez votre facture SALFA numérisée (PDF ou Image)'}
+                      {isProcessing ? 'Lecture et extraction IA de toutes les pages en cours...' : 'Déposez votre facture de soins numérisée (PDF ou Image)'}
                     </h4>
                     <p className="text-xs text-slate-500 mt-1 max-w-md">
-                      Reconnaissance intelligente des colonnes, sous-sociétés entre parenthèses et actes médicaux avec montants.
+                      Lecture exhaustive de toutes les pages : détection des assurés, matricules, sous-sociétés et décomposition des actes médicaux.
                     </p>
                   </div>
                   <input
@@ -781,32 +699,85 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isProcessing}
-                    className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 shadow-xs"
+                    className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 shadow-xs cursor-pointer flex items-center gap-2"
                   >
-                    Parcourir un fichier PDF ou Image
+                    {isProcessing ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>Analyse en cours...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ScanLine className="h-4 w-4" />
+                        <span>Parcourir un document PDF ou Image</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}
 
-              {/* Mode: SAMPLE */}
-              {importMode === 'sample' && (
-                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-6 space-y-4">
-                  <div className="flex items-center gap-2 text-indigo-950 font-bold text-sm">
-                    <Sparkles className="h-5 w-5 text-indigo-600" />
-                    <span>Facture réelle SALFA N° FA-05/BSA (Client BSA)</span>
-                  </div>
-                  <p className="text-xs text-indigo-800 leading-relaxed">
-                    Charge un jeu de données réel complet avec 25 patients (BFV, Accès Banques, Orange, etc.) et actes médicaux variés (CONS, MEDIC, DENT, LABO, RADIO, SOINS). Parfait pour tester et valider le flux en 1 clic.
-                  </p>
-                  <div className="pt-2 flex justify-start">
+              {/* Mode: EXCEL */}
+              {importMode === 'excel' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between rounded-xl bg-emerald-50/80 border border-emerald-200 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700 mt-0.5">
+                        <FileSpreadsheet className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-emerald-950">Modèle Excel pour Prestations de Soins</h4>
+                        <p className="text-xs text-emerald-800 mt-0.5 max-w-lg">
+                          Téléchargez le fichier modèle prêt à remplir contenant toutes les colonnes requises : 
+                          <strong> Numero_Facture, Nom_Agent, Societe, Sous_Societe, Acte_Medicale_Prix, Montants</strong>...
+                        </p>
+                      </div>
+                    </div>
                     <button
                       type="button"
-                      onClick={handleLoadSample}
-                      disabled={isProcessing}
-                      className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 shadow-xs flex items-center gap-2"
+                      onClick={() => downloadPrestationsExcelTemplate()}
+                      className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 shadow-xs shrink-0 cursor-pointer"
                     >
-                      {isProcessing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                      <span>Charger l'exemple réel SALFA (25 patients)</span>
+                      <Download className="h-4 w-4" />
+                      <span>Télécharger le modèle Excel</span>
+                    </button>
+                  </div>
+
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) {
+                        processFile(file);
+                      }
+                    }}
+                    className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
+                  >
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
+                      {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">
+                        {isProcessing ? 'Lecture du fichier Excel en cours...' : 'Déposez votre fichier Excel de prestations (.xlsx, .xls, .csv)'}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-md">
+                        Importe chaque assuré, extrait la sous-société et découpe automatiquement les actes dans la colonne <strong>Acte médicale / Prix</strong>.
+                      </p>
+                    </div>
+                    <input
+                      type="file"
+                      ref={excelInputRef}
+                      onChange={handleFileUpload}
+                      accept=".xlsx,.xls,.csv"
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => excelInputRef.current?.click()}
+                      disabled={isProcessing}
+                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer"
+                    >
+                      Parcourir un fichier Excel
                     </button>
                   </div>
                 </div>
@@ -816,55 +787,69 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
           {parsedInvoice && (
             <div className="space-y-4">
-              {/* Conditional format check warning banner */}
-              {(() => {
-                const isSalfaDoc = 
-                  parsedInvoice.etablissement?.toLowerCase().includes('salfa') || 
-                  parsedInvoice.etablissement?.toLowerCase().includes('loterana') ||
-                  parsedInvoice.etablissement?.toLowerCase().includes('lutherienne') ||
-                  parsedInvoice.numeroFacture?.toLowerCase().includes('salfa') ||
-                  parsedInvoice.numeroFacture?.toLowerCase().includes('fa-') ||
-                  parsedInvoice.lignes?.some(l => l.observations?.toLowerCase().includes('salfa'));
-                
-                if (!isSalfaDoc) {
-                  return (
-                    <div className="flex items-start gap-3 rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 shadow-2xs">
-                      <Info className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
-                      <div>
-                        <h4 className="font-bold text-amber-950 mb-1">⚠️ Info : Format non standard</h4>
-                        <p className="leading-relaxed">
-                          Ce document ne semble pas provenir de la facturation standard de <strong>l'Hôpital SALFA</strong>. 
-                          Rappel : L'importation de prestations est spécifiquement optimisée pour le format de facture unique émis par SALFA vers ses clients (BSA, ASCOMA, MCI Care). 
-                          Vous pouvez continuer l'importation, mais veillez à vérifier attentivement les données extraites ci-dessous.
-                        </p>
-                      </div>
+              {/* PROMINENT EXTRACTION STATS BANNER: Display total number of items to import before rows */}
+              <div className="rounded-2xl border-2 border-indigo-300 bg-gradient-to-r from-indigo-50/90 to-sky-50/80 p-4 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white font-bold shadow-sm">
+                      <FileText className="h-6 w-6" />
                     </div>
-                  );
-                }
-                return null;
-              })()}
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold uppercase tracking-wider text-indigo-700">Nombre de Prestations à Importer</span>
+                        <span className="inline-flex items-center rounded-full bg-indigo-600 px-2.5 py-0.5 text-xs font-extrabold text-white">
+                          {totalDetectedCount} lignes détectées
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-bold text-white">
+                          {selectedCount} sélectionnées
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 font-medium">
+                        Organisme : <strong className="text-slate-900">{parsedInvoice.clientDoit}</strong> • Facture N° : <strong className="text-indigo-900">{parsedInvoice.numeroFacture}</strong>
+                      </p>
+                    </div>
+                  </div>
 
-              {/* Document Overview Header */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSelectAll(true)}
+                      className="px-3 py-1.5 rounded-lg bg-white border border-indigo-200 text-xs font-bold text-indigo-700 hover:bg-indigo-50 shadow-2xs transition cursor-pointer"
+                    >
+                      Tout cocher ({totalDetectedCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSelectAll(false)}
+                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+                    >
+                      Tout décocher
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Financial Recap Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
                 <div>
                   <span className="text-slate-500 block">Organisme / Client</span>
                   <strong className="text-slate-900 font-bold text-sm">{parsedInvoice.clientDoit}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Facture N°</span>
-                  <strong className="text-indigo-600 font-bold text-sm">{parsedInvoice.numeroFacture}</strong>
+                  <span className="text-slate-500 block">Total Facturé (Sélection)</span>
+                  <strong className="text-slate-900 font-bold text-sm">{formatMoney(totalSelectedBrut)}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Lignes extraites</span>
-                  <strong className="text-slate-900 font-bold text-sm">{parsedInvoice.lignes.length} patients</strong>
+                  <span className="text-slate-500 block">Ticket Modérateur</span>
+                  <strong className="text-amber-700 font-bold text-sm">{formatMoney(totalSelectedPart)}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Montant Total Facturé</span>
-                  <strong className="text-emerald-700 font-bold text-sm">{formatMoney(parsedInvoice.totalMontantBrut)}</strong>
+                  <span className="text-slate-500 block">Prise en Charge (Net)</span>
+                  <strong className="text-emerald-700 font-bold text-sm">{formatMoney(totalSelectedNet)}</strong>
                 </div>
               </div>
 
-              {/* Ingestion options */}
+              {/* Ingestion Options */}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs">
                 <div className="flex flex-wrap items-center gap-4">
                   <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
@@ -874,7 +859,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                       onChange={(e) => setAutoCreateMissingPersonnes(e.target.checked)}
                       className="rounded text-indigo-600"
                     />
-                    <span>Créer assurés manquants</span>
+                    <span>Créer assurés manquants automatiquement</span>
                   </label>
 
                   <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
@@ -887,125 +872,114 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     <span>Créer sous-sociétés (parenthèses)</span>
                   </label>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleToggleSelectAll(true)}
-                    className="text-xs text-indigo-600 font-semibold hover:underline"
-                  >
-                    Tout cocher
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    onClick={() => handleToggleSelectAll(false)}
-                    className="text-xs text-slate-500 hover:underline"
-                  >
-                    Tout décocher
-                  </button>
-                </div>
               </div>
 
               {/* Extracted Lines Table */}
-              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
-                    <tr>
-                      <th className="py-2.5 px-3 w-8">
-                        <input
-                          type="checkbox"
-                          checked={selectedCount === parsedInvoice.lignes.length}
-                          onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                          className="rounded text-indigo-600"
-                        />
-                      </th>
-                      <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3">Matricule & Assuré</th>
-                      <th className="py-2.5 px-3">Sous-Société</th>
-                      <th className="py-2.5 px-3 min-w-[200px]">Acte médicale / Prix</th>
-                      <th className="py-2.5 px-3 text-right">Montant Brut</th>
-                      <th className="py-2.5 px-3 text-right">Ticket Modérateur</th>
-                      <th className="py-2.5 px-3 text-right">Prise en Charge (Net)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {parsedInvoice.lignes.map((ligne, idx) => (
-                      <tr
-                        key={idx}
-                        className={`hover:bg-slate-50/80 transition ${
-                          selectedLines[idx] ? 'bg-white' : 'bg-slate-50/50 opacity-60'
-                        }`}
-                      >
-                        <td className="py-2.5 px-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                    Lignes de soins extraites ({selectedCount} / {totalDetectedCount})
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3 w-8">
                           <input
                             type="checkbox"
-                            checked={!!selectedLines[idx]}
-                            onChange={() => handleToggleSelectLine(idx)}
+                            checked={selectedCount === parsedInvoice.lignes.length && parsedInvoice.lignes.length > 0}
+                            onChange={(e) => handleToggleSelectAll(e.target.checked)}
                             className="rounded text-indigo-600"
                           />
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
-                          {ligne.dateSoins}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <div className="font-semibold text-slate-900">{ligne.nomPrenom}</div>
-                          <div className="text-[11px] text-slate-500 font-mono">Mat: {ligne.matricule || '-'}</div>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          {ligne.sousSociete ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200">
-                              {ligne.sousSociete}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 text-[11px]">-</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 min-w-[200px]">
-                          {ligne.actes && ligne.actes.length > 0 ? (
-                            <div className="flex flex-col gap-1">
-                              {ligne.actes.map((a, i) => (
-                                <div
-                                  key={i}
-                                  className="flex items-center justify-between px-2 py-0.5 rounded text-[11px] font-mono bg-indigo-50/70 border border-indigo-100 text-indigo-900"
-                                >
-                                  <span className="font-bold">{a.code}</span>
-                                  <span className="font-semibold text-slate-800 ml-2">
-                                    {formatMoney(a.montant)}
-                                  </span>
-                                </div>
-                              ))}
-                              {ligne.actes.length > 1 && (
-                                <div className="text-[10px] text-slate-400 font-medium px-1">
-                                  {ligne.actes.length} actes cumulés
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-slate-600 text-[11px]">{ligne.actesTexte}</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-medium text-slate-900">
-                          {formatMoney(ligne.montantBrut)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-amber-700 font-medium">
-                          {formatMoney(ligne.participation)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
-                          {formatMoney(ligne.netAPayer)}
-                        </td>
+                        </th>
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3">Matricule & Assuré</th>
+                        <th className="py-2.5 px-3">Sous-Société</th>
+                        <th className="py-2.5 px-3 min-w-[200px]">Acte médicale / Prix</th>
+                        <th className="py-2.5 px-3 text-right">Montant Brut</th>
+                        <th className="py-2.5 px-3 text-right">Ticket Modérateur</th>
+                        <th className="py-2.5 px-3 text-right">Prise en Charge (Net)</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {parsedInvoice.lignes.map((ligne, idx) => (
+                        <tr
+                          key={idx}
+                          className={`hover:bg-slate-50/80 transition ${
+                            selectedLines[idx] ? 'bg-white' : 'bg-slate-50/50 opacity-60'
+                          }`}
+                        >
+                          <td className="py-2.5 px-3">
+                            <input
+                              type="checkbox"
+                              checked={!!selectedLines[idx]}
+                              onChange={() => handleToggleSelectLine(idx)}
+                              className="rounded text-indigo-600"
+                            />
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+                            {ligne.dateSoins}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-semibold text-slate-900">{ligne.nomPrenom}</div>
+                            <div className="text-[11px] text-slate-500 font-mono">Mat: {ligne.matricule || '-'}</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {ligne.sousSociete ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200">
+                                {ligne.sousSociete}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 min-w-[200px]">
+                            {ligne.actes && ligne.actes.length > 0 ? (
+                              <div className="flex flex-col gap-1">
+                                {ligne.actes.map((a, i) => (
+                                  <div
+                                    key={i}
+                                    className="flex items-center justify-between px-2 py-0.5 rounded text-[11px] font-mono bg-indigo-50/70 border border-indigo-100 text-indigo-900"
+                                  >
+                                    <span className="font-bold">{a.code}</span>
+                                    <span className="font-semibold text-slate-800 ml-2">
+                                      {formatMoney(a.montant)}
+                                    </span>
+                                  </div>
+                                ))}
+                                {ligne.actes.length > 1 && (
+                                  <div className="text-[10px] text-slate-400 font-medium px-1">
+                                    {ligne.actes.length} actes cumulés
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-600 text-[11px]">{ligne.actesTexte}</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-medium text-slate-900">
+                            {formatMoney(ligne.montantBrut)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-amber-700 font-medium">
+                            {formatMoney(ligne.participation)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+                            {formatMoney(ligne.netAPayer)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Bottom Reset Action */}
               <div className="flex justify-end">
                 <button
-                  onClick={() => {
-                    setParsedInvoice(null);
-                    setSelectedLines({});
-                  }}
-                  className="text-xs text-slate-500 hover:text-slate-700"
+                  onClick={handleResetAndBack}
+                  className="text-xs text-slate-500 hover:text-slate-700 cursor-pointer"
                 >
                   Charger un autre document
                 </button>
@@ -1019,7 +993,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           <div>
             {parsedInvoice && (
               <div className="text-xs text-slate-600">
-                <strong className="text-slate-900 font-bold">{selectedCount}</strong> prestations sélectionnées •{' '}
+                <strong className="text-slate-900 font-bold">{selectedCount}</strong> sur <strong className="text-slate-900 font-bold">{totalDetectedCount}</strong> prestations sélectionnées •{' '}
                 Total : <strong className="text-slate-900 font-bold">{formatMoney(totalSelectedBrut)}</strong> (Net prise en charge :{' '}
                 <strong className="text-emerald-700 font-bold">{formatMoney(totalSelectedNet)}</strong>)
               </div>
@@ -1030,7 +1004,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             {parsedInvoice && (
               <button
                 onClick={handleResetAndBack}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-1.5 shadow-2xs"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Retour</span>
@@ -1038,7 +1012,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             )}
             <button
               onClick={handleClose}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
             >
               Annuler
             </button>
@@ -1046,7 +1020,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               <button
                 onClick={handleValidateImport}
                 disabled={selectedCount === 0}
-                className="rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50 shadow-xs flex items-center gap-2"
+                className="rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50 shadow-xs flex items-center gap-2 cursor-pointer"
               >
                 <Check className="h-4 w-4" />
                 <span>Enregistrer {selectedCount} Prestations</span>
