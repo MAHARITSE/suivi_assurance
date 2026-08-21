@@ -8,16 +8,16 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
     $stmtActes = $pdo->query("SELECT * FROM actes ORDER BY code ASC");
-    $actes = $stmtActes->fetchAll();
+    $actes = $stmtActes ? $stmtActes->fetchAll() : [];
     foreach ($actes as &$a) {
-        $a['tarifConventionnel'] = (float)$a['tarifConventionnel'];
+        $a['tarifConventionnel'] = (float)($a['tarifConventionnel'] ?? 0);
     }
 
     $stmtFamilles = $pdo->query("SELECT * FROM familles ORDER BY code ASC");
-    $familles = $stmtFamilles->fetchAll();
+    $familles = $stmtFamilles ? $stmtFamilles->fetchAll() : [];
     foreach ($familles as &$f) {
-        $f['tauxDefaut'] = (float)$f['tauxDefaut'];
-        $f['plafondAnnuel'] = (float)$f['plafondAnnuel'];
+        $f['tauxDefaut'] = (float)($f['tauxDefaut'] ?? 80);
+        $f['plafondAnnuel'] = (float)($f['plafondAnnuel'] ?? 0);
     }
 
     sendJson([
@@ -30,7 +30,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    $data = getJsonBody();
+    $data = getJsonInput();
     if (empty($data['code']) || empty($data['libelle'])) {
         sendJson(['success' => false, 'error' => 'Code et Libellé obligatoires'], 400);
     }

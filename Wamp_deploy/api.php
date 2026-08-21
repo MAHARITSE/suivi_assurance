@@ -37,7 +37,7 @@ try {
         case 'societes':
             if ($method === 'GET') {
                 $stmt = $pdo->query("SELECT * FROM societes ORDER BY nom ASC");
-                sendJson(['success' => true, 'data' => $stmt->fetchAll()]);
+                sendJson(['success' => true, 'data' => $stmt ? $stmt->fetchAll() : []]);
             }
             break;
 
@@ -45,25 +45,25 @@ try {
         case 'familles':
             if ($method === 'GET') {
                 $stmt = $pdo->query("SELECT * FROM familles ORDER BY code ASC");
-                sendJson(['success' => true, 'data' => $stmt->fetchAll()]);
+                sendJson(['success' => true, 'data' => $stmt ? $stmt->fetchAll() : []]);
             }
             break;
 
         // --- PERSONNES (ASSURÉS) ---
         case 'personnes':
             if ($method === 'GET') {
-                $stmt = $pdo->query("SELECT * FROM personnes ORDER BY nomPrenom ASC");
-                sendJson(['success' => true, 'data' => $stmt->fetchAll()]);
+                $stmt = $pdo->query("SELECT * FROM personnes ORDER BY nom_prenom ASC");
+                sendJson(['success' => true, 'data' => $stmt ? $stmt->fetchAll() : []]);
             } elseif ($method === 'POST') {
                 $body = getJsonInput();
-                $stmt = $pdo->prepare("INSERT INTO personnes (id, matricule, nomPrenom, qualite, societeId, sousSociete) VALUES (:id, :matricule, :nomPrenom, :qualite, :societeId, :sousSociete) ON DUPLICATE KEY UPDATE nomPrenom = VALUES(nomPrenom), societeId = VALUES(societeId), sousSociete = VALUES(sousSociete)");
+                $stmt = $pdo->prepare("INSERT INTO personnes (id, matricule, nom_prenom, qualite, societe_id, sous_societe) VALUES (:id, :matricule, :nom_prenom, :qualite, :societe_id, :sous_societe) ON DUPLICATE KEY UPDATE nom_prenom = VALUES(nom_prenom), societe_id = VALUES(societe_id), sous_societe = VALUES(sous_societe)");
                 $stmt->execute([
                     ':id' => $body['id'] ?? uniqid('pers_'),
                     ':matricule' => $body['matricule'] ?? '',
-                    ':nomPrenom' => $body['nomPrenom'] ?? '',
+                    ':nom_prenom' => $body['nomPrenom'] ?? $body['nom_prenom'] ?? '',
                     ':qualite' => $body['qualite'] ?? 'Adhérent',
-                    ':societeId' => $body['societeId'] ?? null,
-                    ':sousSociete' => $body['sousSociete'] ?? null,
+                    ':societe_id' => $body['societeId'] ?? $body['societe_id'] ?? null,
+                    ':sous_societe' => $body['sousSociete'] ?? $body['sous_societe'] ?? null,
                 ]);
                 sendJson(['success' => true, 'message' => 'Personne enregistrée']);
             }
@@ -72,16 +72,15 @@ try {
         // --- PRESTATIONS (DOSSIERS & FACTURES) ---
         case 'prestations':
             if ($method === 'GET') {
-                $stmt = $pdo->query("SELECT * FROM prestations ORDER BY date DESC, numeroFacture DESC");
-                $prestations = $stmt->fetchAll();
+                $stmt = $pdo->query("SELECT * FROM prestations ORDER BY date DESC, numero_facture DESC");
+                $prestations = $stmt ? $stmt->fetchAll() : [];
 
-                // Charger toutes les lignes
-                $lignesStmt = $pdo->query("SELECT * FROM lignes_prestations ORDER BY id ASC");
-                $allLignes = $lignesStmt->fetchAll();
+                $lignesStmt = $pdo->query("SELECT * FROM lignes_prestation ORDER BY id ASC");
+                $allLignes = $lignesStmt ? $lignesStmt->fetchAll() : [];
 
                 $lignesByPrestation = [];
                 foreach ($allLignes as $l) {
-                    $lignesByPrestation[$l['prestationId']][] = $l;
+                    $lignesByPrestation[$l['prestation_id']][] = $l;
                 }
 
                 foreach ($prestations as &$p) {
@@ -93,44 +92,42 @@ try {
                 $p = getJsonInput();
                 $pdo->beginTransaction();
 
-                $stmt = $pdo->prepare("REPLACE INTO prestations (id, numeroFacture, date, societeId, societeNom, sousSociete, personneId, matricule, nomAgent, totalPrestation, participation, montantARembourser, totalPaye, resteAPayer, statut, commentaires) VALUES (:id, :numeroFacture, :date, :societeId, :societeNom, :sousSociete, :personneId, :matricule, :nomAgent, :totalPrestation, :participation, :montantARembourser, :totalPaye, :resteAPayer, :statut, :commentaires)");
+                $stmt = $pdo->prepare("REPLACE INTO prestations (id, numero_facture, date, societe_id, societe_nom, sous_societe, personne_id, matricule, nom_agent, total_prestation, participation, montant_a_rembourser, total_paye, reste_a_payer, statut, commentaires) VALUES (:id, :numero_facture, :date, :societe_id, :societe_nom, :sous_societe, :personne_id, :matricule, :nom_agent, :total_prestation, :participation, :montant_a_rembourser, :total_paye, :reste_a_payer, :statut, :commentaires)");
                 $stmt->execute([
                     ':id' => $p['id'] ?? uniqid('prest_'),
-                    ':numeroFacture' => $p['numeroFacture'] ?? '',
+                    ':numero_facture' => $p['numeroFacture'] ?? $p['numero_facture'] ?? '',
                     ':date' => $p['date'] ?? date('Y-m-d'),
-                    ':societeId' => $p['societeId'] ?? '',
-                    ':societeNom' => $p['societeNom'] ?? null,
-                    ':sousSociete' => $p['sousSociete'] ?? null,
-                    ':personneId' => $p['personneId'] ?? null,
+                    ':societe_id' => $p['societeId'] ?? $p['societe_id'] ?? '',
+                    ':societe_nom' => $p['societeNom'] ?? $p['societe_nom'] ?? null,
+                    ':sous_societe' => $p['sousSociete'] ?? $p['sous_societe'] ?? null,
+                    ':personne_id' => $p['personneId'] ?? $p['personne_id'] ?? '',
                     ':matricule' => $p['matricule'] ?? null,
-                    ':nomAgent' => $p['nomAgent'] ?? null,
-                    ':totalPrestation' => $p['totalPrestation'] ?? 0,
+                    ':nom_agent' => $p['nomAgent'] ?? $p['nom_agent'] ?? null,
+                    ':total_prestation' => $p['totalPrestation'] ?? $p['total_prestation'] ?? 0,
                     ':participation' => $p['participation'] ?? 0,
-                    ':montantARembourser' => $p['montantARembourser'] ?? 0,
-                    ':totalPaye' => $p['totalPaye'] ?? 0,
-                    ':resteAPayer' => $p['resteAPayer'] ?? 0,
+                    ':montant_a_rembourser' => $p['montantARembourser'] ?? $p['montant_a_rembourser'] ?? 0,
+                    ':total_paye' => $p['totalPaye'] ?? $p['total_paye'] ?? 0,
+                    ':reste_a_payer' => $p['resteAPayer'] ?? $p['reste_a_payer'] ?? 0,
                     ':statut' => $p['statut'] ?? 'En attente',
                     ':commentaires' => $p['commentaires'] ?? null,
                 ]);
 
-                // Supprimer anciennes lignes et réinsérer
-                $del = $pdo->prepare("DELETE FROM lignes_prestations WHERE prestationId = :prestationId");
-                $del->execute([':prestationId' => $p['id']]);
+                $del = $pdo->prepare("DELETE FROM lignes_prestation WHERE prestation_id = :prestation_id");
+                $del->execute([':prestation_id' => $p['id']]);
 
                 if (!empty($p['lignes']) && is_array($p['lignes'])) {
-                    $lStmt = $pdo->prepare("INSERT INTO lignes_prestations (id, prestationId, code, libelle, totalPrestation, ticketModerateur, montantARembourser, totalPaye, statut, motifRejet) VALUES (:id, :prestationId, :code, :libelle, :totalPrestation, :ticketModerateur, :montantARembourser, :totalPaye, :statut, :motifRejet)");
+                    $lStmt = $pdo->prepare("INSERT INTO lignes_prestation (id, prestation_id, code, libelle, total_prestation, ticket_moderateur, montant_a_rembourser, total_paye, statut) VALUES (:id, :prestation_id, :code, :libelle, :total_prestation, :ticket_moderateur, :montant_a_rembourser, :total_paye, :statut)");
                     foreach ($p['lignes'] as $l) {
                         $lStmt->execute([
                             ':id' => $l['id'] ?? uniqid('lig_'),
-                            ':prestationId' => $p['id'],
+                            ':prestation_id' => $p['id'],
                             ':code' => $l['code'] ?? 'CONS',
                             ':libelle' => $l['libelle'] ?? '',
-                            ':totalPrestation' => $l['totalPrestation'] ?? 0,
-                            ':ticketModerateur' => $l['ticketModerateur'] ?? 0,
-                            ':montantARembourser' => $l['montantARembourser'] ?? ($l['totalPrestation'] - ($l['ticketModerateur'] ?? 0)),
-                            ':totalPaye' => $l['totalPaye'] ?? 0,
+                            ':total_prestation' => $l['totalPrestation'] ?? $l['total_prestation'] ?? 0,
+                            ':ticket_moderateur' => $l['ticketModerateur'] ?? $l['ticket_moderateur'] ?? 0,
+                            ':montant_a_rembourser' => $l['montantARembourser'] ?? $l['montant_a_rembourser'] ?? 0,
+                            ':total_paye' => $l['totalPaye'] ?? $l['total_paye'] ?? 0,
                             ':statut' => $l['statut'] ?? 'En attente',
-                            ':motifRejet' => $l['motifRejet'] ?? null,
                         ]);
                     }
                 }
@@ -152,15 +149,15 @@ try {
         // --- PAIEMENTS & BORDEREAUX ---
         case 'paiements':
             if ($method === 'GET') {
-                $stmt = $pdo->query("SELECT * FROM paiements ORDER BY datePaiement DESC, numeroBordereau DESC");
-                $paiements = $stmt->fetchAll();
+                $stmt = $pdo->query("SELECT * FROM paiements ORDER BY date_paiement DESC, numero_bordereau DESC");
+                $paiements = $stmt ? $stmt->fetchAll() : [];
 
-                $lpStmt = $pdo->query("SELECT * FROM lignes_paiements ORDER BY id ASC");
-                $allLp = $lpStmt->fetchAll();
+                $lpStmt = $pdo->query("SELECT * FROM lignes_paiement ORDER BY id ASC");
+                $allLp = $lpStmt ? $lpStmt->fetchAll() : [];
 
                 $lpByPaiement = [];
                 foreach ($allLp as $lp) {
-                    $lpByPaiement[$lp['paiementId']][] = $lp;
+                    $lpByPaiement[$lp['paiement_id']][] = $lp;
                 }
 
                 foreach ($paiements as &$pm) {
@@ -172,49 +169,47 @@ try {
                 $pm = getJsonInput();
                 $pdo->beginTransaction();
 
-                $stmt = $pdo->prepare("REPLACE INTO paiements (id, numeroBordereau, datePaiement, dateSaisie, societeId, matricule, nomAgent, modePaiement, referencePaiement, totalReclame, totalPaye, totalModerateur, totalExclu, remise, statut, notes) VALUES (:id, :numeroBordereau, :datePaiement, :dateSaisie, :societeId, :matricule, :nomAgent, :modePaiement, :referencePaiement, :totalReclame, :totalPaye, :totalModerateur, :totalExclu, :remise, :statut, :notes)");
+                $stmt = $pdo->prepare("REPLACE INTO paiements (id, numero_bordereau, date_paiement, date_saisie, societe_id, matricule, nom_agent, mode_paiement, reference_paiement, total_reclame, total_paye, total_moderateur, total_exclu, remise, statut, notes) VALUES (:id, :numero_bordereau, :date_paiement, :date_saisie, :societe_id, :matricule, :nom_agent, :mode_paiement, :reference_paiement, :total_reclame, :total_paye, :total_moderateur, :total_exclu, :remise, :statut, :notes)");
                 $stmt->execute([
                     ':id' => $pm['id'] ?? uniqid('pai_'),
-                    ':numeroBordereau' => $pm['numeroBordereau'] ?? '',
-                    ':datePaiement' => $pm['datePaiement'] ?? date('Y-m-d'),
-                    ':dateSaisie' => $pm['dateSaisie'] ?? date('Y-m-d'),
-                    ':societeId' => $pm['societeId'] ?? '',
+                    ':numero_bordereau' => $pm['numeroBordereau'] ?? $pm['numero_bordereau'] ?? '',
+                    ':date_paiement' => $pm['datePaiement'] ?? $pm['date_paiement'] ?? date('Y-m-d'),
+                    ':date_saisie' => $pm['dateSaisie'] ?? $pm['date_saisie'] ?? date('Y-m-d'),
+                    ':societe_id' => $pm['societeId'] ?? $pm['societe_id'] ?? '',
                     ':matricule' => $pm['matricule'] ?? null,
-                    ':nomAgent' => $pm['nomAgent'] ?? null,
-                    ':modePaiement' => $pm['modePaiement'] ?? 'Virement bancaire',
-                    ':referencePaiement' => $pm['referencePaiement'] ?? null,
-                    ':totalReclame' => $pm['totalReclame'] ?? 0,
-                    ':totalPaye' => $pm['totalPaye'] ?? 0,
-                    ':totalModerateur' => $pm['totalModerateur'] ?? 0,
-                    ':totalExclu' => $pm['totalExclu'] ?? 0,
+                    ':nom_agent' => $pm['nomAgent'] ?? $pm['nom_agent'] ?? null,
+                    ':mode_paiement' => $pm['modePaiement'] ?? $pm['mode_paiement'] ?? 'Virement bancaire',
+                    ':reference_paiement' => $pm['referencePaiement'] ?? $pm['reference_paiement'] ?? null,
+                    ':total_reclame' => $pm['totalReclame'] ?? $pm['total_reclame'] ?? 0,
+                    ':total_paye' => $pm['totalPaye'] ?? $pm['total_paye'] ?? 0,
+                    ':total_moderateur' => $pm['totalModerateur'] ?? $pm['total_moderateur'] ?? 0,
+                    ':total_exclu' => $pm['totalExclu'] ?? $pm['total_exclu'] ?? 0,
                     ':remise' => $pm['remise'] ?? 0,
                     ':statut' => $pm['statut'] ?? 'Validé',
                     ':notes' => $pm['notes'] ?? null,
                 ]);
 
-                // Lignes de paiement
-                $del = $pdo->prepare("DELETE FROM lignes_paiements WHERE paiementId = :paiementId");
-                $del->execute([':paiementId' => $pm['id']]);
+                $del = $pdo->prepare("DELETE FROM lignes_paiement WHERE paiement_id = :paiement_id");
+                $del->execute([':paiement_id' => $pm['id']]);
 
                 if (!empty($pm['lignes']) && is_array($pm['lignes'])) {
-                    $lpStmt = $pdo->prepare("INSERT INTO lignes_paiements (id, paiementId, prestationId, lignePrestationId, prestationNumero, immatriculation, nomBaseAssurance, nomAgent, totalPaye, montantPaye, ticketModerateur, montantExclu, montantReclame, codeActe, libelleActe, commentaire) VALUES (:id, :paiementId, :prestationId, :lignePrestationId, :prestationNumero, :immatriculation, :nomBaseAssurance, :nomAgent, :totalPaye, :montantPaye, :ticketModerateur, :montantExclu, :montantReclame, :codeActe, :libelleActe, :commentaire)");
+                    $lpStmt = $pdo->prepare("INSERT INTO lignes_paiement (id, paiement_id, prestation_id, ligne_prestation_id, prestation_numero, immatriculation, nom_base_assurance, nom_agent, total_paye, ticket_moderateur, montant_exclu, montant_reclame, code_acte, libelle_acte, commentaire) VALUES (:id, :paiement_id, :prestation_id, :ligne_prestation_id, :prestation_numero, :immatriculation, :nom_base_assurance, :nom_agent, :total_paye, :ticket_moderateur, :montant_exclu, :montant_reclame, :code_acte, :libelle_acte, :commentaire)");
                     foreach ($pm['lignes'] as $lp) {
                         $lpStmt->execute([
                             ':id' => $lp['id'] ?? uniqid('lp_'),
-                            ':paiementId' => $pm['id'],
-                            ':prestationId' => $lp['prestationId'] ?? null,
-                            ':lignePrestationId' => $lp['lignePrestationId'] ?? null,
-                            ':prestationNumero' => $lp['prestationNumero'] ?? null,
+                            ':paiement_id' => $pm['id'],
+                            ':prestation_id' => $lp['prestationId'] ?? $lp['prestation_id'] ?? null,
+                            ':ligne_prestation_id' => $lp['lignePrestationId'] ?? $lp['ligne_prestation_id'] ?? null,
+                            ':prestation_numero' => $lp['prestationNumero'] ?? $lp['prestation_numero'] ?? null,
                             ':immatriculation' => $lp['immatriculation'] ?? null,
-                            ':nomBaseAssurance' => $lp['nomBaseAssurance'] ?? null,
-                            ':nomAgent' => $lp['nomAgent'] ?? null,
-                            ':totalPaye' => $lp['totalPaye'] ?? 0,
-                            ':montantPaye' => $lp['montantPaye'] ?? ($lp['totalPaye'] ?? 0),
-                            ':ticketModerateur' => $lp['ticketModerateur'] ?? 0,
-                            ':montantExclu' => $lp['montantExclu'] ?? 0,
-                            ':montantReclame' => $lp['montantReclame'] ?? 0,
-                            ':codeActe' => $lp['codeActe'] ?? null,
-                            ':libelleActe' => $lp['libelleActe'] ?? null,
+                            ':nom_base_assurance' => $lp['nomBaseAssurance'] ?? $lp['nom_base_assurance'] ?? null,
+                            ':nom_agent' => $lp['nomAgent'] ?? $lp['nom_agent'] ?? null,
+                            ':total_paye' => $lp['totalPaye'] ?? $lp['total_paye'] ?? 0,
+                            ':ticket_moderateur' => $lp['ticketModerateur'] ?? $lp['ticket_moderateur'] ?? 0,
+                            ':montant_exclu' => $lp['montantExclu'] ?? $lp['montant_exclu'] ?? 0,
+                            ':montant_reclame' => $lp['montantReclame'] ?? $lp['montant_reclame'] ?? 0,
+                            ':code_acte' => $lp['codeActe'] ?? $lp['code_acte'] ?? null,
+                            ':libelle_acte' => $lp['libelleActe'] ?? $lp['libelle_acte'] ?? null,
                             ':commentaire' => $lp['commentaire'] ?? null,
                         ]);
                     }

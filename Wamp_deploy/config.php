@@ -27,7 +27,6 @@ function getPDO() {
         try {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
-            // Check if HTML or JSON output requested
             if (!headers_sent() && (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'json') !== false)) {
                 header('Content-Type: application/json; charset=utf-8');
                 http_response_code(500);

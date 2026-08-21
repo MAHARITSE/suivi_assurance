@@ -1,233 +1,96 @@
 <?php
 /**
- * API REST Paiements (Règlements & Rejets)
- * GET /api/paiements.php
- * POST /api/paiements.php
- * DELETE /api/paiements.php?id=...
+ * API REST Paiements & Règlements
  */
-
 require_once __DIR__ . '/../config.php';
 $pdo = getPDO();
 $method = $_SERVER['REQUEST_METHOD'];
 
-// ----------------------------------------------------
-// 1. GET - Liste des bordereaux de règlement et rejets
-// ----------------------------------------------------
 if ($method === 'GET') {
-    $societeId = $_GET['societeId'] ?? 'ALL';
-    $search = trim($_GET['search'] ?? '');
+    $stmt = $pdo->query("SELECT * FROM paiements ORDER BY date_paiement DESC, numero_bordereau DESC");
+    $paiements = $stmt ? $stmt->fetchAll() : [];
 
-    $where = [];
-    $params = [];
+    $lpStmt = $pdo->query("SELECT * FROM lignes_paiement ORDER BY id ASC");
+    $allLp = $lpStmt ? $lpStmt->fetchAll() : [];
 
-    if ($societeId !== 'ALL' && !empty($societeId)) {
-        $where[] = "p.societeId = ?";
-        $params[] = $societeId;
+    $lpByPaiement = [];
+    foreach ($allLp as $lp) {
+        $lpByPaiement[$lp['paiement_id']][] = $lp;
     }
 
-    if (!empty($search)) {
-        $where[] = "(p.numeroBordereau LIKE ? OR p.referencePaiement LIKE ? OR p.nomAgent LIKE ? OR p.matricule LIKE ? OR p.notes LIKE ?)";
-        $term = "%$search%";
-        $params[] = $term;
-        $params[] = $term;
-        $params[] = $term;
-        $params[] = $term;
-        $params[] = $term;
-    }
-
-    $whereClause = count($where) > 0 ? "WHERE " . implode(" AND ", $where) : "";
-    $sql = "SELECT p.*, s.nom AS societeNomRef
-            FROM paiements p
-            LEFT JOIN societes s ON p.societeId = s.id
-            $whereClause
-            ORDER BY p.datePaiement DESC, p.id DESC";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $paiements = $stmt->fetchAll();
-
-    if (count($paiements) > 0) {
-        $paiementIds = array_column($paiements, 'id');
-        $placeholders = implode(',', array_fill(0, count($paiementIds), '?'));
-        $stmtLines = $pdo->prepare("SELECT * FROM paiement_lignes WHERE paiementId IN ($placeholders) ORDER BY id ASC");
-        $stmtLines->execute($paiementIds);
-        $allLines = $stmtLines->fetchAll();
-
-        $linesByPaiement = [];
-        foreach ($allLines as $line) {
-            $actesPayes = [];
-            if (!empty($line['actesPayes'])) {
-                $decoded = json_decode($line['actesPayes'], true);
-                if (is_array($decoded)) $actesPayes = $decoded;
-            }
-
-            $linesByPaiement[$line['paiementId']][] = [
-                'id' => $line['id'],
-                'paiementId' => $line['paiementId'],
-                'lignePrestationId' => $line['lignePrestationId'],
-                'prestationId' => $line['prestationId'],
-                'prestationNumero' => $line['prestationNumero'],
-                'dateSoins' => $line['dateSoins'],
-                'immatriculation' => $line['immatriculation'],
-                'nomBaseAssurance' => $line['nomBaseAssurance'],
-                'nomAgent' => $line['nomAgent'],
-                'totalPaye' => (float)$line['totalPaye'],
-                'montantPaye' => (float)$line['montantPaye'],
-                'ticketModerateur' => (float)$line['ticketModerateur'],
-                'montantExclu' => (float)$line['montantExclu'],
-                'montantReclame' => (float)$line['montantReclame'],
-                'actesPayes' => $actesPayes,
-                'commentaire' => $line['commentaire']
-            ];
-        }
-
-        foreach ($paiements as &$p) {
-            $p['totalReclame'] = (float)$p['totalReclame'];
-            $p['totalPaye'] = (float)$p['totalPaye'];
-            $p['totalModerateur'] = (float)$p['totalModerateur'];
-            $p['totalExclu'] = (float)$p['totalExclu'];
-            $p['remise'] = (float)$p['remise'];
-            $p['lignes'] = $linesByPaiement[$p['id']] ?? [];
-        }
+    foreach ($paiements as &$pm) {
+        $pm['lignes'] = $lpByPaiement[$pm['id']] ?? [];
     }
 
     sendJson(['success' => true, 'data' => $paiements]);
 }
 
-// ----------------------------------------------------
-// 2. POST - Enregistrement d'un règlement ou rejet
-// ----------------------------------------------------
 if ($method === 'POST') {
-    $data = getJsonBody();
-    if (empty($data['numeroBordereau']) || empty($data['societeId'])) {
-        sendJson(['success' => false, 'error' => 'Numéro de bordereau ou société manquant'], 400);
-    }
-
-    $id = !empty($data['id']) ? $data['id'] : 'pai-' . uniqid();
-    $totReclame = (float)($data['totalReclame'] ?? 0);
-    $totPaye = (float)($data['totalPaye'] ?? 0);
-    $totMod = (float)($data['totalModerateur'] ?? 0);
-    $totExclu = (float)($data['totalExclu'] ?? 0);
-    $remise = (float)($data['remise'] ?? 0);
-
+    $pm = getJsonInput();
     $pdo->beginTransaction();
+
     try {
-        $stmt = $pdo->prepare("INSERT INTO paiements 
-            (id, numeroBordereau, datePaiement, dateSaisie, societeId, nomAgent, matricule, modePaiement, referencePaiement, totalReclame, totalPaye, totalModerateur, totalExclu, remise, statut, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt = $pdo->prepare("REPLACE INTO paiements (id, numero_bordereau, date_paiement, date_saisie, societe_id, matricule, nom_agent, mode_paiement, reference_paiement, total_reclame, total_paye, total_moderateur, total_exclu, remise, statut, notes) VALUES (:id, :numero_bordereau, :date_paiement, :date_saisie, :societe_id, :matricule, :nom_agent, :mode_paiement, :reference_paiement, :total_reclame, :total_paye, :total_moderateur, :total_exclu, :remise, :statut, :notes)");
         $stmt->execute([
-            $id,
-            $data['numeroBordereau'],
-            $data['datePaiement'] ?? date('Y-m-d'),
-            date('Y-m-d H:i:s'),
-            $data['societeId'],
-            $data['nomAgent'] ?? '',
-            $data['matricule'] ?? '',
-            $data['modePaiement'] ?? 'Virement bancaire',
-            $data['referencePaiement'] ?? '',
-            $totReclame,
-            $totPaye,
-            $totMod,
-            $totExclu,
-            $remise,
-            $data['statut'] ?? 'Validé',
-            $data['notes'] ?? ''
+            ':id' => $pm['id'] ?? uniqid('pai_'),
+            ':numero_bordereau' => $pm['numeroBordereau'] ?? $pm['numero_bordereau'] ?? '',
+            ':date_paiement' => $pm['datePaiement'] ?? $pm['date_paiement'] ?? date('Y-m-d'),
+            ':date_saisie' => $pm['dateSaisie'] ?? $pm['date_saisie'] ?? date('Y-m-d'),
+            ':societe_id' => $pm['societeId'] ?? $pm['societe_id'] ?? '',
+            ':matricule' => $pm['matricule'] ?? null,
+            ':nom_agent' => $pm['nomAgent'] ?? $pm['nom_agent'] ?? null,
+            ':mode_paiement' => $pm['modePaiement'] ?? $pm['mode_paiement'] ?? 'Virement bancaire',
+            ':reference_paiement' => $pm['referencePaiement'] ?? $pm['reference_paiement'] ?? null,
+            ':total_reclame' => $pm['totalReclame'] ?? $pm['total_reclame'] ?? 0,
+            ':total_paye' => $pm['totalPaye'] ?? $pm['total_paye'] ?? 0,
+            ':total_moderateur' => $pm['totalModerateur'] ?? $pm['total_moderateur'] ?? 0,
+            ':total_exclu' => $pm['totalExclu'] ?? $pm['total_exclu'] ?? 0,
+            ':remise' => $pm['remise'] ?? 0,
+            ':statut' => $pm['statut'] ?? 'Validé',
+            ':notes' => $pm['notes'] ?? null,
         ]);
 
-        if (!empty($data['lignes']) && is_array($data['lignes'])) {
-            $stmtLine = $pdo->prepare("INSERT INTO paiement_lignes 
-                (id, paiementId, lignePrestationId, prestationId, prestationNumero, dateSoins, immatriculation, nomBaseAssurance, nomAgent, totalPaye, montantPaye, ticketModerateur, montantExclu, montantReclame, actesPayes, commentaire)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $del = $pdo->prepare("DELETE FROM lignes_paiement WHERE paiement_id = :paiement_id");
+        $del->execute([':paiement_id' => $pm['id']]);
 
-            foreach ($data['lignes'] as $l) {
-                $plId = !empty($l['id']) ? $l['id'] : 'pl-' . uniqid();
-                $lPaye = (float)($l['totalPaye'] ?? $l['montantPaye'] ?? 0);
-                $lMod = (float)($l['ticketModerateur'] ?? 0);
-                $lExclu = (float)($l['montantExclu'] ?? 0);
-                $lReclame = (float)($l['montantReclame'] ?? 0);
-                $actesJson = !empty($l['actesPayes']) ? json_encode($l['actesPayes'], JSON_UNESCAPED_UNICODE) : null;
-
-                $stmtLine->execute([
-                    $plId,
-                    $id,
-                    $l['lignePrestationId'] ?? null,
-                    $l['prestationId'] ?? null,
-                    $l['prestationNumero'] ?? null,
-                    $l['dateSoins'] ?? null,
-                    $l['immatriculation'] ?? null,
-                    $l['nomBaseAssurance'] ?? null,
-                    $l['nomAgent'] ?? null,
-                    $lPaye,
-                    $lPaye,
-                    $lMod,
-                    $lExclu,
-                    $lReclame,
-                    $actesJson,
-                    $l['commentaire'] ?? null
+        if (!empty($pm['lignes']) && is_array($pm['lignes'])) {
+            $lpStmt = $pdo->prepare("INSERT INTO lignes_paiement (id, paiement_id, prestation_id, ligne_prestation_id, prestation_numero, immatriculation, nom_base_assurance, nom_agent, total_paye, ticket_moderateur, montant_exclu, montant_reclame, code_acte, libelle_acte, commentaire) VALUES (:id, :paiement_id, :prestation_id, :ligne_prestation_id, :prestation_numero, :immatriculation, :nom_base_assurance, :nom_agent, :total_paye, :ticket_moderateur, :montant_exclu, :montant_reclame, :code_acte, :libelle_acte, :commentaire)");
+            foreach ($pm['lignes'] as $lp) {
+                $lpStmt->execute([
+                    ':id' => $lp['id'] ?? uniqid('lp_'),
+                    ':paiement_id' => $pm['id'],
+                    ':prestation_id' => $lp['prestationId'] ?? $lp['prestation_id'] ?? null,
+                    ':ligne_prestation_id' => $lp['lignePrestationId'] ?? $lp['ligne_prestation_id'] ?? null,
+                    ':prestation_numero' => $lp['prestationNumero'] ?? $lp['prestation_numero'] ?? null,
+                    ':immatriculation' => $lp['immatriculation'] ?? null,
+                    ':nom_base_assurance' => $lp['nomBaseAssurance'] ?? $lp['nom_base_assurance'] ?? null,
+                    ':nom_agent' => $lp['nomAgent'] ?? $lp['nom_agent'] ?? null,
+                    ':total_paye' => $lp['totalPaye'] ?? $lp['total_paye'] ?? 0,
+                    ':ticket_moderateur' => $lp['ticketModerateur'] ?? $lp['ticket_moderateur'] ?? 0,
+                    ':montant_exclu' => $lp['montantExclu'] ?? $lp['montant_exclu'] ?? 0,
+                    ':montant_reclame' => $lp['montantReclame'] ?? $lp['montant_reclame'] ?? 0,
+                    ':code_acte' => $lp['codeActe'] ?? $lp['code_acte'] ?? null,
+                    ':libelle_acte' => $lp['libelleActe'] ?? $lp['libelle_acte'] ?? null,
+                    ':commentaire' => $lp['commentaire'] ?? null,
                 ]);
-
-                // Mise à jour de la ligne de prestation
-                if (!empty($l['lignePrestationId'])) {
-                    $stmtUpdateLig = $pdo->prepare("UPDATE prestation_lignes SET 
-                        totalPaye = totalPaye + ?,
-                        statut = CASE 
-                            WHEN ? > 0 AND totalPaye = 0 AND ? >= montantARembourser THEN 'Rejeté'
-                            WHEN (totalPaye + ? + ?) >= montantARembourser THEN 'Payé'
-                            WHEN (totalPaye + ?) > 0 THEN 'Partiellement payé'
-                            ELSE statut
-                        END
-                        WHERE id = ?");
-                    $stmtUpdateLig->execute([$lPaye, $lExclu, $lExclu, $lPaye, $lExclu, $lPaye, $l['lignePrestationId']]);
-                }
-
-                // Mise à jour de la prestation parente
-                if (!empty($l['prestationId'])) {
-                    $stmtPrestInfo = $pdo->prepare("SELECT montantARembourser, totalPrestation, participation FROM prestations WHERE id = ?");
-                    $stmtPrestInfo->execute([$l['prestationId']]);
-                    $pInfo = $stmtPrestInfo->fetch();
-
-                    if ($pInfo) {
-                        $rembVal = (float)$pInfo['montantARembourser'];
-                        $stmtUpdatePrest = $pdo->prepare("UPDATE prestations SET 
-                            totalPaye = totalPaye + ?,
-                            resteAPayer = GREATEST(0, montantARembourser - (totalPaye + ?) - ?),
-                            statut = CASE 
-                                WHEN GREATEST(0, montantARembourser - (totalPaye + ?) - ?) <= 0 THEN 'Payé'
-                                WHEN (totalPaye + ?) > 0 THEN 'Partiellement payé'
-                                ELSE statut
-                            END
-                            WHERE id = ?");
-                        $stmtUpdatePrest->execute([$lPaye, $lPaye, $lExclu, $lPaye, $lExclu, $lPaye, $l['prestationId']]);
-                    }
-                }
             }
         }
 
         $pdo->commit();
-        sendJson(['success' => true, 'id' => $id, 'message' => 'Règlement enregistré avec succès']);
+        sendJson(['success' => true, 'message' => 'Règlement enregistré avec succès']);
     } catch (Exception $e) {
         $pdo->rollBack();
         sendJson(['success' => false, 'error' => $e->getMessage()], 500);
     }
 }
 
-// ----------------------------------------------------
-// 3. DELETE - Suppression d'un règlement
-// ----------------------------------------------------
 if ($method === 'DELETE') {
     $id = $_GET['id'] ?? '';
-    if (empty($id)) {
-        sendJson(['success' => false, 'error' => 'Identifiant manquant'], 400);
-    }
-
-    $pdo->beginTransaction();
-    try {
-        $pdo->prepare("DELETE FROM paiement_lignes WHERE paiementId = ?")->execute([$id]);
-        $pdo->prepare("DELETE FROM paiements WHERE id = ?")->execute([$id]);
-        $pdo->commit();
+    if ($id) {
+        $stmt = $pdo->prepare("DELETE FROM paiements WHERE id = :id");
+        $stmt->execute([':id' => $id]);
         sendJson(['success' => true, 'message' => 'Règlement supprimé']);
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        sendJson(['success' => false, 'error' => $e->getMessage()], 500);
+    } else {
+        sendJson(['success' => false, 'error' => 'ID manquant'], 400);
     }
 }

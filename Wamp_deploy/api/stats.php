@@ -14,9 +14,9 @@ $wherePai = [];
 $paramsPai = [];
 
 if ($societeId !== 'ALL' && !empty($societeId)) {
-    $wherePrest[] = "societeId = ?";
+    $wherePrest[] = "societe_id = ?";
     $paramsPrest[] = $societeId;
-    $wherePai[] = "societeId = ?";
+    $wherePai[] = "societe_id = ?";
     $paramsPai[] = $societeId;
 }
 
@@ -26,67 +26,67 @@ $wherePaiSql = count($wherePai) > 0 ? "WHERE " . implode(" AND ", $wherePai) : "
 // 1. Totaux Prestations
 $stmtPrest = $pdo->prepare("SELECT 
     COUNT(*) as totalDossiers,
-    COALESCE(SUM(totalPrestation), 0) as totalReclame,
+    COALESCE(SUM(total_prestation), 0) as totalReclame,
     COALESCE(SUM(participation), 0) as totalTicketModerateurPrest,
-    COALESCE(SUM(montantARembourser), 0) as totalARembourser,
-    COALESCE(SUM(resteAPayer), 0) as totalResteAPayer,
-    COUNT(CASE WHEN statut = 'Payé' OR resteAPayer <= 0 THEN 1 END) as totalPayeCount,
+    COALESCE(SUM(montant_a_rembourser), 0) as totalARembourser,
+    COALESCE(SUM(reste_a_payer), 0) as totalResteAPayer,
+    COUNT(CASE WHEN statut = 'Payé' OR reste_a_payer <= 0 THEN 1 END) as totalPayeCount,
     COUNT(CASE WHEN statut = 'Rejeté' THEN 1 END) as totalRejeteCount,
-    COUNT(CASE WHEN statut = 'En attente' AND resteAPayer > 0 THEN 1 END) as totalEnAttenteCount,
-    COUNT(CASE WHEN statut = 'Partiellement payé' AND resteAPayer > 0 THEN 1 END) as totalPartielCount
+    COUNT(CASE WHEN statut = 'En attente' AND reste_a_payer > 0 THEN 1 END) as totalEnAttenteCount,
+    COUNT(CASE WHEN statut = 'Partiellement payé' AND reste_a_payer > 0 THEN 1 END) as totalPartielCount
     FROM prestations $wherePrestSql");
 $stmtPrest->execute($paramsPrest);
-$statsPrest = $stmtPrest->fetch();
+$statsPrest = $stmtPrest->fetch() ?: [];
 
 // 2. Totaux Paiements & Règlements
 $stmtPai = $pdo->prepare("SELECT 
     COUNT(*) as totalBordereaux,
-    COALESCE(SUM(totalPaye), 0) as totalPaye,
-    COALESCE(SUM(totalModerateur), 0) as totalModerateur,
-    COALESCE(SUM(totalExclu), 0) as totalExclu,
+    COALESCE(SUM(total_paye), 0) as totalPaye,
+    COALESCE(SUM(total_moderateur), 0) as totalModerateur,
+    COALESCE(SUM(total_exclu), 0) as totalExclu,
     COALESCE(SUM(remise), 0) as totalRemise
     FROM paiements $wherePaiSql");
 $stmtPai->execute($paramsPai);
-$statsPai = $stmtPai->fetch();
+$statsPai = $stmtPai->fetch() ?: [];
 
 // 3. CA par Société
 $stmtCaSoc = $pdo->prepare("SELECT 
     s.nom, 
-    COALESCE(SUM(p.totalPrestation), 0) as total
+    COALESCE(SUM(p.total_prestation), 0) as total
     FROM prestations p
-    LEFT JOIN societes s ON p.societeId = s.id
+    LEFT JOIN societes s ON p.societe_id = s.id
     $wherePrestSql
-    GROUP BY p.societeId, s.nom
+    GROUP BY p.societe_id, s.nom
     ORDER BY total DESC");
 $stmtCaSoc->execute($paramsPrest);
-$caParSociete = $stmtCaSoc->fetchAll();
+$caParSociete = $stmtCaSoc->fetchAll() ?: [];
 
 // 4. Évolution Mensuelle
 $stmtMensuel = $pdo->prepare("SELECT 
     DATE_FORMAT(date, '%Y-%m') as mois,
-    COALESCE(SUM(totalPrestation), 0) as totalPrestations,
-    COALESCE(SUM(totalPaye), 0) as totalRegle
+    COALESCE(SUM(total_prestation), 0) as totalPrestations,
+    COALESCE(SUM(total_paye), 0) as totalRegle
     FROM prestations
     $wherePrestSql
     GROUP BY DATE_FORMAT(date, '%Y-%m')
     ORDER BY mois ASC
     LIMIT 12");
 $stmtMensuel->execute($paramsPrest);
-$evolutionMensuelle = $stmtMensuel->fetchAll();
+$evolutionMensuelle = $stmtMensuel->fetchAll() ?: [];
 
 sendJson([
     'success' => true,
     'data' => [
-        'totalReclame' => (float)$statsPrest['totalReclame'],
-        'totalPaye' => (float)$statsPai['totalPaye'],
-        'totalModerateur' => (float)$statsPai['totalModerateur'],
-        'totalExclu' => (float)$statsPai['totalExclu'],
-        'totalResteAPayer' => (float)$statsPrest['totalResteAPayer'],
-        'totalDossiers' => (int)$statsPrest['totalDossiers'],
-        'totalPayeCount' => (int)$statsPrest['totalPayeCount'],
-        'totalRejeteCount' => (int)$statsPrest['totalRejeteCount'],
-        'totalEnAttenteCount' => (int)$statsPrest['totalEnAttenteCount'],
-        'totalPartielCount' => (int)$statsPrest['totalPartielCount'],
+        'totalReclame' => (float)($statsPrest['totalReclame'] ?? 0),
+        'totalPaye' => (float)($statsPai['totalPaye'] ?? 0),
+        'totalModerateur' => (float)($statsPai['totalModerateur'] ?? 0),
+        'totalExclu' => (float)($statsPai['totalExclu'] ?? 0),
+        'totalResteAPayer' => (float)($statsPrest['totalResteAPayer'] ?? 0),
+        'totalDossiers' => (int)($statsPrest['totalDossiers'] ?? 0),
+        'totalPayeCount' => (int)($statsPrest['totalPayeCount'] ?? 0),
+        'totalRejeteCount' => (int)($statsPrest['totalRejeteCount'] ?? 0),
+        'totalEnAttenteCount' => (int)($statsPrest['totalEnAttenteCount'] ?? 0),
+        'totalPartielCount' => (int)($statsPrest['totalPartielCount'] ?? 0),
         'caParSociete' => array_map(function($row) {
             return ['name' => $row['nom'] ?? 'Société', 'value' => (float)$row['total']];
         }, $caParSociete),
