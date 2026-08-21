@@ -46,7 +46,7 @@ export interface LignePrestation {
   ticketModerateur?: number; // Part modérateur assuré sur cet acte
   montantARembourser?: number; // Net à rembourser sur cet acte
   totalPaye: number; // Montant cumulé payé à travers tous les règlements
-  statut?: 'En attente' | 'Partiellement payé' | 'Payé';
+  statut?: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté';
 }
 
 export interface Prestation {
@@ -109,7 +109,7 @@ export interface Paiement {
   matricule?: string;
   prestationId?: string; // Prescription rattachée principale si mono-adhérent
   prestationNumero?: string;
-  modePaiement: 'Virement bancaire' | 'Chèque' | 'Espèces' | 'Mobile Money';
+  modePaiement: 'Virement bancaire' | 'Chèque' | 'Espèces' | 'Mobile Money' | 'Autre';
   referencePaiement: string;
   totalReclame: number; // Montant brut à payer
   montantAPayer?: number;

@@ -7,6 +7,7 @@ import {
   Edit3, 
   Trash2, 
   FileText, 
+  Receipt,
   CheckCircle, 
   CheckCircle2, 
   Clock, 
@@ -38,7 +39,56 @@ import { Prestation, LignePrestation, Paiement, Societe, Personne, Famille } fro
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPrestationsPdf } from '../utils/recouvrementPdf';
 import { SalfaImportModal } from './SalfaImportModal';
+import { FacturesGroupedTable } from './prestations/FacturesGroupedTable';
+import { FactureDetailModal } from './prestations/FactureDetailModal';
+import { PrestationsStickyFooter } from './prestations/PrestationsStickyFooter';
 import * as XLSX from 'xlsx';
+
+export type PrestationViewMode = 'detaillee' | 'factures';
+
+export type FactureSortField = 
+  | 'numeroFacture' 
+  | 'date' 
+  | 'societe' 
+  | 'nombreAssures' 
+  | 'nombreActes' 
+  | 'totalFacture' 
+  | 'totalTicketMod' 
+  | 'totalARembourser' 
+  | 'totalPaye' 
+  | 'resteAReclamer' 
+  | 'tauxRecouvrement' 
+  | 'statut';
+
+export interface GroupedFacture {
+  numeroFacture: string;
+  societeId: string;
+  societeNom: string;
+  sousSocietes: string[];
+  dates: string[];
+  dateMin: string;
+  dateMax: string;
+  prestations: Prestation[];
+  nombreAssures: number;
+  nombreActes: number;
+  totalFacture: number;
+  totalTicketMod: number;
+  totalARembourser: number;
+  totalPaye: number;
+  totalExclu: number;
+  resteAReclamer: number;
+  tauxRecouvrement: number;
+  statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté';
+  hasMatch: boolean;
+  hasDuplicate: boolean;
+  bordereaux: Array<{
+    bordereau: string;
+    date: string;
+    mode: string;
+    montant: number;
+    nomAgent?: string;
+  }>;
+}
 
 interface PrestationsViewProps {
   prestations: Prestation[];
@@ -83,6 +133,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   isCreateModalOpen,
   setIsCreateModalOpen,
 }) => {
+  // View mode state
+  const [viewMode, setViewMode] = useState<PrestationViewMode>('detaillee');
+
   // Multi-criteria filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -94,13 +147,20 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [reconciliationFilter, setReconciliationFilter] = useState<'ALL' | 'MATCH_DATE_MONTANT' | 'DUPLICATES'>('ALL');
   const [filterRetard3Mois, setFilterRetard3Mois] = useState<boolean>(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+  const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
 
-  // Sorting state
+  // Sorting state for detailed view
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
+  // Sorting state for grouped invoice view
+  const [factureSortField, setFactureSortField] = useState<FactureSortField>('date');
+  const [factureSortDirection, setFactureSortDirection] = useState<SortDirection>('desc');
+
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [expandedFactureRows, setExpandedFactureRows] = useState<Record<string, boolean>>({});
   const [viewingPrestation, setViewingPrestation] = useState<Prestation | null>(null);
+  const [viewingFacture, setViewingFacture] = useState<GroupedFacture | null>(null);
   const [editingPrestation, setEditingPrestation] = useState<Prestation | null>(null);
   const [isSalfaModalOpen, setIsSalfaModalOpen] = useState<boolean>(false);
   const [lineEditContext, setLineEditContext] = useState<{ prestation: Prestation, ligne: LignePrestation } | null>(null);
@@ -366,9 +426,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const totalExclu = Math.max(excluFromPaiements, excluFromLines);
     const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
 
-    const isFullyPaid = totalPaye >= remb && remb > 0;
-    const isPartiallyPaid = totalPaye > 0 && !isFullyPaid;
-    const statut = p.statut === 'Rejeté' || (totalExclu >= remb && remb > 0) ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente';
+    const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && (totalPaye > 0 || remb === 0));
+    const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
+    const isAllExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
+    const statut = p.statut === 'Rejeté' || isAllExcluded 
+      ? 'Rejeté' 
+      : isFullyPaid || resteAPayer <= 0 
+      ? 'Payé' 
+      : isPartiallyPaid 
+      ? 'Partiellement payé' 
+      : 'En attente';
 
     return { tot, mod, remb, totalPaye, totalExclu, resteAPayer, statut };
   };
@@ -427,9 +494,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const lTotalPaye = Math.max(l.totalPaye || 0, lPaidFromP);
     // Deduct exclusions from Reste à Payer since they are rejected
     const lReste = Math.max(0, lARemb - lTotalPaye - lExcluFromP);
-    const isFullyPaid = lTotalPaye >= lARemb && lARemb > 0;
-    const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid;
-    const statut = l.statut || (isFullyPaid ? 'Payé' : (lExcluFromP >= lARemb) ? 'Rejeté' : isPartiallyPaid ? 'Partiellement payé' : 'En attente');
+    const isFullyPaid = (lTotalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && (lTotalPaye > 0 || lARemb === 0));
+    const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid && lReste > 0;
+    const isLineExcluded = (lExcluFromP >= lARemb && lARemb > 0 && lTotalPaye === 0) || l.statut === 'Rejeté';
+    const statut = isLineExcluded
+      ? 'Rejeté'
+      : isFullyPaid || lReste <= 0
+      ? 'Payé'
+      : isPartiallyPaid
+      ? 'Partiellement payé'
+      : (l.statut || 'En attente');
 
     // Check if line matches a settlement line on date and amount
     const pDate = p.date ? p.date.split('T')[0] : '';
@@ -444,21 +518,54 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     return { lBrut, lPart, lARemb, lTotalPaye, lReste, statut, matchingSettlementLine };
   };
 
+  // Status counters for quick badges
+  const statusCounts = useMemo(() => {
+    let paye = 0, partiel = 0, attente = 0, rejete = 0;
+    prestations.forEach(p => {
+      const fin = getPrestationFinancials(p);
+      if (fin.statut === 'Rejeté' || p.statut === 'Rejeté') {
+        rejete++;
+      } else if (fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0) {
+        paye++;
+      } else if (fin.statut === 'Partiellement payé' || p.statut === 'Partiellement payé') {
+        partiel++;
+      } else {
+        attente++;
+      }
+    });
+    return { all: prestations.length, paye, partiel, attente, rejete };
+  }, [prestations, paymentsMap]);
+
   // Filtered and Sorted List
   const filteredAndSortedList = useMemo(() => {
     const list = prestations.filter(p => {
+      // Financials
+      const fin = getPrestationFinancials(p);
+
       // Societe filter
       const matchesSociete = filterSocieteId === 'ALL' || p.societeId === filterSocieteId;
       // Sous-societe filter
       const matchesSousSoc = filterSousSociete === 'ALL' || (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
-      // Status filter
-      const matchesStatus = statusFilter === 'ALL' || p.statut === statusFilter;
+      
+      // Status filter - include all prestations with no remaining balance in 'Payé'
+      let matchesStatus = true;
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'Payé') {
+          matchesStatus = fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0 || (p.resteAPayer !== undefined && p.resteAPayer <= 0);
+        } else if (statusFilter === 'Rejeté') {
+          matchesStatus = fin.statut === 'Rejeté' || p.statut === 'Rejeté';
+        } else if (statusFilter === 'Partiellement payé') {
+          matchesStatus = (fin.statut === 'Partiellement payé' || p.statut === 'Partiellement payé') && fin.resteAPayer > 0;
+        } else if (statusFilter === 'En attente') {
+          matchesStatus = (fin.statut === 'En attente' || p.statut === 'En attente') && fin.totalPaye === 0 && fin.resteAPayer > 0 && fin.statut !== 'Rejeté';
+        } else {
+          matchesStatus = p.statut === statusFilter || fin.statut === statusFilter;
+        }
+      }
+
       // Date range filter
       const matchesDateDebut = !dateDebut || p.date >= dateDebut;
       const matchesDateFin = !dateFin || p.date <= dateFin;
-      
-      // Financials
-      const fin = getPrestationFinancials(p);
 
       // Solde filter
       let matchesSolde = true;
@@ -620,6 +727,287 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     };
   }, [filteredAndSortedList, paymentsMap]);
 
+  // Statistics for selected items (when checkboxes are checked)
+  const selectedStats = useMemo(() => {
+    const isCustom = selectedPrestations.size > 0;
+    const items = isCustom 
+      ? filteredAndSortedList.filter(p => selectedPrestations.has(p.id))
+      : [];
+
+    let count = items.length;
+    let totalFacture = 0;
+    let totalTicketMod = 0;
+    let totalARembourser = 0;
+    let totalPaye = 0;
+    let totalReste = 0;
+
+    items.forEach(p => {
+      const fin = getPrestationFinancials(p);
+      totalFacture += fin.tot;
+      totalTicketMod += fin.mod;
+      totalARembourser += fin.remb;
+      totalPaye += fin.totalPaye;
+      totalReste += fin.resteAPayer;
+    });
+
+    return {
+      isCustom,
+      count,
+      totalFacture,
+      totalTicketMod,
+      totalARembourser,
+      totalPaye,
+      totalReste,
+    };
+  }, [filteredAndSortedList, selectedPrestations, paymentsMap]);
+
+  // Grouped factures aggregation across all filtered prestations
+  const groupedFactures = useMemo(() => {
+    const map = new Map<string, {
+      numeroFacture: string;
+      societeId: string;
+      societeNom: string;
+      sousSocietes: Set<string>;
+      dates: Set<string>;
+      dateMin: string;
+      dateMax: string;
+      prestations: Prestation[];
+      assuresSet: Set<string>;
+      nombreActes: number;
+      totalFacture: number;
+      totalTicketMod: number;
+      totalARembourser: number;
+      totalPaye: number;
+      totalExclu: number;
+      resteAReclamer: number;
+      hasMatch: boolean;
+      hasDuplicate: boolean;
+      bordereaux: Array<{
+        bordereau: string;
+        date: string;
+        mode: string;
+        montant: number;
+        nomAgent?: string;
+      }>;
+    }>();
+
+    filteredAndSortedList.forEach(p => {
+      const num = (p.numeroFacture || 'SANS_NUMERO').trim();
+      const fin = getPrestationFinancials(p);
+      const recInfo = getPrestationReconciliationInfo(p);
+      const personne = getPersonne(p.personneId);
+      const agentName = (p.nomAgent || personne?.nomPrenom || p.matricule || p.personneId || 'Assuré').trim();
+      const socNom = p.societeNom || getSocieteNom(p.societeId);
+      const pDate = p.date ? p.date.split('T')[0] : '';
+      const attBordereaux = paymentsMap.prestBordereauxMap[p.id] || paymentsMap.prestBordereauxMap[p.numeroFacture] || [];
+
+      if (!map.has(num)) {
+        const sousSet = new Set<string>();
+        if (p.sousSociete && p.sousSociete.trim()) sousSet.add(p.sousSociete.trim());
+
+        const datesSet = new Set<string>();
+        if (pDate) datesSet.add(pDate);
+
+        const aSet = new Set<string>();
+        aSet.add(agentName);
+
+        map.set(num, {
+          numeroFacture: num,
+          societeId: p.societeId,
+          societeNom: socNom,
+          sousSocietes: sousSet,
+          dates: datesSet,
+          dateMin: pDate,
+          dateMax: pDate,
+          prestations: [p],
+          assuresSet: aSet,
+          nombreActes: p.lignes?.length || 1,
+          totalFacture: fin.tot,
+          totalTicketMod: fin.mod,
+          totalARembourser: fin.remb,
+          totalPaye: fin.totalPaye,
+          totalExclu: fin.totalExclu,
+          resteAReclamer: fin.resteAPayer,
+          hasMatch: recInfo.hasMatch,
+          hasDuplicate: recInfo.hasDuplicate,
+          bordereaux: [...attBordereaux],
+        });
+      } else {
+        const grp = map.get(num)!;
+        if (p.sousSociete && p.sousSociete.trim()) grp.sousSocietes.add(p.sousSociete.trim());
+        if (pDate) {
+          grp.dates.add(pDate);
+          if (!grp.dateMin || pDate < grp.dateMin) grp.dateMin = pDate;
+          if (!grp.dateMax || pDate > grp.dateMax) grp.dateMax = pDate;
+        }
+        grp.prestations.push(p);
+        grp.assuresSet.add(agentName);
+        grp.nombreActes += (p.lignes?.length || 1);
+        grp.totalFacture += fin.tot;
+        grp.totalTicketMod += fin.mod;
+        grp.totalARembourser += fin.remb;
+        grp.totalPaye += fin.totalPaye;
+        grp.totalExclu += fin.totalExclu;
+        grp.resteAReclamer += fin.resteAPayer;
+        if (recInfo.hasMatch) grp.hasMatch = true;
+        if (recInfo.hasDuplicate) grp.hasDuplicate = true;
+
+        attBordereaux.forEach(b => {
+          if (!grp.bordereaux.some(ex => ex.bordereau === b.bordereau && ex.montant === b.montant && ex.nomAgent === b.nomAgent)) {
+            grp.bordereaux.push(b);
+          }
+        });
+      }
+    });
+
+    const list: GroupedFacture[] = Array.from(map.values()).map(grp => {
+      const isAllRejete = grp.prestations.every(p => {
+        const fin = getPrestationFinancials(p);
+        return fin.statut === 'Rejeté' || p.statut === 'Rejeté';
+      });
+      const isFullyPaid = (grp.totalPaye >= grp.totalARembourser && grp.totalARembourser > 0) || (grp.resteAReclamer <= 0 && (grp.totalPaye > 0 || grp.totalARembourser === 0));
+      const isPartiallyPaid = grp.totalPaye > 0 && !isFullyPaid && grp.resteAReclamer > 0;
+      const statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté' = isAllRejete 
+        ? 'Rejeté' 
+        : isFullyPaid || grp.resteAReclamer <= 0 
+        ? 'Payé' 
+        : isPartiallyPaid 
+        ? 'Partiellement payé' 
+        : 'En attente';
+
+      const tauxRecouvrement = grp.totalARembourser > 0 
+        ? Math.min(100, Math.round((grp.totalPaye / grp.totalARembourser) * 100)) 
+        : (grp.totalPaye > 0 ? 100 : 0);
+
+      return {
+        numeroFacture: grp.numeroFacture,
+        societeId: grp.societeId,
+        societeNom: grp.societeNom,
+        sousSocietes: Array.from(grp.sousSocietes),
+        dates: Array.from(grp.dates),
+        dateMin: grp.dateMin,
+        dateMax: grp.dateMax,
+        prestations: grp.prestations,
+        nombreAssures: grp.assuresSet.size,
+        nombreActes: grp.nombreActes,
+        totalFacture: grp.totalFacture,
+        totalTicketMod: grp.totalTicketMod,
+        totalARembourser: grp.totalARembourser,
+        totalPaye: grp.totalPaye,
+        totalExclu: grp.totalExclu,
+        resteAReclamer: Math.max(0, grp.resteAReclamer),
+        tauxRecouvrement,
+        statut,
+        hasMatch: grp.hasMatch,
+        hasDuplicate: grp.hasDuplicate,
+        bordereaux: grp.bordereaux,
+      };
+    });
+
+    // Sort grouped invoices
+    list.sort((a, b) => {
+      let valA: any = '';
+      let valB: any = '';
+
+      switch (factureSortField) {
+        case 'numeroFacture':
+          valA = a.numeroFacture.toLowerCase();
+          valB = b.numeroFacture.toLowerCase();
+          break;
+        case 'date':
+          valA = a.dateMax || a.dateMin || '';
+          valB = b.dateMax || b.dateMin || '';
+          break;
+        case 'societe':
+          valA = a.societeNom.toLowerCase();
+          valB = b.societeNom.toLowerCase();
+          break;
+        case 'nombreAssures':
+          valA = a.nombreAssures;
+          valB = b.nombreAssures;
+          break;
+        case 'nombreActes':
+          valA = a.nombreActes;
+          valB = b.nombreActes;
+          break;
+        case 'totalFacture':
+          valA = a.totalFacture;
+          valB = b.totalFacture;
+          break;
+        case 'totalTicketMod':
+          valA = a.totalTicketMod;
+          valB = b.totalTicketMod;
+          break;
+        case 'totalARembourser':
+          valA = a.totalARembourser;
+          valB = b.totalARembourser;
+          break;
+        case 'totalPaye':
+          valA = a.totalPaye;
+          valB = b.totalPaye;
+          break;
+        case 'resteAReclamer':
+          valA = a.resteAReclamer;
+          valB = b.resteAReclamer;
+          break;
+        case 'tauxRecouvrement':
+          valA = a.tauxRecouvrement;
+          valB = b.tauxRecouvrement;
+          break;
+        case 'statut':
+          valA = a.statut;
+          valB = b.statut;
+          break;
+        default:
+          valA = a.dateMax || '';
+          valB = b.dateMax || '';
+      }
+
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return factureSortDirection === 'asc' ? valA - valB : valB - valA;
+      }
+      const comp = String(valA).localeCompare(String(valB));
+      return factureSortDirection === 'asc' ? comp : -comp;
+    });
+
+    return list;
+  }, [filteredAndSortedList, paymentsMap, factureSortField, factureSortDirection, societes, personnes]);
+
+  // Aggregated totals across all grouped factures
+  const groupedFacturesTotals = useMemo(() => {
+    return groupedFactures.reduce((acc, f) => {
+      acc.totalFacture += f.totalFacture;
+      acc.totalTicketMod += f.totalTicketMod;
+      acc.totalARembourser += f.totalARembourser;
+      acc.totalPaye += f.totalPaye;
+      acc.resteAReclamer += f.resteAReclamer;
+      acc.totalAssures += f.nombreAssures;
+      acc.totalActes += f.nombreActes;
+      return acc;
+    }, {
+      totalFacture: 0,
+      totalTicketMod: 0,
+      totalARembourser: 0,
+      totalPaye: 0,
+      resteAReclamer: 0,
+      totalAssures: 0,
+      totalActes: 0,
+    });
+  }, [groupedFactures]);
+
+  const handleFactureSort = (field: FactureSortField) => {
+    if (factureSortField === field) {
+      setFactureSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setFactureSortField(field);
+      setFactureSortDirection(field.startsWith('total') || field === 'nombreAssures' || field === 'resteAReclamer' ? 'desc' : 'asc');
+    }
+  };
+
+  const toggleFactureRow = (num: string) => {
+    setExpandedFactureRows(prev => ({ ...prev, [num]: !prev[num] }));
+  };
+
   // Form State for Create/Edit Modal
   const [formData, setFormData] = useState<Partial<Prestation>>({
     numeroFacture: '',
@@ -739,17 +1127,17 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     }
 
     const pers = personnes.find(p => p.id === prestation.personneId);
-    const newId = generateId();
+    const newId = generateId('pai-rej');
     
     const exclusionPaiement: Paiement = {
       id: newId,
       numeroBordereau: `REJET-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
       datePaiement: new Date().toISOString().split('T')[0],
-      dateSaisie: new Date().toISOString(),
+      dateSaisie: new Date().toISOString().split('T')[0],
       societeId: prestation.societeId,
       nomAgent: pers?.nomPrenom || prestation.nomAgent,
       matricule: pers?.matricule || prestation.matricule,
-      modePaiement: 'Virement bancaire',
+      modePaiement: 'Autre',
       referencePaiement: `REJET-${ligne.code || 'ACTE'}`,
       totalReclame: mnt,
       totalPaye: 0,
@@ -757,26 +1145,52 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       totalExclu: mnt,
       remise: 0,
       statut: 'Validé',
-      notes: motif,
+      notes: `Rejet acte ${ligne.code || ''} (${ligne.libelle || ''}) : ${motif}`,
       lignes: [
         {
-          id: generateId(),
+          id: generateId('lp-rej'),
           paiementId: newId,
           lignePrestationId: ligne.id,
           prestationId: prestation.id,
+          prestationNumero: prestation.numeroFacture,
           immatriculation: pers?.matricule || prestation.matricule || '',
           nomBaseAssurance: pers?.nomPrenom || prestation.nomAgent || '',
+          nomAgent: pers?.nomPrenom || prestation.nomAgent || '',
           totalPaye: 0,
+          montantPaye: 0,
           ticketModerateur: 0,
           montantExclu: mnt,
+          montantReclame: mnt,
+          actesPayes: [{ code: ligne.code, libelle: ligne.libelle, montant: 0 }],
           commentaire: motif
         }
       ]
     };
     
-    // update status if fully excluded? 
-    // actually it's dynamically calculated in getLineFinancials when the payment is factored in!
-    onSavePaiement(exclusionPaiement, [prestation]);
+    // Update line status and prestation status
+    const updatedLignes = (prestation.lignes || []).map(l => {
+      if (l.id === ligne.id) {
+        const lARemb = l.montantARembourser ?? (l.totalPrestation - (l.ticketModerateur || 0));
+        const currentPaid = l.totalPaye || 0;
+        const isRejet = currentPaid === 0 && (mnt >= lARemb || (mnt + (paymentsMap.lineExcluMap[l.id] || 0) >= lARemb));
+        return {
+          ...l,
+          statut: isRejet ? ('Rejeté' as const) : l.statut,
+        };
+      }
+      return l;
+    });
+
+    const isAllRejected = updatedLignes.every(l => l.statut === 'Rejeté');
+    const newReste = Math.max(0, (prestation.resteAPayer !== undefined ? prestation.resteAPayer : (prestation.montantARembourser ?? prestation.totalPrestation)) - mnt);
+    const updatedPrestation: Prestation = {
+      ...prestation,
+      resteAPayer: newReste,
+      lignes: updatedLignes,
+      statut: isAllRejected ? ('Rejeté' as const) : newReste <= 0 ? ('Payé' as const) : prestation.statut,
+    };
+
+    onSavePaiement(exclusionPaiement, [updatedPrestation]);
     setLineExcludeContext(null);
   };
 
@@ -854,6 +1268,31 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   };
 
   const handleExportExcel = () => {
+    if (viewMode === 'factures') {
+      const rows = groupedFactures.map(f => ({
+        'N° Facture': f.numeroFacture,
+        'Société': f.societeNom,
+        'Sous-Sociétés': f.sousSocietes.join(', '),
+        'Période': f.dateMin === f.dateMax ? f.dateMin : `${f.dateMin} au ${f.dateMax}`,
+        'Nombre d\'Assurés': f.nombreAssures,
+        'Nombre d\'Actes': f.nombreActes,
+        'Total Brut (Facturé)': f.totalFacture,
+        'Ticket Modérateur': f.totalTicketMod,
+        'Part Assurance (Réclamé)': f.totalARembourser,
+        'Total Perçu (Encaissé)': f.totalPaye,
+        'Restant à Réclamer': f.resteAReclamer,
+        'Taux Recouvrement (%)': `${f.tauxRecouvrement}%`,
+        'Statut': f.statut,
+        'Bordereaux Règlements': f.bordereaux.map(b => b.bordereau).join(', '),
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Synthese_Factures');
+      XLSX.writeFile(workbook, `Synthese_Factures_${new Date().toISOString().split('T')[0]}.xlsx`);
+      return;
+    }
+
     const rows = filteredAndSortedList.map(p => {
       const personne = getPersonne(p.personneId);
       const soc = societes.find(s => s.id === p.societeId);
@@ -896,66 +1335,133 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   };
 
   return (
-    <div id="prestations-view" className="space-y-5">
-      {/* Action Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div id="prestations-view" className="space-y-4 pb-24">
+      {/* Action Header with View Mode Switcher & Streamlined Actions */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Dossiers de Prestations & Soins</h2>
-          <p className="text-xs text-slate-500">
-            Enregistrement des factures médicales, actes de soins et calcul des tickets modérateurs
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-slate-900">Dossiers de Prestations & Factures</h2>
+            
+            {/* View Mode Switcher */}
+            <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('factures')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'factures'
+                    ? 'bg-white text-indigo-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Vue par Facture</span>
+                <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-indigo-100 text-indigo-800 font-bold">
+                  {groupedFactures.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViewMode('detaillee')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'detaillee'
+                    ? 'bg-white text-indigo-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5 text-slate-600" />
+                <span>Vue Détaillée (Dossiers)</span>
+                <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-slate-200 text-slate-700 font-bold">
+                  {filteredAndSortedList.length}
+                </span>
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Suivi des factures médicales, total perçu, restants à réclamer et état des tickets modérateurs
           </p>
         </div>
 
+        {/* Action Buttons */}
         <div className="flex items-center flex-wrap gap-2">
           <button
             id="btn-import-salfa"
             onClick={() => setIsSalfaModalOpen(true)}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 shadow-xs transition cursor-pointer"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 shadow-2xs transition cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
             <span>Importer Facture SALFA</span>
           </button>
 
-          <button
-            id="btn-export-recouvrement-pdf"
-            onClick={handleExportRecouvrementPdf}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 shadow-xs transition cursor-pointer"
-            title="Exporter l'état de recouvrement des factures en retard de plus de 3 mois au format PDF"
-          >
-            <FileText className="w-3.5 h-3.5 text-rose-600" />
-            <span>Export PDF Recouvrement (&gt; 3 mois)</span>
-          </button>
+          {/* Consolidated Export Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(prev => !prev)}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>Exports & Rapports</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
 
-          <button
-            onClick={handleExportRecouvrementPdfSelected}
-            disabled={selectedPrestations.size === 0}
-            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border shadow-xs transition ${
-              selectedPrestations.size > 0 
-                ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 cursor-pointer' 
-                : 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed opacity-50'
-            }`}
-            title="Exporter l'état de recouvrement détaillé des factures sélectionnées avec leurs actes"
-          >
-            <FileText className={`w-3.5 h-3.5 ${selectedPrestations.size > 0 ? 'text-amber-600' : 'text-slate-400'}`} />
-            <span>Export Sélection Détaillé ({selectedPrestations.size})</span>
-          </button>
+            {showExportMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-20" 
+                  onClick={() => setShowExportMenu(false)}
+                />
+                <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30 text-xs animate-in fade-in zoom-in-95 duration-100">
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportExcel(); }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 flex items-center space-x-2 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <div className="font-semibold">Exporter Excel (.xlsx)</div>
+                      <div className="text-[10px] text-slate-400">
+                        {viewMode === 'factures' ? 'Synthèse factures groupées' : 'Lignes et dossiers détaillés'}
+                      </div>
+                    </div>
+                  </button>
 
-          <button
-            id="btn-export-prestations-xlsx"
-            onClick={handleExportExcel}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-xs transition cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-500" />
-            <span>Exporter Excel</span>
-          </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportRecouvrementPdf(); }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 flex items-center space-x-2 cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 text-rose-600" />
+                    <div>
+                      <div className="font-semibold">PDF Recouvrement (&gt; 3 mois)</div>
+                      <div className="text-[10px] text-slate-400">État de relance pour les impayés</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportRecouvrementPdfSelected(); }}
+                    disabled={selectedPrestations.size === 0}
+                    className={`w-full text-left px-3.5 py-2 flex items-center space-x-2 ${
+                      selectedPrestations.size > 0 
+                        ? 'hover:bg-slate-50 text-slate-700 cursor-pointer' 
+                        : 'text-slate-300 cursor-not-allowed'
+                    }`}
+                  >
+                    <FileText className={`w-4 h-4 ${selectedPrestations.size > 0 ? 'text-amber-600' : 'text-slate-300'}`} />
+                    <div>
+                      <div className="font-semibold">PDF Sélection Détaillé ({selectedPrestations.size})</div>
+                      <div className="text-[10px] text-slate-400">Rapport personnalisé avec actes</div>
+                    </div>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
 
           <button
             id="btn-new-prestation"
             onClick={handleOpenCreate}
-            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition cursor-pointer"
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Nouvelle Facture Prestation</span>
+            <span>Nouvelle Facture</span>
           </button>
         </div>
       </div>
@@ -987,22 +1493,27 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Statut :</span>
             {[
-              { key: 'ALL', label: 'Tous' },
-              { key: 'En attente', label: 'En attente' },
-              { key: 'Partiellement payé', label: 'Partiel' },
-              { key: 'Payé', label: 'Payé' },
-              { key: 'Rejeté', label: 'Rejeté' }
+              { key: 'ALL', label: 'Tous', count: statusCounts.all },
+              { key: 'En attente', label: 'En attente', count: statusCounts.attente },
+              { key: 'Partiellement payé', label: 'Partiel', count: statusCounts.partiel },
+              { key: 'Payé', label: 'Totalement payé', count: statusCounts.paye },
+              { key: 'Rejeté', label: 'Rejeté', count: statusCounts.rejete }
             ].map(st => (
               <button
                 key={st.key}
                 onClick={() => setStatusFilter(st.key)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                   statusFilter === st.key
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {st.label}
+                <span>{st.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  statusFilter === st.key ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-700'
+                }`}>
+                  {st.count}
+                </span>
               </button>
             ))}
           </div>
@@ -1185,10 +1696,23 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         )}
       </div>
 
-      {/* Prestations Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+      {/* Table Section: Vue par Facture VS Vue Détaillée */}
+      {viewMode === 'factures' ? (
+        <FacturesGroupedTable
+          factures={groupedFactures}
+          expandedFactureRows={expandedFactureRows}
+          toggleFactureRow={toggleFactureRow}
+          factureSortField={factureSortField}
+          factureSortDirection={factureSortDirection}
+          onSort={handleFactureSort}
+          onViewFacture={(f) => setViewingFacture(f)}
+          getPersonne={getPersonne}
+        />
+      ) : (
+        /* Detailed Dossiers Table */
+        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
               <tr>
                 <th className="py-3 px-2 w-8">
@@ -1644,7 +2168,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 })
               )}
             </tbody>
-            <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
+            <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
               <tr>
                 <td colSpan={6} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
                   Total de la sélection ({stats.count}) :
@@ -1671,9 +2195,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             </tfoot>
           </table>
         </div>
-
-
       </div>
+      )}
+
+      {/* Modal: View Grouped Facture Details */}
+      <FactureDetailModal
+        facture={viewingFacture}
+        onClose={() => setViewingFacture(null)}
+        getPersonne={getPersonne}
+        getSocieteNom={getSocieteNom}
+      />
 
       {/* Modal: View Prestation (FEN_Vision_Prestation) */}
       {viewingPrestation && (
@@ -2206,6 +2737,43 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             newPrests.forEach(p => onSavePrestation(p));
           }
         }}
+      />
+
+      {/* Sticky Bottom Totals Summary Bar - Toujours visible en bas de la fenêtre */}
+      <PrestationsStickyFooter
+        viewMode={viewMode}
+        dossiersCount={viewMode === 'factures' ? groupedFacturesTotals.totalAssures : stats.count}
+        facturesCount={groupedFactures.length}
+        totalFacture={
+          selectedPrestations.size > 0 
+            ? selectedStats.totalFacture 
+            : (viewMode === 'factures' ? groupedFacturesTotals.totalFacture : stats.totalFacture)
+        }
+        totalTicketMod={
+          selectedPrestations.size > 0 
+            ? selectedStats.totalTicketMod 
+            : (viewMode === 'factures' ? groupedFacturesTotals.totalTicketMod : stats.totalTicketMod)
+        }
+        totalARembourser={
+          selectedPrestations.size > 0 
+            ? selectedStats.totalARembourser 
+            : (viewMode === 'factures' ? groupedFacturesTotals.totalARembourser : stats.totalARembourser)
+        }
+        totalPaye={
+          selectedPrestations.size > 0 
+            ? selectedStats.totalPaye 
+            : (viewMode === 'factures' ? groupedFacturesTotals.totalPaye : stats.totalPaye)
+        }
+        totalReste={
+          selectedPrestations.size > 0 
+            ? selectedStats.totalReste 
+            : (viewMode === 'factures' ? groupedFacturesTotals.resteAReclamer : stats.totalReste)
+        }
+        selectedCount={selectedPrestations.size}
+        onSelectAll={() => setSelectedPrestations(new Set(filteredAndSortedList.map(p => p.id)))}
+        onClearSelection={() => setSelectedPrestations(new Set())}
+        onExportPdfSelected={handleExportRecouvrementPdfSelected}
+        onExportExcel={handleExportExcel}
       />
     </div>
   );

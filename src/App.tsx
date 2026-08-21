@@ -108,8 +108,29 @@ export function App() {
 
   // Handlers for Paiements
   const handleSavePaiement = (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
-    setPaiements(prev => [newPaiement, ...prev]);
-    setPrestations(updatedPrestations);
+    setPaiements(prev => {
+      const idx = prev.findIndex(p => p.id === newPaiement.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = newPaiement;
+        return copy;
+      }
+      return [newPaiement, ...prev];
+    });
+
+    if (updatedPrestations && updatedPrestations.length > 0) {
+      setPrestations(prev => {
+        const updatedMap = new Map(updatedPrestations.map(p => [p.id, p]));
+        const result = prev.map(p => updatedMap.has(p.id) ? updatedMap.get(p.id)! : p);
+        // Include any newly auto-generated prestations not already in state
+        updatedPrestations.forEach(up => {
+          if (!prev.some(p => p.id === up.id)) {
+            result.unshift(up);
+          }
+        });
+        return result;
+      });
+    }
   };
 
   const handleDeletePaiement = (id: string) => {

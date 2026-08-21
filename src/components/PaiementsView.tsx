@@ -37,6 +37,7 @@ import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from 
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
+import { PaiementsStickyFooter } from './paiements/PaiementsStickyFooter';
 import * as XLSX from 'xlsx';
 
 type PaiementSortField = 'datePaiement' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
@@ -135,6 +136,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+  const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
 
   const toggleRow = (id: string) => {
     setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -981,79 +983,115 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   };
 
   return (
-    <div id="paiements-view" className="space-y-5">
-      {/* View Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-4 pb-20">
+      {/* View Header with View Mode Switcher & Streamlined Actions */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Saisie & Règlements d'Assurance</h2>
-          <p className="text-xs text-slate-500">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-slate-900">Saisie & Règlements d'Assurance</h2>
+            
+            {/* View Mode Switcher */}
+            <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
+              <button
+                id="tab-view-bordereaux"
+                type="button"
+                onClick={() => setViewMode('bordereaux')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'bordereaux'
+                    ? 'bg-white text-emerald-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Vue par Bordereau</span>
+                <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                  {filteredAndSortedPaiements.length}
+                </span>
+              </button>
+
+              <button
+                id="tab-view-groupes"
+                type="button"
+                onClick={() => setViewMode('groupes_actes')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'groupes_actes'
+                    ? 'bg-white text-emerald-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Regroupé par Patient + Date + Actes</span>
+                <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                  {groupedPaymentActs.length}
+                </span>
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
             Bordereaux de paiements, lettrage des prescriptions et regroupement des soins par assuré, date et mêmes actes
           </p>
         </div>
 
         <div className="flex items-center flex-wrap gap-2">
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button
-              id="tab-view-bordereaux"
-              type="button"
-              onClick={() => setViewMode('bordereaux')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                viewMode === 'bordereaux'
-                  ? 'bg-white text-emerald-800 shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Vue par Bordereau ({filteredAndSortedPaiements.length})</span>
-            </button>
-            <button
-              id="tab-view-groupes"
-              type="button"
-              onClick={() => setViewMode('groupes_actes')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                viewMode === 'groupes_actes'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Regroupé par Patient + Date + Actes ({groupedPaymentActs.length})</span>
-            </button>
-          </div>
-
           <button
             id="btn-import-decompte"
             onClick={() => setIsDecompteModalOpen(true)}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-xs transition cursor-pointer"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-2xs transition cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             <span>Importer Décompte</span>
           </button>
 
-          <button
-            id="btn-export-paiements-recouvrement-pdf"
-            onClick={handleExportRecouvrementPdf}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 shadow-xs transition cursor-pointer"
-            title="Exporter l'état de recouvrement des créances échues (&gt; 3 mois) au format PDF"
-          >
-            <FileText className="w-3.5 h-3.5 text-rose-600" />
-            <span>Export PDF Recouvrement (&gt; 3 mois)</span>
-          </button>
+          {/* Consolidated Export Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(prev => !prev)}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>Exports & Rapports</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
 
-          <button
-            id="btn-export-paiements-xlsx"
-            onClick={handleExportExcel}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-xs transition cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-500" />
-            <span>Exporter {viewMode === 'groupes_actes' ? 'Actes Groupés' : 'Bordereaux'} Excel</span>
-          </button>
+            {showExportMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-20" 
+                  onClick={() => setShowExportMenu(false)}
+                />
+                <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30 text-xs animate-in fade-in zoom-in-95 duration-100">
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportExcel(); }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 flex items-center space-x-2 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <div className="font-semibold">Exporter Excel (.xlsx)</div>
+                      <div className="text-[10px] text-slate-400">
+                        {viewMode === 'groupes_actes' ? 'Actes groupés par assuré et date' : 'Bordereaux de règlements complets'}
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportRecouvrementPdf(); }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 flex items-center space-x-2 cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 text-rose-600" />
+                    <div>
+                      <div className="font-semibold">PDF Recouvrement (&gt; 3 mois)</div>
+                      <div className="text-[10px] text-slate-400">État de relance pour les impayés</div>
+                    </div>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
 
           <button
             id="btn-new-paiement"
             onClick={handleOpenCreateModal}
-            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Nouveau Règlement</span>
@@ -1669,7 +1707,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   })
                 )}
               </tbody>
-              <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
+              <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
                 <tr>
                   <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
                     Total de la sélection ({stats.count}) :
@@ -1979,7 +2017,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                 const totExclu = groupedPaymentActs.reduce((s, g) => s + g.totalExclu, 0);
 
                 return (
-                  <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-200 text-slate-800 text-[11px]">
+                  <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
                     <tr>
                       <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
                         Total de la sélection ({groupedPaymentActs.length}) :
@@ -2461,6 +2499,17 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             onSavePaiement(newPaiement, updatedPrestations);
           }
         }}
+      />
+
+      {/* Sticky Bottom Summary Bar */}
+      <PaiementsStickyFooter
+        viewMode={viewMode === 'bordereaux' ? 'bordereaux' : 'groupes'}
+        count={viewMode === 'bordereaux' ? filteredAndSortedPaiements.length : groupedPaymentActs.length}
+        totalReclame={stats.totalReclame}
+        totalModerateur={stats.totalModerateur}
+        totalPaye={stats.totalPaye}
+        totalExclu={stats.totalExclu}
+        onExportExcel={handleExportExcel}
       />
     </div>
   );

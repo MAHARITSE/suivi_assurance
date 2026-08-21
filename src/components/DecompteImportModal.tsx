@@ -801,13 +801,35 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           body: formData,
         });
 
-        const contentType = response.headers.get('content-type') || '';
         let json: any = null;
-        if (contentType.includes('application/json')) {
-          json = await response.json();
-        } else {
-          console.warn('Non-JSON response from /api/parse-invoice');
-          throw new Error('Réponse invalide du serveur (non-JSON). Veuillez vérifier le fichier.');
+        try {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            json = await response.json();
+          } else {
+            const rawText = await response.text();
+            try {
+              json = JSON.parse(rawText);
+            } catch {
+              // Non-JSON
+            }
+          }
+        } catch {
+          // Ignore parsing error
+        }
+
+        if (!response.ok || !json || json.success === false) {
+          const serverErr = json?.error;
+          if (serverErr) {
+            throw new Error(serverErr);
+          }
+          if (response.status === 413) {
+            throw new Error("Le fichier est trop volumineux (taille maximale: 25 Mo).");
+          }
+          if (response.status === 504 || response.status === 408) {
+            throw new Error("Délai de traitement dépassé par le serveur. Veuillez réessayer ou utiliser l'importation par exemple de décompte.");
+          }
+          throw new Error("L'extraction automatique du décompte n'a pas pu aboutir. Vérifiez que la clé GEMINI_API_KEY est configurée ou utilisez les exemples de décompte prédéfinis.");
         }
 
         const data: ParsedFactureAssurance = json?.data || json;
@@ -818,8 +840,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         processLoadedDocument(data);
       }
     } catch (err: any) {
-      console.warn('Decompte OCR error:', err);
-      setErrorMessage(err.message || 'Erreur lors de l\'extraction des données du document. Assurez-vous que l\'image ou le PDF est lisible.');
+      console.warn('Decompte extraction error:', err);
+      setErrorMessage(err.message || 'Erreur lors de l\'extraction des données du document. Assurez-vous que le document est lisible.');
       setIsProcessing(false);
     }
   };
@@ -962,22 +984,33 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           const prest = updatedPrestations[pIndex];
           const updatedLignes = prest.lignes.map(l => {
             if (l.id === targetLigneId) {
+              const newTotalPaye = (l.totalPaye || 0) + row.netAPayer;
+              const lARemb = l.montantARembourser ?? (l.totalPrestation - (l.ticketModerateur || 0));
+              const isLigneRejetee = (row.montantExclu || 0) >= lARemb && newTotalPaye === 0;
+              const isLigneFullyCovered = (newTotalPaye + (row.montantExclu || 0)) >= lARemb || newTotalPaye >= lARemb;
               return {
                 ...l,
-                totalPaye: (l.totalPaye || 0) + row.netAPayer
+                totalPaye: newTotalPaye,
+                statut: isLigneRejetee ? ('Rejeté' as const) : isLigneFullyCovered ? ('Payé' as const) : newTotalPaye > 0 ? ('Partiellement payé' as const) : l.statut
               };
             }
             return l;
           });
 
-          const totalPrestationVal = prest.totalPrestation;
+          const totalPrestationVal = prest.montantTotal ?? prest.totalPrestation;
+          const partVal = prest.ticketModerateur ?? prest.participation ?? 0;
+          const rembVal = prest.montantARembourser ?? Math.max(0, totalPrestationVal - partVal);
           const totalPaidAll = updatedLignes.reduce((sum, l) => sum + (l.totalPaye || 0), 0);
-          const isFullyPaid = totalPaidAll >= (totalPrestationVal - prest.participation);
+          const newReste = Math.max(0, rembVal - totalPaidAll - (row.montantExclu || 0));
+          const isAllRejected = updatedLignes.every(l => l.statut === 'Rejeté');
+          const isFullyPaid = totalPaidAll >= rembVal || newReste <= 0;
 
           updatedPrestations[pIndex] = {
             ...prest,
+            totalPaye: totalPaidAll,
+            resteAPayer: newReste,
             lignes: updatedLignes,
-            statut: isFullyPaid ? 'Payé' : 'Partiellement payé'
+            statut: isAllRejected ? 'Rejeté' : isFullyPaid ? 'Payé' : totalPaidAll > 0 ? 'Partiellement payé' : prest.statut
           };
         }
       } else {
@@ -1002,6 +1035,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           createdPersonnes.push(matchedPer);
         }
 
+        const isAutoRejet = row.netAPayer === 0 && row.montantExclu > 0;
+
         const autoPrest: Prestation = {
           id: targetPrestationId,
           numeroFacture: `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
@@ -1016,10 +1051,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           montantTotal: row.montantBrut,
           participation: row.participation,
           ticketModerateur: row.participation,
-          montantARembourser: row.netAPayer,
+          montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
           totalPaye: row.netAPayer,
           resteAPayer: 0,
-          statut: 'Payé',
+          statut: isAutoRejet ? 'Rejeté' : 'Payé',
           dateCreation: new Date().toISOString().split('T')[0],
           commentaires: `Prestation générée lors du règlement ${parsedDoc.numeroBordereau || ''}`,
           lignes: [
@@ -1030,9 +1065,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               libelle: row.actLibelle,
               totalPrestation: row.montantBrut,
               ticketModerateur: row.participation,
-              montantARembourser: row.netAPayer,
+              montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
               totalPaye: row.netAPayer,
-              statut: 'Payé' as const
+              statut: isAutoRejet ? ('Rejeté' as const) : ('Payé' as const)
             }
           ]
         };

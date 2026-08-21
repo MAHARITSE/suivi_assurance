@@ -67,6 +67,7 @@ async function startServer() {
 
   // API: Parse Invoice PDF / Image / Text
   app.post('/api/parse-invoice', upload.single('file'), async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
       const file = req.file;
       const { text, sampleType, targetOrganism, docType, insuranceType } = req.body;
@@ -113,8 +114,15 @@ async function startServer() {
 
       const ai = getGenAI();
 
+      if (!ai) {
+        return res.status(400).json({
+          success: false,
+          error: "Clé API Gemini non configurée. Pour extraire automatiquement des données depuis des fichiers PDF scannés ou images, veuillez configurer la variable GEMINI_API_KEY dans Paramètres > Secrets. Vous pouvez également utiliser l'importation par fichier Excel (.xlsx / .csv) ou l'exemple de facture SALFA prêt à l'emploi."
+        });
+      }
+
       // If Gemini is available and a file (PDF or Image) was uploaded
-      if (ai && file) {
+      if (file) {
         try {
           const mimeType = file.mimetype || (file.originalname.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
           const base64Data = file.buffer.toString('base64');
@@ -127,7 +135,8 @@ async function startServer() {
 
           const prompt = `Tu es un expert comptable et actuaire spécialisé dans l'analyse de factures et décomptes de règlement d'assurance santé à Madagascar (spécifiquement MCI CARE, ASCOMA / Gras Savoye, BSA / ASK GS, ARO, AXA, etc.).${organismGuidance}
 
-Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte de règlement tiers payant ou relevé de remboursements) et extrait rigoureusement TOUTES les informations et lignes de soins dans une structure JSON valide selon le schéma suivant.\n!!! TRÈS IMPORTANT !!! LE DOCUMENT EST UN PDF MULTI-PAGES. TU DOIS IMPÉRATIVEMENT EXTRAIRE LES LIGNES DE TOUTES LES PAGES JUSQU'AU TOTAL FINAL. NE T'ARRÊTE PAS À LA PAGE 1 :
+Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte de règlement tiers payant ou relevé de remboursements) et extrait rigoureusement TOUTES les informations et lignes de soins dans une structure JSON valide selon le schéma suivant.
+!!! TRÈS IMPORTANT !!! LE DOCUMENT EST UN PDF MULTI-PAGES. TU DOIS IMPÉRATIVEMENT EXTRAIRE LES LIGNES DE TOUTES LES PAGES JUSQU'AU TOTAL FINAL. NE T'ARRÊTE PAS À LA PAGE 1 :
 
 {
   "documentType": "facture" ou "decompte",
@@ -176,7 +185,7 @@ Analyse minutieusement ce document (PDF ou Image de facture médicale, décompte
 
 RÈGLES CRUCIALES D'EXTRACTION :
 1. EXTRACTION MULTI-PAGES OBLIGATOIRE : Ce document contient souvent plusieurs pages. Extrais ABSOLUMENT TOUTES les lignes de TOUTES LES PAGES jusqu'à la fin. Il est normal d'avoir plus de 100 lignes. N'abrège jamais le tableau !
-2. Colonne "Acte médicale/Prix" (Multiples Actes) : Un montant ou patient peut avoir PLUSIEURS actes médicaux sous la colonne "Acte médicale/Prix" (ex: "DENT : 50 000,00 \n MEDIC : 12 000,00" ou "CONS : 20 000,00 / MEDIC : 26 200,00 / LABO : 3 000,00"). Extrais TOUS les sous-actes distinctement dans la liste "actes", chacun avec son code (ex: CONS, MEDIC/PHAR, LABO, DENT, HOSP, SOINS, ECHO, STOCK), son libellé et son montant individuel.
+2. Colonne "Acte médicale/Prix" (Multiples Actes) : Un montant ou patient peut avoir PLUSIEURS actes médicaux sous la colonne "Acte médicale/Prix" (ex: "DENT : 50 000,00 \\n MEDIC : 12 000,00" ou "CONS : 20 000,00 / MEDIC : 26 200,00 / LABO : 3 000,00"). Extrais TOUS les sous-actes distinctement dans la liste "actes", chacun avec son code (ex: CONS, MEDIC/PHAR, LABO, DENT, HOSP, SOINS, ECHO, STOCK), son libellé et son montant individuel.
 3. Analyse des parenthèses et sous-sociétés : Les mentions entre parenthèses dans la colonne client ou assuré indiquent des **sous-sociétés** (ex: "(BFV)", "(ACCES BANQUES)", "(BAOBAB BANQUE)", "(SIPEM)", "(CAISSE D'ÉPARGNE)", "(ORANGE)", "(WILDLIFE CONSERVATION)", "(ADRA MADAGASCAR)"). Place-les impérativement dans le champ "sousSociete".
 4. Dates : Convertis TOUTES les dates au format ISO 'YYYY-MM-DD' (ex: 21/04/2026 -> 2026-04-21, 01/04/26 -> 2026-04-01).
 5. Codes actes :
@@ -256,11 +265,9 @@ RÈGLES CRUCIALES D'EXTRACTION :
 
           let responseText = '';
           const candidateModels = [
-            'gemini-3.7-flash', 
-            'gemini-3.1-pro-preview', 
             'gemini-2.5-flash', 
-            'gemini-3.1-flash-lite', 
-            'gemini-flash-latest'
+            'gemini-3.7-flash', 
+            'gemini-2.5-pro'
           ];
           const errors: string[] = [];
 
@@ -292,7 +299,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
               const is503 = errMsg.includes('503') || mErr?.status === 'UNAVAILABLE' || mErr?.status === 503;
               console.warn(`Model ${modelName} attempt failed (503=${is503}):`, errMsg);
               if (is503) {
-                await waitMs(1000); // Wait slightly longer for demand spikes
+                await waitMs(1000);
               }
             }
           }
@@ -349,12 +356,12 @@ RÈGLES CRUCIALES D'EXTRACTION :
             if (hasQuotaOrDemandErr) {
               return res.status(429).json({
                 success: false,
-                error: "Les services d'analyse IA de Google (Gemini) rencontrent actuellement une forte demande ou une limite de quota temporaire. Veuillez patienter 10 à 15 secondes puis réessayer, ou utilisez les exemples de démonstration préchargés si le problème persiste."
+                error: "Les services d'analyse IA de Google (Gemini) rencontrent actuellement une forte demande ou une limite temporaire. Veuillez patienter 10 secondes et réessayer, ou importez vos données via le format Excel (.xlsx) ou le modèle SALFA d'exemple."
               });
             }
             return res.status(500).json({
               success: false,
-              error: `L'extraction IA de la facture a échoué. Détails des tentatives : ${errors.join(' | ')}`
+              error: `L'extraction automatique du document a échoué (${errors[0]}). Vous pouvez importer directement votre fichier via le modèle Excel ou utiliser l'exemple de facture SALFA.`
             });
           }
         } catch (geminiErr: any) {
@@ -364,7 +371,7 @@ RÈGLES CRUCIALES D'EXTRACTION :
 
       return res.status(500).json({ 
         success: false, 
-        error: ai ? "L'extraction par Intelligence Artificielle a échoué ou aucun texte n'a pu être extrait." : "Clé API Gemini non configurée. Veuillez ajouter votre clé GEMINI_API_KEY dans l'onglet Paramètres > Secrets pour activer l'extraction automatique." 
+        error: "L'extraction du document n'a pas pu aboutir. Veuillez vérifier la lisibilité du fichier, utiliser le format Excel (.xlsx / .csv) ou charger la facture SALFA de démonstration." 
       });
 
     } catch (err: any) {

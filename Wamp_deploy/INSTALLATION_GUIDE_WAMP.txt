@@ -1,0 +1,35 @@
+========================================================================
+GUIDE D'INSTALLATION EXPRESS - WAMP SERVER + MYSQL
+Application : Suivi des Prestations et Règlements d'Assurance
+========================================================================
+
+ETAPE 1 : COPIE DES FICHIERS
+------------------------------------------------------------------------
+1. Allez dans le dossier "www" de votre WAMP :
+   C:\wamp64\www\ (ou C:\wamp\www\)
+
+2. Créez un sous-dossier nomme :
+   suivi_assurance
+
+3. Copiez TOUT le contenu du dossier "Wamp_deploy" vers :
+   C:\wamp64\www\suivi_assurance\
+
+
+ETAPE 2 : IMPORTATION MYSQL PHPMYADMIN
+------------------------------------------------------------------------
+1. Demarrez WampServer (icone verte dans la barre des taches).
+2. Ouvrez votre navigateur Web a l'adresse :
+   http://localhost/phpmyadmin
+3. Cliquez sur l'onglet "Importer".
+4. Selectionnez le fichier :
+   C:\wamp64\www\suivi_assurance\database.sql
+5. Cliquez sur "Executer" en bas.
+
+
+ETAPE 3 : UTILISATION
+------------------------------------------------------------------------
+Ouvrez simplement votre navigateur sur :
+http://localhost/suivi_assurance
+
+Tout est pret et fonctionnel avec MySQL !
+========================================================================

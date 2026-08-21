@@ -293,19 +293,35 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           body: formData,
         });
 
-        const contentType = response.headers.get('content-type') || '';
         let json: any = null;
-
-        if (contentType.includes('application/json')) {
-          json = await response.json();
-        } else {
-          const textResp = await response.text();
-          console.warn('Réponse non-JSON du serveur:', textResp.substring(0, 150));
-          throw new Error('Réponse serveur invalide (non-JSON). Veuillez vérifier le fichier.');
+        try {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            json = await response.json();
+          } else {
+            const rawText = await response.text();
+            try {
+              json = JSON.parse(rawText);
+            } catch {
+              // Non-JSON
+            }
+          }
+        } catch {
+          // Ignore parsing error
         }
 
-        if (json && json.success === false) {
-          throw new Error(json.error || "L'extraction IA de la facture a échoué. Veuillez vérifier vos clés API.");
+        if (!response.ok || !json || json.success === false) {
+          const serverErr = json?.error;
+          if (serverErr) {
+            throw new Error(serverErr);
+          }
+          if (response.status === 413) {
+            throw new Error("Le fichier est trop volumineux (taille maximale: 25 Mo).");
+          }
+          if (response.status === 504 || response.status === 408) {
+            throw new Error("Délai d'analyse dépassé par le serveur. Veuillez réessayer ou privilégier l'importation via fichier Excel (.xlsx).");
+          }
+          throw new Error("L'extraction automatique du document PDF/Image n'a pas pu aboutir. Veuillez vérifier que votre clé GEMINI_API_KEY est configurée, ou utilisez l'import Excel / l'exemple SALFA.");
         }
 
         const data: ParsedFactureAssurance = json?.data || json;
@@ -320,7 +336,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         setIsProcessing(false);
       }
     } catch (err: any) {
-      console.error('Erreur analyse PDF:', err);
+      console.error('Erreur analyse document:', err);
       setErrorMessage(err.message || "Erreur lors de l'analyse du document.");
       setIsProcessing(false);
     }
@@ -578,9 +594,42 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           </div>
 
           {errorMessage && (
-            <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800">
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
-              <span>{errorMessage}</span>
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-800 shadow-2xs space-y-2.5">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                <span className="font-medium leading-relaxed">{errorMessage}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-rose-200/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMessage(null);
+                    setImportMode('excel');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-semibold shadow-xs transition"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  <span>Utiliser le Mode Excel (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMessage(null);
+                    handleLoadSample();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 font-semibold transition"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  <span>Charger l'exemple SALFA</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage(null)}
+                  className="ml-auto text-xs text-slate-500 hover:text-slate-700 underline"
+                >
+                  Fermer
+                </button>
+              </div>
             </div>
           )}
 
