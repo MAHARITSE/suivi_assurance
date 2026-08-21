@@ -73,10 +73,10 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
   });
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-      <div className="overflow-x-auto">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
+      <div className="overflow-auto flex-1">
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
             <tr>
               <th className="py-3 px-2 w-8"></th>
 
@@ -479,32 +479,40 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
               })
             )}
           </tbody>
-          <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
-            <tr>
-              <td colSpan={5} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
-                Total Synthèse Factures ({factures.length} factures / {totals.totalAssures} assurés) :
-              </td>
-              <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900 font-mono">
-                {formatMoney(totals.totalFacture)}
-              </td>
-              <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap font-mono">
-                {formatMoney(totals.totalTicketMod)}
-              </td>
-              <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap font-mono">
-                {formatMoney(totals.totalARembourser)}
-              </td>
-              <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap font-mono">
-                {formatMoney(totals.totalPaye)}
-              </td>
-              <td className="py-3 px-3 text-right whitespace-nowrap font-mono">
-                <span className={totals.resteAReclamer > 0 ? 'text-rose-700' : 'text-slate-400'}>
-                  {formatMoney(totals.resteAReclamer)}
-                </span>
-              </td>
-              <td colSpan={2} className="py-3 px-3"></td>
-            </tr>
-          </tfoot>
         </table>
+      </div>
+
+      {/* Bar de Totaux Généraux toujours visible en bas de la page */}
+      <div className="sticky bottom-0 z-20 bg-slate-900 text-white border-t border-slate-800 px-4 py-3 shadow-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2 font-bold uppercase text-slate-300 tracking-wider">
+          <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+          <span>Total Synthèse Factures ({factures.length} factures / {totals.totalAssures} assurés)</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 sm:gap-6 font-mono font-bold">
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-sans text-slate-400 block font-normal">Total Brut</span>
+            <span className="text-slate-100">{formatMoney(totals.totalFacture)}</span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-sans text-amber-400 block font-normal">Ticket Mod.</span>
+            <span className="text-amber-300">{formatMoney(totals.totalTicketMod)}</span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-sans text-indigo-300 block font-normal">Part Assurance</span>
+            <span className="text-indigo-200">{formatMoney(totals.totalARembourser)}</span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-sans text-emerald-400 block font-normal">Total Perçu</span>
+            <span className="text-emerald-400">{formatMoney(totals.totalPaye)}</span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-sans text-rose-400 block font-normal">Reste à Réclamer</span>
+            <span className={totals.resteAReclamer > 0 ? 'text-rose-400 font-extrabold' : 'text-slate-400'}>
+              {formatMoney(totals.resteAReclamer)}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );

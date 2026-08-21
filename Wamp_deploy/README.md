@@ -8,7 +8,7 @@ Ce dossier `Wamp_deploy` contient l'ensemble des fichiers nécessaires pour inst
 
 | Fichier / Dossier | Rôle & Description |
 | :--- | :--- |
-| **`database.sql`** | Script SQL complet créant la base `suivi_assurance` avec toutes les tables (`societes`, `personnes`, `familles`, `actes`, `prestations`, `prestation_lignes`, `paiements`, `paiement_lignes`) et les données initiales de référence. |
+| **`schema.sql`** | Script SQL complet créant la base `suivi_assurance_salfa` avec toutes les tables (`societes`, `personnes`, `familles`, `prestations`, `lignes_prestation`, `paiements`, `lignes_paiement`). |
 | **`config.php`** | Fichier de configuration de la connexion MySQL (hôte `localhost`, port `3306`, utilisateur `root`, mot de passe vide par défaut). |
 | **`index.php`** | Interface principale complète, responsive et moderne pour la gestion quotidienne. |
 | **`app.js`** | Moteur client interactif communiquant avec les APIs REST PHP. |
@@ -37,9 +37,9 @@ Ce dossier `Wamp_deploy` contient l'ensemble des fichiers nécessaires pour inst
    ```
 3. Connectez-vous (Utilisateur : `root`, Mot de passe : *(laisser vide)*, Serveur : `MySQL` ou `MariaDB`).
 4. Cliquez sur l'onglet **Importer**.
-5. Cliquez sur **Parcourir** et sélectionnez le fichier `database.sql` situé dans `C:\wamp64\www\suivi_assurance\database.sql`.
+5. Cliquez sur **Parcourir** et sélectionnez le fichier `schema.sql` situé dans `C:\wamp64\www\suivi_assurance\schema.sql`.
 6. Cliquez sur le bouton **Exécuter** en bas de la page.
-> *Note : La base `suivi_assurance` et toutes les tables seront automatiquement créées et alimentées avec les données de test (ASCOMA, MCI CARE, BSA, factures et actes).*
+> *Note : La base `suivi_assurance_salfa` et toutes les tables seront automatiquement créées.*
 
 ---
 

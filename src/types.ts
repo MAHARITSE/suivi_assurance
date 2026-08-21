@@ -192,5 +192,55 @@ export type ActiveTab =
   | 'societes'
   | 'personnes'
   | 'familles'
-  | 'etats';
+  | 'etats'
+  | 'entete';
+
+export interface EnteteConfig {
+  etablissement: string;
+  sousTitre: string;
+  departement: string;
+  adresse: string;
+  telephone: string;
+  email: string;
+  nifStat: string;
+  villePays: string;
+  logoUrl?: string;
+  fontFamily: 'helvetica' | 'times' | 'courier';
+  titreTaille: number;
+  sousTitreTaille: number;
+  corpsTaille: number;
+  formePolice: 'bold' | 'normal' | 'italic' | 'bolditalic';
+  majusculesTitre: boolean;
+  alignement: 'left' | 'center' | 'between';
+  themeCouleur: 'slate' | 'rouge' | 'emeraude' | 'indigo' | 'sombre' | 'custom';
+  couleurPrimaire: string;
+  couleurAccent: string;
+  styleSeparateur: 'bandeau' | 'ligne_simple' | 'double_ligne' | 'aucun';
+  textePiedDePage: string;
+  afficherDateGeneration: boolean;
+}
+
+export const defaultEnteteConfig: EnteteConfig = {
+  etablissement: 'ÉTABLISSEMENT MÉDICAL SALFA',
+  sousTitre: 'Service de Facturation & Recouvrement Tiers-Payant',
+  departement: 'Pôle Gestion Assurances & Créances Santé',
+  adresse: 'Lot IVK 45, Ambohibao - Antananarivo 101',
+  telephone: '+261 20 22 200 00 / +261 34 00 000 00',
+  email: 'contact@salfa.mg / facturation@salfa.mg',
+  nifStat: 'NIF: 3000123456 • STAT: 86101 11 2005 0 00123',
+  villePays: 'Antananarivo, Madagascar',
+  fontFamily: 'helvetica',
+  titreTaille: 15,
+  sousTitreTaille: 9,
+  corpsTaille: 8,
+  formePolice: 'bold',
+  majusculesTitre: true,
+  alignement: 'between',
+  themeCouleur: 'slate',
+  couleurPrimaire: '#1e293b',
+  couleurAccent: '#b91c1c',
+  styleSeparateur: 'bandeau',
+  textePiedDePage: 'Document Confidentiel de Recouvrement et Suivi des Assurances • SALFA',
+  afficherDateGeneration: true,
+};
 

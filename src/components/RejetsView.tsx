@@ -78,6 +78,36 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
     note?: string;
   }>>({});
 
+  // Dismissed/hidden rejets set (including FA-04/MCI/26-030 requested by user)
+  const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('suivi_rejets_dismissed_ids');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return ['FA-04/MCI/26-030'];
+  });
+  const [showDismissed, setShowDismissed] = useState<boolean>(false);
+
+  const handleDismissRejet = (id: string, numFacture: string) => {
+    setDismissedIds(prev => {
+      const updated = Array.from(new Set([...prev, id, numFacture]));
+      try {
+        localStorage.setItem('suivi_rejets_dismissed_ids', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const handleRestoreRejet = (id: string, numFacture: string) => {
+    setDismissedIds(prev => {
+      const updated = prev.filter(item => item !== id && item !== numFacture);
+      try {
+        localStorage.setItem('suivi_rejets_dismissed_ids', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
   // Modal edit contestation
   const [selectedRejetModal, setSelectedRejetModal] = useState<RejetDetail | null>(null);
   const [modalStatut, setModalStatut] = useState<'À traiter' | 'En contestation' | 'Régularisé' | 'Rejet définitif'>('En contestation');
@@ -228,6 +258,17 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
   // 2. Filtrage des rejets
   const filteredRejets = useMemo(() => {
     return allRejets.filter((item) => {
+      // Exclure spécifiquement les rejets masqués (ex: FA-04/MCI/26-030)
+      const isDismissed = dismissedIds.includes(item.id) || 
+                          dismissedIds.includes(item.numeroFacture) || 
+                          item.numeroFacture === 'FA-04/MCI/26-030';
+      if (!showDismissed && isDismissed) {
+        return false;
+      }
+      if (showDismissed && !isDismissed) {
+        return false;
+      }
+
       // Filtre Tiers-Payeur Global
       const effectiveSocFilter = selectedSocieteId !== 'ALL' ? selectedSocieteId : filterSociete;
       const matchesSoc = effectiveSocFilter === 'ALL' || item.societeId === effectiveSocFilter;
@@ -764,14 +805,32 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
                       </td>
 
                       {/* Action */}
-                      <td className="py-3 px-3 text-center">
+                      <td className="py-3 px-3 text-center space-x-1.5 whitespace-nowrap">
                         <button
                           onClick={() => handleOpenEditModal(item)}
                           className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold text-[11px] transition-colors cursor-pointer shadow-2xs"
+                          title="Modifier le statut de contestation"
                         >
                           <Edit3 className="w-3 h-3 inline mr-1 text-slate-500" />
                           Traiter
                         </button>
+                        {showDismissed ? (
+                          <button
+                            onClick={() => handleRestoreRejet(item.id, item.numeroFacture)}
+                            className="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 font-semibold text-[11px] transition-colors cursor-pointer shadow-2xs"
+                            title="Restaurer ce rejet dans la liste active"
+                          >
+                            Restaurer
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleDismissRejet(item.id, item.numeroFacture)}
+                            className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 font-semibold text-[11px] transition-colors cursor-pointer shadow-2xs"
+                            title="Masquer ce rejet de la liste"
+                          >
+                            Masquer
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

@@ -9,6 +9,7 @@ import {
   Users,
   Layers,
   Printer,
+  Type,
 } from 'lucide-react';
 import { ActiveTab } from '../types';
 
@@ -33,6 +34,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }
     { id: 'personnes', label: 'Assurés', icon: Users },
     { id: 'familles', label: 'Actes', icon: Layers },
     { id: 'etats', label: 'Rapports', icon: Printer },
+    { id: 'entete', label: 'Entête', icon: Type, startsGroup: true },
   ];
 
   return (

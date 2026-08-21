@@ -7,7 +7,7 @@
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '');
-define('DB_NAME', 'suivi_assurance');
+define('DB_NAME', 'suivi_assurance_salfa');
 define('DB_PORT', 3306);
 define('DB_CHARSET', 'utf8mb4');
 
@@ -28,7 +28,7 @@ function getDbConnection() {
             echo json_encode([
                 'success' => false,
                 'error' => 'Erreur de connexion MySQL : ' . $e->getMessage(),
-                'guide' => 'Assurez-vous que MySQL est démarré sur WAMP et que la base "suivi_assurance" est importée depuis schema.sql.'
+                'guide' => 'Assurez-vous que MySQL est démarré sur WAMP et que la base "suivi_assurance_salfa" est importée depuis schema.sql.'
             ]);
             exit;
         }

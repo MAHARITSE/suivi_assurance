@@ -1,18 +1,15 @@
 import React from 'react';
-import { ShieldCheck, Building2, Download } from 'lucide-react';
+import { ShieldCheck, Database } from 'lucide-react';
 import { Societe } from '../types';
 
 interface HeaderProps {
-  societes: Societe[];
-  selectedSocieteId: string;
-  onSelectSociete: (id: string) => void;
-  onExportBackup: () => void;
+  societes?: Societe[];
+  selectedSocieteId?: string;
+  onSelectSociete?: (id: string) => void;
+  onExportBackup?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  societes,
-  selectedSocieteId,
-  onSelectSociete,
   onExportBackup,
 }) => {
   return (
@@ -33,41 +30,23 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <label
-            htmlFor="header-societe-selector"
-            className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-slate-600 transition focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100"
-          >
-            <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
-            <span className="hidden text-xs font-medium lg:inline">Périmètre</span>
-            <select
-              id="header-societe-selector"
-              aria-label="Filtrer par société"
-              value={selectedSocieteId}
-              onChange={(e) => onSelectSociete(e.target.value)}
-              className="max-w-40 min-w-0 cursor-pointer border-0 bg-transparent text-xs font-semibold text-slate-800 outline-none sm:max-w-56"
+        {onExportBackup && (
+          <div className="flex items-center gap-2">
+            <button
+              id="btn-backup-export"
+              onClick={onExportBackup}
+              title="Télécharger le Dump SQL pour MySQL / WAMP Server"
+              aria-label="Télécharger la sauvegarde SQL"
+              className="inline-flex h-9 items-center gap-2 rounded-xl bg-slate-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 active:scale-95"
             >
-              <option value="ALL">Toutes les sociétés</option>
-              {societes.map((societe) => (
-                <option key={societe.id} value={societe.id}>
-                  {societe.nom} ({societe.code})
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <button
-            id="btn-backup-export"
-            onClick={onExportBackup}
-            title="Télécharger une sauvegarde des données"
-            aria-label="Télécharger une sauvegarde"
-            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-          >
-            <Download className="h-4 w-4" />
-            <span className="hidden xl:inline">Sauvegarder</span>
-          </button>
-        </div>
+              <Database className="h-4 w-4 text-emerald-400" />
+              <span>Sauvegarder (.SQL WAMP)</span>
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
 };
+
+

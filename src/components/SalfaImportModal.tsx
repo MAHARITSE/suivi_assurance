@@ -18,6 +18,7 @@ import {
 import { Prestation, LignePrestation, Societe, Personne, Famille, ParsedFactureAssurance } from '../types';
 import { formatMoney, generateId, normalizeDateISO } from '../utils/formatters';
 import { downloadPrestationsExcelTemplate } from '../utils/excelTemplates';
+import { findBestMatchingSociete } from '../utils/societyMatcher';
 import * as XLSX from 'xlsx';
 
 interface SalfaImportModalProps {
@@ -368,14 +369,9 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       return;
     }
 
-    const docSocName = (parsedInvoice.clientDoit || chosenLignes[0]?.societeAffiliee || 'MCI CARE').trim();
+    const docSocName = (parsedInvoice.clientDoit || chosenLignes[0]?.societeAffiliee || targetSocietyName || 'MCI CARE').trim();
 
-    let matchedSoc = societes.find(s => 
-      s.nom.toLowerCase().trim() === docSocName.toLowerCase() ||
-      s.code.toLowerCase().trim() === docSocName.toLowerCase() ||
-      s.nom.toLowerCase().includes(docSocName.toLowerCase()) ||
-      docSocName.toLowerCase().includes(s.nom.toLowerCase())
-    );
+    let matchedSoc = findBestMatchingSociete(docSocName, societes, targetSocietyName);
 
     const createdSocietes: Societe[] = [];
     const createdPersonnes: Personne[] = [];

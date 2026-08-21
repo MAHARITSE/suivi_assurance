@@ -328,6 +328,12 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           return false;
         }
 
+        // Exclure les rejets purs de la liste des règlements par défaut (les rejets sont gérés dans l'onglet Rejets)
+        const isPureRejet = (p.totalPaye === 0 || !p.totalPaye) && ((p.totalExclu || 0) > 0 || p.numeroBordereau?.startsWith('REJET-') || p.referencePaiement?.startsWith('REJET-'));
+        if (isPureRejet && filterExclusion !== 'AVEC_EXCLUSION' && !searchTerm.trim()) {
+          return false;
+        }
+
         // Exclusion filter
         if (filterExclusion === 'AVEC_EXCLUSION' && (p.totalExclu || 0) <= 0) {
           return false;
@@ -1270,10 +1276,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
       {/* Paiements Table / Grouped Table based on viewMode */}
       {viewMode === 'bordereaux' ? (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
+          <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
                 <tr>
                   <th className="py-3 px-2 w-8"></th>
                   
@@ -1541,7 +1547,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                   <table className="w-full text-xs">
                                     <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                                       <tr>
-                                        <th className="py-2 px-2 text-left">Date Soins</th>
+                                        <th className="py-2 px-2 text-center">Date Soins</th>
                                         <th className="py-2 px-2 text-left">Patient / Assuré</th>
                                         <th className="py-2 px-2 text-left">Matricule</th>
                                         <th className="py-2 px-2 text-left">Acte Regroupé</th>
@@ -1555,7 +1561,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                     <tbody className="divide-y divide-slate-100">
                                       {groupedPaymentLines.map((grp) => (
                                         <tr key={grp.groupKey} className="hover:bg-slate-50">
-                                          <td className="py-2 px-2 text-slate-600 font-medium">
+                                          <td className="py-2 px-2 text-slate-600 font-medium text-center">
                                             {formatDate(grp.dateSoins)}
                                           </td>
                                           <td className="py-2 px-2 font-semibold text-slate-900">
@@ -1598,7 +1604,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                   <table className="w-full text-xs">
                                     <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                                       <tr>
-                                        <th className="py-2 px-2 text-left">Date Soins</th>
+                                        <th className="py-2 px-2 text-center">Date Soins</th>
                                         <th className="py-2 px-2 text-left">Nom de l'Agent (Prescription)</th>
                                         <th className="py-2 px-2 text-left">Matricule</th>
                                         <th className="py-2 px-2 text-left">Réf Prescription</th>
@@ -1618,8 +1624,8 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                                         return (
                                           <tr key={l.id} className={`hover:bg-slate-50 ${lMatch.hasMatch ? 'bg-emerald-50/30' : ''}`}>
-                                            <td className="py-2 px-2 text-slate-600 font-medium">
-                                              <div className="flex items-center gap-1">
+                                            <td className="py-2 px-2 text-slate-600 font-medium text-center">
+                                              <div className="flex items-center justify-center gap-1">
                                                 <span className={lMatch.hasMatch ? 'border-b-2 border-dashed border-emerald-500 text-emerald-900 font-bold' : ''} title={lMatchTooltip}>
                                                   {l.dateSoins ? formatDate(l.dateSoins) : '-'}
                                                 </span>
@@ -1682,40 +1688,50 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   })
                 )}
               </tbody>
-              <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
-                <tr>
-                  <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
-                    Total de la sélection ({stats.count}) :
-                  </td>
-                  <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">
-                    {formatMoney(stats.totalReclame)}
-                  </td>
-                  <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap">
-                    {formatMoney(stats.totalModerateur)}
-                  </td>
-                  <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap">
-                    {formatMoney(Math.max(0, stats.totalReclame - stats.totalModerateur))}
-                  </td>
-                  <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap">
-                    {formatMoney(stats.totalPaye)}
-                  </td>
-                  <td className="py-3 px-3 text-right whitespace-nowrap">
-                    <span className={Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye) > 0 ? 'text-rose-700' : 'text-slate-400'}>
-                      {formatMoney(Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye))}
-                    </span>
-                  </td>
-                  <td colSpan={3} className="py-3 px-3 text-right text-rose-700 whitespace-nowrap">
-                    {formatMoney(stats.totalExclu)}
-                  </td>
-                </tr>
-              </tfoot>
             </table>
+          </div>
+
+          {/* Bar de Totaux Généraux toujours visible en bas de la page */}
+          <div className="sticky bottom-0 z-20 shrink-0 bg-slate-900 text-white border-t border-slate-800 px-4 py-3 shadow-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 font-bold uppercase text-slate-300 tracking-wider">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Total Général ({stats.count} règlements)</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 sm:gap-6 font-mono font-bold">
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-sans text-slate-400 block font-normal">Total Réclamé</span>
+                <span className="text-slate-100">{formatMoney(stats.totalReclame)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-sans text-amber-400 block font-normal">Ticket Mod.</span>
+                <span className="text-amber-300">{formatMoney(stats.totalModerateur)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-sans text-indigo-300 block font-normal">Net Assureur</span>
+                <span className="text-indigo-200">{formatMoney(Math.max(0, stats.totalReclame - stats.totalModerateur))}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-sans text-emerald-400 block font-normal">Total Réglé</span>
+                <span className="text-emerald-400">{formatMoney(stats.totalPaye)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-sans text-rose-400 block font-normal">Reste Dû</span>
+                <span className={Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye) > 0 ? 'text-rose-400 font-extrabold' : 'text-slate-400'}>
+                  {formatMoney(Math.max(0, (stats.totalReclame - stats.totalModerateur) - stats.totalPaye))}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-sans text-rose-400 block font-normal">Total Exclu</span>
+                <span className="text-rose-400">{formatMoney(stats.totalExclu)}</span>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
         /* Grouped View: Regroupé par Personne + Date + Mêmes Actes */
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="bg-emerald-50/50 px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
+          <div className="bg-emerald-50/50 px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
             <div className="flex items-center gap-2 text-xs">
               <Layers className="w-4 h-4 text-emerald-700" />
               <span className="font-bold text-slate-900">Synthèse Groupée par Patient, Date de Soin et Mêmes Actes</span>
@@ -1726,18 +1742,18 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             </span>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
                 <tr>
                   <th className="py-3 px-2 w-8"></th>
 
                   {/* Date Soins */}
                   <th
                     onClick={() => handleGroupSort('dateSoins')}
-                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'dateSoins' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
+                    className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${groupSortField === 'dateSoins' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
-                    <div className="flex items-center">
+                    <div className="flex items-center justify-center">
                       <span>Date Soins</span>
                       {renderGroupSortIcon('dateSoins')}
                     </div>
@@ -1867,7 +1883,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                               {isGroupExpanded ? <ChevronDown className="w-4 h-4 text-emerald-600 font-bold" /> : <ChevronRight className="w-4 h-4" />}
                             </button>
                           </td>
-                          <td className="py-3 px-3 text-slate-700 font-semibold whitespace-nowrap">
+                          <td className="py-3 px-3 text-slate-700 font-semibold whitespace-nowrap text-center">
                             {formatDate(grp.dateSoins)}
                           </td>
                           <td className="py-3 px-3">
@@ -1983,46 +1999,56 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   })
                 )}
               </tbody>
-              {(() => {
-                const totReclame = groupedPaymentActs.reduce((s, g) => s + g.totalReclame, 0);
-                const totMod = groupedPaymentActs.reduce((s, g) => s + g.ticketModerateur, 0);
-                const totRemb = Math.max(0, totReclame - totMod);
-                const totPaye = groupedPaymentActs.reduce((s, g) => s + g.totalPaye, 0);
-                const totReste = Math.max(0, totRemb - totPaye);
-                const totExclu = groupedPaymentActs.reduce((s, g) => s + g.totalExclu, 0);
-
-                return (
-                  <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
-                    <tr>
-                      <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider text-slate-500">
-                        Total de la sélection ({groupedPaymentActs.length}) :
-                      </td>
-                      <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900">
-                        {formatMoney(totReclame)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap">
-                        {formatMoney(totMod)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap">
-                        {formatMoney(totRemb)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap">
-                        {formatMoney(totPaye)}
-                      </td>
-                      <td className="py-3 px-3 text-right whitespace-nowrap">
-                        <span className={totReste > 0 ? 'text-rose-700' : 'text-slate-400'}>
-                          {formatMoney(totReste)}
-                        </span>
-                      </td>
-                      <td colSpan={3} className="py-3 px-3 text-right text-rose-700 whitespace-nowrap">
-                        {formatMoney(totExclu)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                );
-              })()}
             </table>
           </div>
+
+          {/* Bar de Totaux Généraux toujours visible en bas de la page */}
+          {(() => {
+            const totReclame = groupedPaymentActs.reduce((s, g) => s + g.totalReclame, 0);
+            const totMod = groupedPaymentActs.reduce((s, g) => s + g.ticketModerateur, 0);
+            const totRemb = Math.max(0, totReclame - totMod);
+            const totPaye = groupedPaymentActs.reduce((s, g) => s + g.totalPaye, 0);
+            const totReste = Math.max(0, totRemb - totPaye);
+            const totExclu = groupedPaymentActs.reduce((s, g) => s + g.totalExclu, 0);
+
+            return (
+              <div className="sticky bottom-0 z-20 shrink-0 bg-slate-900 text-white border-t border-slate-800 px-4 py-3 shadow-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 font-bold uppercase text-slate-300 tracking-wider">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>Total Synthèse ({groupedPaymentActs.length} groupes)</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 sm:gap-6 font-mono font-bold">
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-sans text-slate-400 block font-normal">Total Réclamé</span>
+                    <span className="text-slate-100">{formatMoney(totReclame)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-sans text-amber-400 block font-normal">Ticket Mod.</span>
+                    <span className="text-amber-300">{formatMoney(totMod)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-sans text-indigo-300 block font-normal">Net Assureur</span>
+                    <span className="text-indigo-200">{formatMoney(totRemb)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-sans text-emerald-400 block font-normal">Total Réglé</span>
+                    <span className="text-emerald-400">{formatMoney(totPaye)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-sans text-rose-400 block font-normal">Reste Dû</span>
+                    <span className={totReste > 0 ? 'text-rose-400 font-extrabold' : 'text-slate-400'}>
+                      {formatMoney(totReste)}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-sans text-rose-400 block font-normal">Total Exclu</span>
+                    <span className="text-rose-400">{formatMoney(totExclu)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2084,7 +2110,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   <table className="w-full text-xs">
                     <thead className="bg-slate-100 text-slate-600">
                       <tr>
-                        <th className="p-2 text-left">Date Soins</th>
+                        <th className="p-2 text-center">Date Soins</th>
                         <th className="p-2 text-left">Patient / Assuré</th>
                         <th className="p-2 text-left">Matricule</th>
                         <th className="p-2 text-left">Acte Regroupé</th>
@@ -2098,7 +2124,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                     <tbody className="divide-y divide-slate-100">
                       {groupLinesForSinglePayment(viewingPaiement.lignes, viewingPaiement.datePaiement).map(grp => (
                         <tr key={grp.groupKey}>
-                          <td className="p-2 text-slate-600 font-medium">{formatDate(grp.dateSoins)}</td>
+                          <td className="p-2 text-slate-600 font-medium text-center">{formatDate(grp.dateSoins)}</td>
                           <td className="p-2 font-semibold text-slate-900">{grp.nomAgent}</td>
                           <td className="p-2 font-mono text-[11px] text-slate-600">{grp.immatriculation}</td>
                           <td className="p-2">
@@ -2120,7 +2146,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                   <table className="w-full text-xs">
                     <thead className="bg-slate-100 text-slate-600">
                       <tr>
-                        <th className="p-2 text-left">Date Soins</th>
+                        <th className="p-2 text-center">Date Soins</th>
                         <th className="p-2 text-left">Matricule</th>
                         <th className="p-2 text-left">Assuré</th>
                         <th className="p-2 text-left">Acte / Commentaire</th>
@@ -2133,7 +2159,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                     <tbody className="divide-y divide-slate-100">
                       {viewingPaiement.lignes.map(l => (
                         <tr key={l.id}>
-                          <td className="p-2 text-slate-600 font-medium">{l.dateSoins ? formatDate(l.dateSoins) : '-'}</td>
+                          <td className="p-2 text-slate-600 font-medium text-center">{l.dateSoins ? formatDate(l.dateSoins) : '-'}</td>
                           <td className="p-2 font-mono font-medium text-indigo-700">{l.immatriculation || '-'}</td>
                           <td className="p-2 font-semibold text-slate-800">{l.nomAgent || l.nomBaseAssurance}</td>
                           <td className="p-2">

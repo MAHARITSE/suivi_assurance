@@ -10,6 +10,7 @@ import { SocietesView } from './components/SocietesView';
 import { PersonnesView } from './components/PersonnesView';
 import { FamillesView } from './components/FamillesView';
 import { EtatsView } from './components/EtatsView';
+import { EnteteView } from './components/EnteteView';
 
 import { 
   initialSocietes, 
@@ -18,6 +19,7 @@ import {
   initialPaiements 
 } from './data/initialData';
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
+import { generateMySQLDump } from './utils/sqlExporter';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -291,12 +293,14 @@ export function App() {
 
   const handleExportBackup = () => {
     const data = { societes, personnes, familles, prestations, paiements };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const sqlContent = generateMySQLDump(data);
+    const blob = new Blob([sqlContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `suivi_assurance_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `suivi_assurance_salfa_dump_${new Date().toISOString().split('T')[0]}.sql`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -422,6 +426,10 @@ export function App() {
             familles={familles}
             selectedSocieteId={selectedSocieteId}
           />
+        )}
+
+        {activeTab === 'entete' && (
+          <EnteteView />
         )}
       </main>
 

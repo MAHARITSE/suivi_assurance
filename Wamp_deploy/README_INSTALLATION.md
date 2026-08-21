@@ -7,7 +7,7 @@ Ce dossier `Wamp_deploy` contient tout le nécessaire pour installer et héberge
 
 ### 1. Structure des Fichiers
 
-* **`schema.sql`** : Script complet de création de la base de données `suivi_assurance`, avec toutes les tables (`societes`, `familles`, `personnes`, `prestations`, `lignes_prestations`, `paiements`, `lignes_paiements`) et les données initiales de paramétrage.
+* **`schema.sql`** : Script complet de création de la base de données `suivi_assurance_salfa`, avec toutes les tables (`societes`, `familles`, `personnes`, `prestations`, `lignes_prestation`, `paiements`, `lignes_paiement`) et les données initiales de paramétrage.
 * **`config.php`** : Fichier de configuration de la connexion MySQL (PDO) avec gestion des erreurs.
 * **`api.php`** : API RESTful en PHP pour communiquer entre l'interface utilisateur et la base MySQL.
 * **`.htaccess`** : Configuration Apache pour autoriser les requêtes CORS et optimiser le routage.
@@ -22,7 +22,7 @@ Ce dossier `Wamp_deploy` contient tout le nécessaire pour installer et héberge
 4. Cliquez sur l'onglet **Importer** en haut.
 5. Cliquez sur **Parcourir** et sélectionnez le fichier `Wamp_deploy/schema.sql`.
 6. Cliquez sur **Exécuter** en bas de la page.
-7. La base de données `suivi_assurance` est maintenant créée avec toutes ses tables !
+7. La base de données `suivi_assurance_salfa` est maintenant créée avec toutes ses tables !
 
 ---
 
@@ -55,4 +55,4 @@ Ouvrez les URLs suivantes dans votre navigateur :
 | **Port (DB_PORT)** | `3306` (ou `3307` si configuré pour MariaDB) |
 | **Utilisateur (DB_USER)** | `root` |
 | **Mot de passe (DB_PASS)** | `""` (vide) |
-| **Nom de la Base (DB_NAME)** | `suivi_assurance` |
+| **Nom de la Base (DB_NAME)** | `suivi_assurance_salfa` |

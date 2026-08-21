@@ -22,7 +22,7 @@ ETAPE 2 : IMPORTATION MYSQL PHPMYADMIN
    http://localhost/phpmyadmin
 3. Cliquez sur l'onglet "Importer".
 4. Selectionnez le fichier :
-   C:\wamp64\www\suivi_assurance\database.sql
+   C:\wamp64\www\suivi_assurance\schema.sql
 5. Cliquez sur "Executer" en bas.
 
 

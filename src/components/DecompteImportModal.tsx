@@ -43,6 +43,7 @@ import {
 } from '../types';
 import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
+import { findBestMatchingSociete } from '../utils/societyMatcher';
 import * as XLSX from 'xlsx';
 
 interface DecompteImportModalProps {
@@ -669,7 +670,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             if (jsonRows.length === 0) throw new Error('Le fichier Excel est vide ou ne contient aucune ligne de données.');
 
             let inferredBordereau = '';
-            let inferredOrganisme = chosenOrg || 'ASCOMA / MCI / BSA';
+            let inferredOrganisme = chosenOrg || 'MCI CARE';
             let inferredDateReglement = new Date().toISOString().split('T')[0];
 
             const lignes: FactureLigneParsed[] = jsonRows.map((row, idx) => {
@@ -689,7 +690,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               if (rawBord && !inferredBordereau) inferredBordereau = rawBord;
 
               const rawOrg = chosenOrg || String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client']) || '').trim();
-              if (rawOrg) inferredOrganisme = rawOrg;
+              if (rawOrg && rawOrg !== 'Organisme') {
+                const matched = findBestMatchingSociete(rawOrg, societes, chosenOrg);
+                if (matched) inferredOrganisme = matched.nom;
+                else inferredOrganisme = rawOrg;
+              }
 
               const rawDateReg = String(getVal(['Date_Reglement', 'Date_Paiement', 'Date_Reglement_Paiement', 'Date Reglement', 'Date Paiement']) || '').trim();
               if (rawDateReg) inferredDateReglement = normalizeDateISO(rawDateReg);
@@ -996,12 +1001,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     }
 
     const socName = (parsedDoc.clientDoit || parsedDoc.garant || getEffectiveInsurance() || 'MCI CARE').trim();
-    let matchedSoc = societes.find(s => 
-      s.nom.toLowerCase().trim() === socName.toLowerCase() ||
-      s.code.toLowerCase().trim() === socName.toLowerCase() ||
-      s.nom.toLowerCase().includes(socName.toLowerCase()) ||
-      socName.toLowerCase().includes(s.nom.toLowerCase())
-    );
+    let matchedSoc = findBestMatchingSociete(socName, societes, getEffectiveInsurance());
 
     const createdSocietes: Societe[] = [];
     const finalPersonnesMap = new Map<string, Personne>();

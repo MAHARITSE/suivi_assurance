@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
-  Filter, 
   Eye, 
   Edit3, 
   Trash2, 
@@ -13,7 +12,6 @@ import {
   Clock, 
   AlertCircle, 
   AlertTriangle,
-  CalendarCheck,
   Tag,
   Sparkles,
   Link2,
@@ -199,7 +197,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     if (selectedPrestations.size === 0) return;
     const prestationsList = filteredAndSortedList.filter(p => selectedPrestations.has(p.id));
     generateSelectedPrestationsPdf(prestationsList, paiements, societes, personnes, {
-      titreEtablissement: 'SALFA - Établissement Médical & Soins'
+      titreEtablissement: 'SALFA - Établissement Médical & Soins',
+      familles,
     });
   };
 
@@ -505,20 +504,17 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
   // Status counters for quick badges
   const statusCounts = useMemo(() => {
-    let paye = 0, partiel = 0, attente = 0, rejete = 0;
+    let paye = 0, enCours = 0;
     prestations.forEach(p => {
       const fin = getPrestationFinancials(p);
-      if (fin.statut === 'Rejeté' || p.statut === 'Rejeté') {
-        rejete++;
-      } else if (fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0) {
+      const isPaid = fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0 || (p.resteAPayer !== undefined && p.resteAPayer <= 0);
+      if (isPaid) {
         paye++;
-      } else if (fin.statut === 'Partiellement payé' || p.statut === 'Partiellement payé') {
-        partiel++;
       } else {
-        attente++;
+        enCours++;
       }
     });
-    return { all: prestations.length, paye, partiel, attente, rejete };
+    return { all: prestations.length, enCours, paye };
   }, [prestations, paymentsMap]);
 
   // Filtered and Sorted List
@@ -532,17 +528,14 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       // Sous-societe filter
       const matchesSousSoc = filterSousSociete === 'ALL' || (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
       
-      // Status filter - include all prestations with no remaining balance in 'Payé'
+      // Status filter - Tous, En cours, Totalement payé
       let matchesStatus = true;
       if (statusFilter !== 'ALL') {
-        if (statusFilter === 'Payé') {
-          matchesStatus = fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0 || (p.resteAPayer !== undefined && p.resteAPayer <= 0);
-        } else if (statusFilter === 'Rejeté') {
-          matchesStatus = fin.statut === 'Rejeté' || p.statut === 'Rejeté';
-        } else if (statusFilter === 'Partiellement payé') {
-          matchesStatus = (fin.statut === 'Partiellement payé' || p.statut === 'Partiellement payé') && fin.resteAPayer > 0;
-        } else if (statusFilter === 'En attente') {
-          matchesStatus = (fin.statut === 'En attente' || p.statut === 'En attente') && fin.totalPaye === 0 && fin.resteAPayer > 0 && fin.statut !== 'Rejeté';
+        const isPaid = fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0 || (p.resteAPayer !== undefined && p.resteAPayer <= 0);
+        if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
+          matchesStatus = isPaid;
+        } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
+          matchesStatus = !isPaid;
         } else {
           matchesStatus = p.statut === statusFilter || fin.statut === statusFilter;
         }
@@ -1441,8 +1434,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       </div>
 
       {/* Main Multi-criteria Filter Bar */}
-      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-3">
-        <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           {/* Search Input */}
           <div className="relative flex-1 min-w-[240px]">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
@@ -1468,10 +1461,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Statut :</span>
             {[
               { key: 'ALL', label: 'Tous', count: statusCounts.all },
-              { key: 'En attente', label: 'En attente', count: statusCounts.attente },
-              { key: 'Partiellement payé', label: 'Partiel', count: statusCounts.partiel },
-              { key: 'Payé', label: 'Totalement payé', count: statusCounts.paye },
-              { key: 'Rejeté', label: 'Rejeté', count: statusCounts.rejete }
+              { key: 'EN_COURS', label: 'Encour', count: statusCounts.enCours },
+              { key: 'Payé', label: 'Payé', count: statusCounts.paye }
             ].map(st => (
               <button
                 key={st.key}
@@ -1490,75 +1481,43 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 </span>
               </button>
             ))}
-          </div>
 
-          {/* Reconciliation Quick Filter Chips */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
-            <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-emerald-600" />
-              <span>Rapprochement :</span>
-            </span>
-            <button
-              onClick={() => setReconciliationFilter(prev => prev === 'MATCH_DATE_MONTANT' ? 'ALL' : 'MATCH_DATE_MONTANT')}
-              title="Afficher uniquement les prestations ayant une date et un montant identiques à un règlement"
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
-                reconciliationFilter === 'MATCH_DATE_MONTANT'
-                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
-                  : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
-              }`}
-            >
-              <CalendarCheck className="w-3 h-3" />
-              <span>Même Date & Montant (Règlement)</span>
-            </button>
-            <button
-              onClick={() => setReconciliationFilter(prev => prev === 'DUPLICATES' ? 'ALL' : 'DUPLICATES')}
-              title="Afficher les prestations ayant la même date et le même montant qu'une autre facture"
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
-                reconciliationFilter === 'DUPLICATES'
-                  ? 'bg-amber-600 text-white shadow-xs font-bold'
-                  : 'bg-white border border-amber-300 text-amber-700 hover:bg-amber-50'
-              }`}
-            >
-              <AlertTriangle className="w-3 h-3" />
-              <span>Doublons Date & Montant</span>
-            </button>
-          </div>
-
-          {/* Filter Controls Actions */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowAdvancedFilters(prev => !prev)}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
-                showAdvancedFilters || activeFiltersCount > 0
-                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-semibold'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Filtres avancés</span>
-              {activeFiltersCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-indigo-600 text-white font-bold">
-                  {activeFiltersCount}
-                </span>
-              )}
-            </button>
-
-            {activeFiltersCount > 0 && (
+            {/* Filtre avancé placé juste après le statut */}
+            <div className="flex items-center gap-1.5 ml-1">
               <button
-                onClick={handleResetFilters}
-                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition cursor-pointer"
-                title="Réinitialiser tous les filtres"
+                onClick={() => setShowAdvancedFilters(prev => !prev)}
+                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer ${
+                  showAdvancedFilters || activeFiltersCount > 0
+                    ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-semibold'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
               >
-                <RotateCcw className="w-3 h-3" />
-                <span>Effacer</span>
+                <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Filtres avancés</span>
+                {activeFiltersCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-indigo-600 text-white font-bold">
+                    {activeFiltersCount}
+                  </span>
+                )}
               </button>
-            )}
+
+              {activeFiltersCount > 0 && (
+                <button
+                  onClick={handleResetFilters}
+                  className="flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition cursor-pointer"
+                  title="Réinitialiser tous les filtres"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Effacer</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Expandable Multi-criteria Filter Panel */}
         {showAdvancedFilters && (
-          <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/60 p-3 rounded-lg">
+          <div className="pt-3 mt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/60 p-3 rounded-lg">
             {/* Société Assureur */}
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -1636,7 +1595,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setDatePreset('this_month')}
-                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline"
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
                 >
                   Ce mois
                 </button>
@@ -1644,7 +1603,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setDatePreset('last_month')}
-                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline"
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
                 >
                   Mois dernier
                 </button>
@@ -1652,7 +1611,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setDatePreset('this_year')}
-                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline"
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
                 >
                   Année
                 </button>
@@ -1660,7 +1619,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setDatePreset('all')}
-                  className="text-[10px] text-slate-500 hover:text-slate-700 hover:underline"
+                  className="text-[10px] text-slate-500 hover:text-slate-700 hover:underline cursor-pointer"
                 >
                   Tout
                 </button>
@@ -1684,10 +1643,10 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         />
       ) : (
         /* Detailed Dossiers Table */
-        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
+          <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
               <tr>
                 <th className="py-3 px-2 w-8">
                   <input 
@@ -2142,34 +2101,52 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 })
               )}
             </tbody>
-            <tfoot className="sticky bottom-0 z-10 bg-slate-100/95 backdrop-blur-xs font-bold border-t-2 border-slate-300 text-slate-800 text-[11px] shadow-sm">
-              <tr>
-                <td colSpan={6} className="py-3 px-3 text-right uppercase tracking-wider text-slate-700 font-bold">
-                  {selectedPrestations.size > 0 
-                    ? `Total de la sélection (${selectedPrestations.size} / ${stats.count}) :`
-                    : `Total général (${stats.count} dossiers) :`}
-                </td>
-                <td className="py-3 px-3 text-right whitespace-nowrap text-slate-900 font-mono font-bold">
-                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalFacture : stats.totalFacture)}
-                </td>
-                <td className="py-3 px-3 text-right text-amber-700 whitespace-nowrap font-mono font-bold">
-                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalTicketMod : stats.totalTicketMod)}
-                </td>
-                <td className="py-3 px-3 text-right text-slate-900 whitespace-nowrap font-mono font-bold">
-                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalARembourser : stats.totalARembourser)}
-                </td>
-                <td className="py-3 px-3 text-right text-emerald-700 whitespace-nowrap font-mono font-bold">
-                  {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalPaye : stats.totalPaye)}
-                </td>
-                <td className="py-3 px-3 text-right whitespace-nowrap font-mono font-bold">
-                  <span className={(selectedPrestations.size > 0 ? selectedStats.totalReste : stats.totalReste) > 0 ? 'text-rose-700' : 'text-slate-400'}>
-                    {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalReste : stats.totalReste)}
-                  </span>
-                </td>
-                <td colSpan={2} className="py-3 px-3"></td>
-              </tr>
-            </tfoot>
           </table>
+        </div>
+
+        {/* Bar de Totaux Généraux toujours visible en bas de la page */}
+        <div className="sticky bottom-0 z-20 shrink-0 bg-slate-900 text-white border-t border-slate-800 px-4 py-3 shadow-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 font-bold uppercase text-slate-300 tracking-wider">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+            <span>
+              {selectedPrestations.size > 0 
+                ? `Total sélection (${selectedPrestations.size} / ${stats.count} dossiers)`
+                : `Total général (${stats.count} dossiers)`}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 font-mono font-bold">
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-sans text-slate-400 block font-normal">Total Brut</span>
+              <span className="text-slate-100">
+                {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalFacture : stats.totalFacture)}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-sans text-amber-400 block font-normal">Ticket Mod.</span>
+              <span className="text-amber-300">
+                {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalTicketMod : stats.totalTicketMod)}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-sans text-indigo-300 block font-normal">À Rembourser</span>
+              <span className="text-indigo-200">
+                {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalARembourser : stats.totalARembourser)}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-sans text-emerald-400 block font-normal">Total Payé</span>
+              <span className="text-emerald-400">
+                {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalPaye : stats.totalPaye)}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-sans text-rose-400 block font-normal">Reste à Payer</span>
+              <span className={(selectedPrestations.size > 0 ? selectedStats.totalReste : stats.totalReste) > 0 ? 'text-rose-400 font-extrabold' : 'text-slate-400'}>
+                {formatMoney(selectedPrestations.size > 0 ? selectedStats.totalReste : stats.totalReste)}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
       )}

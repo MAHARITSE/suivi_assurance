@@ -197,10 +197,18 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
     filteredPrestations.forEach(prest => {
       if (prest.lignes && prest.lignes.length > 0) {
         prest.lignes.forEach(lig => {
-          const code = (lig.code || 'CONS').toUpperCase();
-          const current = actMap.get(code) || {
-            code,
-            libelle: lig.libelle || familles.find(f => f.code.toUpperCase() === code)?.libelle || code,
+          const rawCode = (lig.code || 'CONS').toUpperCase().trim();
+          // Find matching famille by exact code or aliases
+          const fam = familles.find(f => 
+            f.code.toUpperCase() === rawCode || 
+            (f.aliases && f.aliases.some(a => a.toUpperCase() === rawCode))
+          );
+          const resolvedCode = fam ? fam.code : rawCode;
+          const resolvedLibelle = fam?.libelle || (resolvedCode === 'CONS' ? 'Consultations & Visites Médicales' : (lig.libelle && lig.libelle.trim().toUpperCase() !== rawCode ? lig.libelle : rawCode));
+
+          const current = actMap.get(resolvedCode) || {
+            code: resolvedCode,
+            libelle: resolvedLibelle,
             count: 0,
             totalMontant: 0,
             totalPaye: 0,
@@ -208,13 +216,15 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
           current.count += 1;
           current.totalMontant += lig.totalPrestation || 0;
           current.totalPaye += lig.totalPaye || 0;
-          actMap.set(code, current);
+          actMap.set(resolvedCode, current);
         });
       } else {
-        const code = 'CONS';
-        const current = actMap.get(code) || {
-          code,
-          libelle: 'Consultation & Soins',
+        const fam = familles.find(f => f.code.toUpperCase() === 'CONS');
+        const resolvedCode = 'CONS';
+        const resolvedLibelle = fam?.libelle || 'Consultations & Visites Médicales';
+        const current = actMap.get(resolvedCode) || {
+          code: resolvedCode,
+          libelle: resolvedLibelle,
           count: 0,
           totalMontant: 0,
           totalPaye: 0,
@@ -222,7 +232,7 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
         current.count += 1;
         current.totalMontant += prest.totalPrestation;
         current.totalPaye += prest.statut === 'Payé' ? prest.totalPrestation : 0;
-        actMap.set(code, current);
+        actMap.set(resolvedCode, current);
       }
     });
 
