@@ -27,14 +27,14 @@ function getPDO() {
         try {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
-            if (!headers_sent() && (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'json') !== false)) {
+            if (php_sapi_name() !== 'cli' && !headers_sent()) {
                 header('Content-Type: application/json; charset=utf-8');
                 http_response_code(500);
                 echo json_encode([
                     'success' => false,
                     'error' => 'Erreur de connexion MySQL : ' . $e->getMessage(),
-                    'guide' => 'Assurez-vous que MySQL est démarré sur WAMP et que la base "suivi_assurance_salfa" est importée depuis schema.sql.'
-                ]);
+                    'guide' => 'Assurez-vous que MySQL est démarré dans WAMP et que la base "suivi_assurance_salfa" est importée depuis schema.sql.'
+                ], JSON_UNESCAPED_UNICODE);
                 exit;
             }
             throw $e;

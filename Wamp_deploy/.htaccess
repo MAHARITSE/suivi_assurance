@@ -1,4 +1,6 @@
 # Configuration Apache / WAMP
+DirectoryIndex index.php index.html
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteCond %{REQUEST_FILENAME} !-f

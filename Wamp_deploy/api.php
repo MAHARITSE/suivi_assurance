@@ -15,7 +15,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once __DIR__ . '/config.php';
-$pdo = getDbConnection();
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
@@ -32,6 +31,7 @@ function getJsonInput() {
 }
 
 try {
+    $pdo = getDbConnection();
     switch ($action) {
         // --- SOCIETES ---
         case 'societes':

@@ -4,18 +4,22 @@
  * Déploiement Local WampServer (PHP / MySQL / Apache)
  * Interface React intégrée à 100% avec le Backend PHP/MySQL
  */
+
+// Masquer les erreurs PHP directes pour éviter de casser le rendu HTML
+ini_set('display_errors', '0');
+error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_WARNING);
+
 require_once __DIR__ . '/config.php';
 
-// Vérification silencieuse de la connexion MySQL
-try {
-    $pdo = getPDO();
-} catch (Exception $e) {
-    // Si la base n'est pas encore configurée, l'API renverra un message d'aide explicite
-}
-
-// Rendu de l'interface utilisateur React avec fidélité absolue à l'application
-if (file_exists(__DIR__ . '/index.html')) {
-    echo file_get_contents(__DIR__ . '/index.html');
+// Rendu de l'interface utilisateur
+$htmlFile = __DIR__ . '/index.html';
+if (file_exists($htmlFile)) {
+    $content = file_get_contents($htmlFile);
+    if (strpos($content, '<base') === false) {
+        $content = str_replace('<head>', '<head>' . "\n" . '    <base href="./">', $content);
+    }
+    header('Content-Type: text/html; charset=utf-8');
+    echo $content;
     exit;
 }
 ?>
