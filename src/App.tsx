@@ -11,6 +11,7 @@ import { PersonnesView } from './components/PersonnesView';
 import { FamillesView } from './components/FamillesView';
 import { EtatsView } from './components/EtatsView';
 import { EnteteView } from './components/EnteteView';
+import { TutoView } from './components/TutoView';
 
 import { 
   initialSocietes, 
@@ -477,6 +478,10 @@ export function App() {
 
         {activeTab === 'entete' && (
           <EnteteView />
+        )}
+
+        {activeTab === 'tuto' && (
+          <TutoView />
         )}
       </main>
 

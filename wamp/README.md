@@ -2,6 +2,11 @@
 
 Ce dossier prépare une version autonome de **Suivi Assurance SALFA** pour Apache, PHP et MySQL via WAMP. L'interface React existante est conservée telle quelle ; le dossier ajoute uniquement le connecteur PHP/MySQL et les fichiers nécessaires au lancement local.
 
+> 🎓 **Nouveau : Tutoriel intégré !**
+> - Dans l'app : Navigation → **Tutoriel** (10 sections, checklist interactive, FAQ)
+> - Fichiers : `TUTO.md` (express 5 étapes) et `../TUTORIEL.md` (complet 12 chapitres)
+> - Build inclus : après `npm run build:wamp`, le tuto est accessible offline dans l'app
+
 ## Versions requises
 
 | Composant | Version minimale | Recommandé |

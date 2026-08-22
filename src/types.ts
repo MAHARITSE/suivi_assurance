@@ -193,7 +193,8 @@ export type ActiveTab =
   | 'personnes'
   | 'familles'
   | 'etats'
-  | 'entete';
+  | 'entete'
+  | 'tuto';
 
 export interface EnteteConfig {
   etablissement: string;
