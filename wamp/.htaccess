@@ -1,0 +1,17 @@
+Options -Indexes
+DirectoryIndex index.html
+
+# Les fichiers de configuration et de documentation ne doivent pas être servis.
+<FilesMatch "^(config\.php|README\.md|schema_wamp\.sql)$">
+    Require all denied
+</FilesMatch>
+
+# Le build Vite produit une application monopage. Les fichiers existants
+# (PHP, JS, CSS, images) restent servis normalement.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+    RewriteRule ^ index.html [L]
+</IfModule>
