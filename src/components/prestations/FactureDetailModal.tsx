@@ -10,7 +10,8 @@ import {
   AlertCircle, 
   Receipt,
   Download,
-  CreditCard
+  CreditCard,
+  Trash2
 } from 'lucide-react';
 import { GroupedFacture } from '../PrestationsView';
 import { formatDate, formatMoney } from '../../utils/formatters';
@@ -19,6 +20,7 @@ import { Personne, Societe } from '../../types';
 interface FactureDetailModalProps {
   facture: GroupedFacture | null;
   onClose: () => void;
+  onDeleteFacture?: (facture: GroupedFacture) => void;
   getPersonne: (id?: string) => Personne | undefined;
   getSocieteNom: (id?: string) => string;
 }
@@ -26,6 +28,7 @@ interface FactureDetailModalProps {
 export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
   facture,
   onClose,
+  onDeleteFacture,
   getPersonne,
   getSocieteNom,
 }) => {
@@ -269,7 +272,30 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end pt-3 border-t border-slate-100">
+        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+          <div>
+            {onDeleteFacture && (
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteFacture(facture);
+                  onClose();
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  facture.totalPaye > 0 || facture.bordereaux.length > 0
+                    ? 'border border-amber-200 text-amber-800 bg-amber-50 hover:bg-amber-100'
+                    : 'border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100'
+                }`}
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>
+                  {facture.totalPaye > 0 || facture.bordereaux.length > 0
+                    ? 'Suppression verrouillée (Règlement actif)'
+                    : 'Supprimer toute la facture en cascade'}
+                </span>
+              </button>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition cursor-pointer"

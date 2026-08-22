@@ -3,6 +3,7 @@ import {
   ChevronDown, 
   ChevronRight, 
   Eye, 
+  Trash2,
   Sparkles, 
   AlertTriangle, 
   CalendarCheck, 
@@ -28,6 +29,7 @@ interface FacturesGroupedTableProps {
   factureSortDirection: 'asc' | 'desc';
   onSort: (field: FactureSortField) => void;
   onViewFacture: (facture: GroupedFacture) => void;
+  onDeleteFacture?: (facture: GroupedFacture) => void;
   getPersonne: (id?: string) => Personne | undefined;
 }
 
@@ -39,6 +41,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
   factureSortDirection,
   onSort,
   onViewFacture,
+  onDeleteFacture,
   getPersonne,
 }) => {
   const renderSortIcon = (field: FactureSortField) => {
@@ -329,11 +332,28 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
                         <div className="flex items-center justify-center space-x-1" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => onViewFacture(facture)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition cursor-pointer"
                             title="Voir la synthèse complète de la facture"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+                          {onDeleteFacture && (
+                            <button
+                              onClick={() => onDeleteFacture(facture)}
+                              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                                facture.totalPaye > 0 || facture.bordereaux.length > 0
+                                  ? 'text-slate-300 hover:text-amber-600 hover:bg-amber-50'
+                                  : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                              }`}
+                              title={
+                                facture.totalPaye > 0 || facture.bordereaux.length > 0
+                                  ? "Facture avec règlements (cliquer pour voir les détails de blocage)"
+                                  : "Supprimer entièrement cette facture et toutes ses prescriptions"
+                              }
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

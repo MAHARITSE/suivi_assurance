@@ -171,6 +171,14 @@ export function App() {
     setPrestations(prev => prev.filter(p => p.id !== id));
   };
 
+  const handleDeleteFacture = (numeroFacture: string) => {
+    const cleanNum = (n: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+    const target = cleanNum(numeroFacture);
+    const toDelete = prestations.filter(p => cleanNum(p.numeroFacture) === target);
+    toDelete.forEach(p => deleteWampData('prestations', p.id));
+    setPrestations(prev => prev.filter(p => cleanNum(p.numeroFacture) !== target));
+  };
+
   // Handlers for Paiements
   const handleSavePaiement = (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
     saveWampData('paiements', newPaiement);
@@ -205,7 +213,103 @@ export function App() {
 
   const handleDeletePaiement = (id: string) => {
     deleteWampData('paiements', id);
-    setPaiements(prev => prev.filter(p => p.id !== id));
+    const remainingPaiements = paiements.filter(p => p.id !== id);
+    setPaiements(remainingPaiements);
+
+    const cleanNum = (n: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+
+    // Map payment lines from remaining paiements
+    const remainingPaidMap = new Map<string, { totalPaye: number; totalExclu: number; bordereaux: string[]; latestDate: string }>();
+    const remainingLinePaidMap = new Map<string, { totalPaye: number; totalExclu: number }>();
+
+    remainingPaiements.forEach(pm => {
+      (pm.lignes || []).forEach(lp => {
+        const net = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
+        const exclu = Number(lp.montantExclu || 0);
+        const pId = lp.prestationId;
+        const lId = lp.lignePrestationId;
+        const num = lp.prestationNumero ? cleanNum(lp.prestationNumero) : '';
+
+        if (pId) {
+          const cur = remainingPaidMap.get(pId) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
+          cur.totalPaye += net;
+          cur.totalExclu += exclu;
+          if (pm.numeroBordereau && !cur.bordereaux.includes(pm.numeroBordereau)) cur.bordereaux.push(pm.numeroBordereau);
+          if (pm.datePaiement && (!cur.latestDate || pm.datePaiement > cur.latestDate)) cur.latestDate = pm.datePaiement;
+          remainingPaidMap.set(pId, cur);
+        }
+        if (num) {
+          const cur = remainingPaidMap.get(num) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
+          cur.totalPaye += net;
+          cur.totalExclu += exclu;
+          if (pm.numeroBordereau && !cur.bordereaux.includes(pm.numeroBordereau)) cur.bordereaux.push(pm.numeroBordereau);
+          if (pm.datePaiement && (!cur.latestDate || pm.datePaiement > cur.latestDate)) cur.latestDate = pm.datePaiement;
+          remainingPaidMap.set(num, cur);
+        }
+        if (lId) {
+          const cur = remainingLinePaidMap.get(lId) || { totalPaye: 0, totalExclu: 0 };
+          cur.totalPaye += net;
+          cur.totalExclu += exclu;
+          remainingLinePaidMap.set(lId, cur);
+        }
+      });
+    });
+
+    setPrestations(prev => {
+      return prev.map(p => {
+        const num = cleanNum(p.numeroFacture);
+        const pPaidData = remainingPaidMap.get(p.id) || remainingPaidMap.get(num) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
+
+        let linesTotalPaye = 0;
+        let linesTotalExclu = 0;
+        const updatedLignes = (p.lignes || []).map(l => {
+          const lPaidData = remainingLinePaidMap.get(l.id) || { totalPaye: 0, totalExclu: 0 };
+          const lBrut = l.totalPrestation || 0;
+          const lPart = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes?.length || 1));
+          const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
+          const lReste = Math.max(0, lARemb - lPaidData.totalPaye - lPaidData.totalExclu);
+          const lStatut = lPaidData.totalExclu >= lARemb && lARemb > 0 && lPaidData.totalPaye === 0
+            ? 'Rejeté'
+            : (lPaidData.totalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && lPaidData.totalPaye > 0)
+            ? 'Payé'
+            : lPaidData.totalPaye > 0
+            ? 'Partiellement payé'
+            : 'En attente';
+
+          linesTotalPaye += lPaidData.totalPaye;
+          linesTotalExclu += lPaidData.totalExclu;
+
+          return {
+            ...l,
+            totalPaye: lPaidData.totalPaye,
+            statut: lStatut as any,
+          };
+        });
+
+        const totalPaye = Math.max(pPaidData.totalPaye, linesTotalPaye);
+        const totalExclu = Math.max(pPaidData.totalExclu, linesTotalExclu);
+        const tot = p.montantTotal ?? p.totalPrestation ?? 0;
+        const mod = p.ticketModerateur ?? p.participation ?? 0;
+        const remb = p.montantARembourser ?? Math.max(0, tot - mod);
+        const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
+
+        const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
+        const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
+        const isExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
+
+        const updatedP: Prestation = {
+          ...p,
+          totalPaye,
+          resteAPayer,
+          lignes: updatedLignes,
+          statut: isExcluded ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
+          datePaiement: pPaidData.latestDate || undefined,
+        };
+
+        saveWampData('prestations', updatedP);
+        return updatedP;
+      });
+    });
   };
 
   // Handlers for Societes
@@ -395,6 +499,7 @@ export function App() {
             selectedSocieteId={selectedSocieteId}
             onSavePrestation={handleSavePrestation}
             onDeletePrestation={handleDeletePrestation}
+            onDeleteFacture={handleDeleteFacture}
             onImportPrestations={handleImportPrestations}
             onSavePaiement={handleSavePaiement}
             isCreateModalOpen={isPrestationModalOpen}

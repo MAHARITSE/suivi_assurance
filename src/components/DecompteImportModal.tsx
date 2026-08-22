@@ -28,7 +28,10 @@ import {
   CalendarCheck,
   Tag,
   Filter,
-  ShieldCheck
+  ShieldCheck,
+  ShieldAlert,
+  Ban,
+  User
 } from 'lucide-react';
 import { 
   Paiement, 
@@ -53,6 +56,7 @@ interface DecompteImportModalProps {
   personnes: Personne[];
   prestations: Prestation[];
   familles: Famille[];
+  paiements?: Paiement[];
   onSavePaiement: (newPaiement: Paiement, updatedPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
 }
 
@@ -254,6 +258,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   personnes,
   prestations,
   familles,
+  paiements = [],
   onSavePaiement,
 }) => {
   const [importMode, setImportMode] = useState<'excel' | 'pdf'>('excel');
@@ -1235,8 +1240,23 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   const handleValidateAndSave = () => {
+    if (parsedDoc && isDuplicateBordereau) {
+      alert(`Attention : Le bordereau de règlement N° "${bordereauRefDoc}" existe déjà dans la base de données (${duplicatePaiementsCount} paiement(s) enregistré(s)). Veuillez vérifier pour éviter les doublons.`);
+      return;
+    }
     executeValidateAndSave();
   };
+
+  const cleanNum = (n?: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+  const bordereauRefDoc = parsedDoc?.numeroBordereau || parsedDoc?.numeroFacture || '';
+  const bordereauClean = cleanNum(bordereauRefDoc);
+  
+  // Check if bordereau reference already exists in paiements OR in paid lines
+  const duplicatePaiements = bordereauClean
+    ? paiements.filter(p => cleanNum(p.numeroBordereau) === bordereauClean || cleanNum(p.referencePaiement) === bordereauClean)
+    : [];
+  const isDuplicateBordereau = duplicatePaiements.length > 0;
+  const duplicatePaiementsCount = duplicatePaiements.length;
 
   const selectedRows = rows.filter(r => r.selected);
   const totalSelectedPaye = selectedRows.reduce((s, r) => s + r.netAPayer, 0);
@@ -1532,6 +1552,31 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
           {parsedDoc && (
             <div className="space-y-4">
+              {/* DUPLICATE WARNING BANNER IF BORDEREAU ALREADY EXISTS */}
+              {isDuplicateBordereau && (
+                <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 shadow-sm text-amber-900 animate-in fade-in">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white font-bold shadow-xs">
+                      <ShieldAlert className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-amber-800 bg-amber-200 px-2 py-0.5 rounded-md">
+                          Doublon Bordereau Détecté
+                        </span>
+                        <span className="text-xs font-bold text-amber-700">
+                          {duplicatePaiementsCount} paiement(s) déjà enregistré(s) avec cette référence
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-800 mt-1 font-medium leading-relaxed">
+                        Le numéro de bordereau / référence <strong>« {bordereauRefDoc} »</strong> existe déjà dans la base des règlements / paiements. 
+                        Pour éviter les doubles encaissements et les erreurs comptables, la validation de ce bordereau est bloquée. Si nécessaire, modifiez la référence ou supprimez l'ancien paiement.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Document Overview Bar */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
                 <div>
@@ -1847,14 +1892,34 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           {/* Matched Prescription Act with Live Comparison & Color Coding */}
                           <td className="py-2.5 px-3 min-w-[320px]">
                             {matched ? (
-                              <div className={`rounded-xl border p-2.5 text-xs space-y-1.5 shadow-2xs ${confront.cardBorderClass}`}>
-                                {/* Header: Code, Libellé & Confrontation Badge */}
+                              <div className={`rounded-xl border p-2.5 text-xs space-y-2 shadow-2xs ${confront.cardBorderClass}`}>
+                                {/* 1. Priorité N°1: Nom du Patient en évidence */}
+                                <div className="flex items-center justify-between gap-1.5 bg-white/90 dark:bg-slate-900/60 px-2 py-1.5 rounded-lg border border-slate-200/80 shadow-2xs">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                    <span className="font-extrabold text-slate-950 text-[12px] truncate uppercase tracking-tight" title={matched.personneNom}>
+                                      {matched.personneNom}
+                                    </span>
+                                    {matched.matricule && matched.matricule !== '-' && (
+                                      <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1 py-0.2 rounded shrink-0">
+                                        Mat: {matched.matricule}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {matched.prestationNum && (
+                                    <span className="text-[9px] text-slate-400 font-mono shrink-0" title={`Réf Facture interne : ${matched.prestationNum}`}>
+                                      N° {matched.prestationNum}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* 2. Acte Prescrit & Badge de Confrontation */}
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5 min-w-0">
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
                                       {matched.codeActe}
                                     </span>
-                                    <span className="font-bold text-slate-900 text-[11px] truncate" title={matched.libelleActe}>
+                                    <span className="font-semibold text-slate-700 text-[11px] truncate" title={matched.libelleActe}>
                                       {matched.libelleActe}
                                     </span>
                                   </div>
@@ -1867,8 +1932,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                   </span>
                                 </div>
 
-                                {/* Comparison Pills: Date & Gross Amount (sans TM) */}
-                                <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+                                {/* 3. Comparison Pills: Date & Gross Amount (sans TM) */}
+                                <div className="flex items-center flex-wrap gap-1.5">
                                   {confront.isSameDate ? (
                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                       ✓ Même Date ({formatDate(matched.prestationDate)})
@@ -1890,12 +1955,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                   )}
                                 </div>
 
-                                {/* Footer details: Facture, Patient & Reste à payer */}
+                                {/* 4. Footer details: Entreprise & Reste à payer */}
                                 <div className="text-[10px] text-slate-600 flex items-center justify-between border-t border-slate-200/60 pt-1">
-                                  <span className="truncate">
-                                    Facture: <strong>{matched.prestationNum}</strong> • {matched.personneNom}
+                                  <span className="truncate text-slate-500 font-medium">
+                                    {matched.sousSociete ? `Entreprise : ${matched.sousSociete}` : 'Acte enregistré en base'}
                                   </span>
-                                  <span className="font-mono font-bold text-emerald-800 shrink-0 ml-1">
+                                  <span className="font-mono font-bold text-emerald-800 shrink-0 ml-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                                     Reste : {formatMoney(matched.resteAPayer)}
                                   </span>
                                 </div>
@@ -1988,11 +2053,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             {parsedDoc && (
               <button
                 onClick={handleValidateAndSave}
-                disabled={selectedRows.length === 0}
-                className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:opacity-50 shadow-xs flex items-center gap-2 cursor-pointer"
+                disabled={selectedRows.length === 0 || isDuplicateBordereau}
+                className={`rounded-xl px-5 py-2 text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer ${
+                  isDuplicateBordereau
+                    ? 'bg-amber-600 text-white hover:bg-amber-500 opacity-60 cursor-not-allowed'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50'
+                }`}
+                title={isDuplicateBordereau ? 'Bordereau déjà existant dans la base des règlements' : undefined}
               >
-                <Check className="h-4 w-4" />
-                <span>Valider et Enregistrer le Règlement</span>
+                {isDuplicateBordereau ? <Ban className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                <span>{isDuplicateBordereau ? 'Bordereau déjà existant (Doublon)' : 'Valider et Enregistrer le Règlement'}</span>
               </button>
             )}
           </div>
@@ -2093,28 +2163,40 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                         }`}
                       >
                         <div className="space-y-1.5 flex-1 min-w-0">
-                          {/* Act header & Libelle + Live confrontation badge */}
+                          {/* 1. Nom du Patient en évidence (Priorité N°1) */}
                           <div className="flex items-center flex-wrap gap-2">
+                            <span className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              {cand.personneNom}
+                            </span>
+                            {cand.matricule && cand.matricule !== '-' && (
+                              <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                Mat: {cand.matricule}
+                              </span>
+                            )}
+                            {cand.sousSociete && (
+                              <span className="text-indigo-700 font-semibold text-[11px] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                                ({cand.sousSociete})
+                              </span>
+                            )}
+                            {cand.prestationNum && (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                (Facture N° {cand.prestationNum} • {formatDate(cand.prestationDate)})
+                              </span>
+                            )}
+                          </div>
+
+                          {/* 2. Act header & Libelle + Live confrontation badge */}
+                          <div className="flex items-center flex-wrap gap-2 pt-0.5">
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
                               {cand.codeActe}
                             </span>
-                            <span className="font-bold text-slate-900 text-xs truncate">
+                            <span className="font-semibold text-slate-800 text-xs truncate">
                               {cand.libelleActe}
                             </span>
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${compDetails.badgeClass}`}>
                               <span>{compDetails.label}</span>
                             </span>
-                          </div>
-
-                          {/* Patient & Invoice metadata */}
-                          <div className="text-[11px] text-slate-600 flex items-center flex-wrap gap-x-2.5 gap-y-0.5">
-                            <span className="font-semibold text-slate-900">{cand.personneNom}</span>
-                            <span className="font-mono text-slate-500">Mat: {cand.matricule}</span>
-                            {cand.sousSociete && (
-                              <span className="text-indigo-600 font-medium">({cand.sousSociete})</span>
-                            )}
-                            <span className="text-slate-400">•</span>
-                            <span>Facture: <strong>{cand.prestationNum}</strong> ({formatDate(cand.prestationDate)})</span>
                           </div>
 
                           {/* Detailed price breakdown & live comparison */}

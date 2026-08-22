@@ -13,7 +13,9 @@ import {
   ScanLine,
   Check,
   RotateCcw,
-  Building
+  Building,
+  ShieldAlert,
+  Ban
 } from 'lucide-react';
 import { Prestation, LignePrestation, Societe, Personne, Famille, ParsedFactureAssurance } from '../types';
 import { formatMoney, generateId, normalizeDateISO } from '../utils/formatters';
@@ -27,6 +29,7 @@ interface SalfaImportModalProps {
   societes: Societe[];
   personnes: Personne[];
   familles: Famille[];
+  prestations?: Prestation[];
   defaultSocieteId?: string;
   onImportPrestations: (newPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
 }
@@ -86,6 +89,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   societes,
   personnes,
   familles,
+  prestations = [],
   defaultSocieteId,
   onImportPrestations,
 }) => {
@@ -309,10 +313,41 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           throw new Error("L'extraction automatique du document PDF/Image n'a pas pu aboutir. Veuillez cliquer sur Réessayer l'analyse IA.");
         }
 
-        const data: ParsedFactureAssurance = json?.data || json;
-        if (!data || !Array.isArray(data.lignes) || data.lignes.length === 0) {
+        const rawData: ParsedFactureAssurance = json?.data || json;
+        if (!rawData || !Array.isArray(rawData.lignes) || rawData.lignes.length === 0) {
           throw new Error("Aucune ligne de prestation n'a pu être extraite. Veuillez vérifier la netteté du document et cliquer sur Réessayer.");
         } else {
+          // Normalize invoice number vs month of coverage
+          let numFact = (rawData.numeroFacture || '').trim();
+          let mois = (rawData.moisPriseEnCharge || '').trim();
+          const isMonth = (v: string) => /^(Janvier|F[ée]vrier|Mars|Avril|Mai|Juin|Juillet|Ao[uû]t|Septembre|Octobre|Novembre|D[ée]cembre)(\s+\d{2,4})?$/i.test(v.trim());
+          
+          if (isMonth(numFact)) {
+            if (!mois || isMonth(numFact)) mois = numFact;
+            numFact = '';
+          }
+          
+          const codeMatch = (str: string) => {
+            const m = str.match(/\b(FA[-_\s]*\d{1,4}\s*\/[A-Za-z0-9\s\-_\.]+\/\s*\d{2,4}(?:[-_\s]*\d+)?)\b/i) 
+              || str.match(/\b(FA[-_][A-Za-z0-9\/\-_]+)\b/i) 
+              || str.match(/\b(FACT[-_][A-Za-z0-9\/\-_]+)\b/i);
+            return m ? m[1].replace(/\s+/g, '').trim() : '';
+          };
+          
+          if (!numFact || isMonth(numFact)) {
+            const inMois = codeMatch(mois);
+            if (inMois) {
+              numFact = inMois;
+              mois = mois.replace(inMois, '').trim();
+            }
+          }
+
+          const data: ParsedFactureAssurance = {
+            ...rawData,
+            numeroFacture: numFact || rawData.numeroFacture || `FA-${Date.now().toString().substring(6)}`,
+            moisPriseEnCharge: mois || rawData.moisPriseEnCharge || 'Avril 2026'
+          };
+
           setParsedInvoice(data);
           const initialSelected: Record<number, boolean> = {};
           data.lignes.forEach((_, i) => { initialSelected[i] = true; });
@@ -539,8 +574,20 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   };
 
   const handleValidateImport = () => {
+    if (parsedInvoice && isDuplicateInvoice) {
+      alert(`Attention : La facture N° "${parsedInvoice.numeroFacture}" existe déjà dans la base (${duplicatePrestationsCount} prescription(s) enregistrée(s)). Veuillez vérifier pour éviter les doublons.`);
+      return;
+    }
     executeImportWithSociety();
   };
+
+  const cleanNum = (n?: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+  const invoiceNumClean = parsedInvoice?.numeroFacture ? cleanNum(parsedInvoice.numeroFacture) : '';
+  const duplicatePrestations = invoiceNumClean 
+    ? prestations.filter(p => cleanNum(p.numeroFacture) === invoiceNumClean)
+    : [];
+  const isDuplicateInvoice = duplicatePrestations.length > 0;
+  const duplicatePrestationsCount = duplicatePrestations.length;
 
   const selectedCount = parsedInvoice ? parsedInvoice.lignes.filter((_, i) => selectedLines[i]).length : 0;
   const totalDetectedCount = parsedInvoice ? parsedInvoice.lignes.length : 0;
@@ -809,6 +856,31 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
           {parsedInvoice && (
             <div className="space-y-4">
+              {/* DUPLICATE WARNING BANNER IF INVOICE ALREADY EXISTS */}
+              {isDuplicateInvoice && (
+                <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 shadow-sm text-amber-900 animate-in fade-in">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white font-bold shadow-xs">
+                      <ShieldAlert className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-amber-800 bg-amber-200 px-2 py-0.5 rounded-md">
+                          Doublon Facture Détecté
+                        </span>
+                        <span className="text-xs font-bold text-amber-700">
+                          {duplicatePrestationsCount} prescription(s) existante(s)
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-800 mt-1 font-medium leading-relaxed">
+                        Le numéro de facture <strong>« {parsedInvoice.numeroFacture} »</strong> est déjà présent dans la base de données des prescriptions. 
+                        Pour éviter les doublons accidentels, l'enregistrement est verrouillé. Si vous souhaitez réimporter, modifiez le numéro de facture ou supprimez l'existante au préalable.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* PROMINENT EXTRACTION STATS BANNER: Display total number of items to import before rows */}
               <div className="rounded-2xl border-2 border-indigo-300 bg-gradient-to-r from-indigo-50/90 to-sky-50/80 p-4 shadow-sm">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -847,6 +919,66 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     >
                       Tout décocher
                     </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Document Parameters Editable Card */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-2xs">
+                <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                  <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <FileText className="h-4 w-4 text-indigo-600" />
+                    Paramètres de la Facture Détectée
+                  </span>
+                  <span className="text-[11px] text-slate-400">Modifiable avant validation</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      N° Facture <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={parsedInvoice.numeroFacture || ''}
+                      onChange={(e) => setParsedInvoice({ ...parsedInvoice, numeroFacture: e.target.value })}
+                      placeholder="ex: FA-04/MCI/26-030"
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-indigo-950 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Mois de Prise en Charge
+                    </label>
+                    <input
+                      type="text"
+                      value={parsedInvoice.moisPriseEnCharge || ''}
+                      onChange={(e) => setParsedInvoice({ ...parsedInvoice, moisPriseEnCharge: e.target.value })}
+                      placeholder="ex: Avril 2026"
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs text-slate-800 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Organisme / Client
+                    </label>
+                    <input
+                      type="text"
+                      value={parsedInvoice.clientDoit || ''}
+                      onChange={(e) => setParsedInvoice({ ...parsedInvoice, clientDoit: e.target.value })}
+                      placeholder="ex: MCI CARE"
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs text-slate-800 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Date d'Émission
+                    </label>
+                    <input
+                      type="date"
+                      value={parsedInvoice.dateEmission || ''}
+                      onChange={(e) => setParsedInvoice({ ...parsedInvoice, dateEmission: e.target.value })}
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs text-slate-800 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
+                    />
                   </div>
                 </div>
               </div>
@@ -1043,11 +1175,16 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             {parsedInvoice && (
               <button
                 onClick={handleValidateImport}
-                disabled={selectedCount === 0}
-                className="rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50 shadow-xs flex items-center gap-2 cursor-pointer"
+                disabled={selectedCount === 0 || isDuplicateInvoice}
+                className={`rounded-xl px-5 py-2 text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer ${
+                  isDuplicateInvoice 
+                    ? 'bg-amber-600 text-white hover:bg-amber-500 opacity-60 cursor-not-allowed' 
+                    : 'bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50'
+                }`}
+                title={isDuplicateInvoice ? 'Facture déjà existante dans la base' : undefined}
               >
-                <Check className="h-4 w-4" />
-                <span>Enregistrer {selectedCount} Prestations</span>
+                {isDuplicateInvoice ? <Ban className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                <span>{isDuplicateInvoice ? 'Facture déjà existante (Doublon)' : `Enregistrer ${selectedCount} Prestations`}</span>
               </button>
             )}
           </div>

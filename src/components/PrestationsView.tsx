@@ -96,6 +96,7 @@ interface PrestationsViewProps {
   selectedSocieteId: string;
   onSavePrestation: (prestation: Prestation) => void;
   onDeletePrestation: (id: string) => void;
+  onDeleteFacture?: (numeroFacture: string) => void;
   onImportPrestations?: (newPrestations: Prestation[], newSocietes?: Societe[], newPersonnes?: Personne[]) => void;
   onSavePaiement?: (paiement: Paiement, updatedPrestations: Prestation[]) => void;
   isCreateModalOpen: boolean;
@@ -125,6 +126,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   selectedSocieteId,
   onSavePrestation,
   onDeletePrestation,
+  onDeleteFacture,
   onImportPrestations,
   onSavePaiement,
   isCreateModalOpen,
@@ -132,6 +134,12 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 }) => {
   // View mode state
   const [viewMode, setViewMode] = useState<PrestationViewMode>('detaillee');
+
+  // Cascade deletion states
+  const [factureToDelete, setFactureToDelete] = useState<GroupedFacture | null>(null);
+  const [factureDeleteBlocked, setFactureDeleteBlocked] = useState<{ facture: GroupedFacture; montantPaye: number; bordereaux: string[] } | null>(null);
+  const [prestationToDelete, setPrestationToDelete] = useState<Prestation | null>(null);
+  const [prestationDeleteBlocked, setPrestationDeleteBlocked] = useState<{ prestation: Prestation; montantPaye: number } | null>(null);
 
   // Multi-criteria filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -311,19 +319,26 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       acteLibelle?: string;
     }>> = {};
 
+    const cleanNum = (n: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+
     (paiements || []).forEach(pm => {
       (pm.lignes || []).forEach(lp => {
         const pId = lp.prestationId;
+        const pNum = lp.prestationNumero ? cleanNum(lp.prestationNumero) : '';
         const lId = lp.lignePrestationId;
         const amount = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
         const exclu = Number(lp.montantExclu || 0);
 
         if (amount > 0 || exclu > 0) {
-          if (pId) {
+          const keysToMap = new Set<string>();
+          if (pId) keysToMap.add(pId);
+          if (pNum) keysToMap.add(pNum);
+
+          keysToMap.forEach(k => {
             if (amount > 0) {
-              prestPaidMap[pId] = (prestPaidMap[pId] || 0) + amount;
-              if (!prestBordereauxMap[pId]) prestBordereauxMap[pId] = [];
-              prestBordereauxMap[pId].push({
+              prestPaidMap[k] = (prestPaidMap[k] || 0) + amount;
+              if (!prestBordereauxMap[k]) prestBordereauxMap[k] = [];
+              prestBordereauxMap[k].push({
                 bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
                 date: pm.datePaiement,
                 mode: pm.modePaiement || 'Virement',
@@ -334,9 +349,10 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
               });
             }
             if (exclu > 0) {
-              prestExcluMap[pId] = (prestExcluMap[pId] || 0) + exclu;
+              prestExcluMap[k] = (prestExcluMap[k] || 0) + exclu;
             }
-          }
+          });
+
           if (lId) {
             if (amount > 0) linePaidMap[lId] = (linePaidMap[lId] || 0) + amount;
             if (exclu > 0) lineExcluMap[lId] = (lineExcluMap[lId] || 0) + exclu;
@@ -393,29 +409,36 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const mod = p.ticketModerateur ?? p.participation ?? 0;
     const remb = p.montantARembourser ?? Math.max(0, tot - mod);
 
-    const paidFromPaiements = paymentsMap.prestPaidMap[p.id] || 0;
-    const excluFromPaiements = paymentsMap.prestExcluMap[p.id] || 0;
+    const cleanNum = (n: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+    const pNum = cleanNum(p.numeroFacture);
+
+    const paidFromPaiementsDirect = paymentsMap.prestPaidMap[p.id] || 0;
+    const paidFromPaiementsNum = pNum ? (paymentsMap.prestPaidMap[pNum] || 0) : 0;
+    const paidFromPaiements = Math.max(paidFromPaiementsDirect, paidFromPaiementsNum);
+
+    const excluFromPaiementsDirect = paymentsMap.prestExcluMap[p.id] || 0;
+    const excluFromPaiementsNum = pNum ? (paymentsMap.prestExcluMap[pNum] || 0) : 0;
+    const excluFromPaiements = Math.max(excluFromPaiementsDirect, excluFromPaiementsNum);
+
     const paidFromLines = (p.lignes || []).reduce((sum, l) => {
       const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
-      const lPaidStored = l.totalPaye || 0;
-      return sum + Math.max(lPaidStored, lPaidFromP);
+      return sum + lPaidFromP;
     }, 0);
     const excluFromLines = (p.lignes || []).reduce((sum, l) => {
       const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
       return sum + lExcluFromP;
     }, 0);
-    const paidFromPrestation = p.totalPaye || 0;
 
-    const totalPaye = Math.max(paidFromPaiements, paidFromLines, paidFromPrestation);
+    const totalPaye = Math.max(paidFromPaiements, paidFromLines);
     const totalExclu = Math.max(excluFromPaiements, excluFromLines);
     const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
 
-    const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && (totalPaye > 0 || remb === 0));
+    const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
     const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
     const isAllExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
     const statut = p.statut === 'Rejeté' || isAllExcluded 
       ? 'Rejeté' 
-      : isFullyPaid || resteAPayer <= 0 
+      : isFullyPaid 
       ? 'Payé' 
       : isPartiallyPaid 
       ? 'Partiellement payé' 
@@ -475,15 +498,15 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
     const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
     const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
-    const lTotalPaye = Math.max(l.totalPaye || 0, lPaidFromP);
+    const lTotalPaye = lPaidFromP;
     // Deduct exclusions from Reste à Payer since they are rejected
     const lReste = Math.max(0, lARemb - lTotalPaye - lExcluFromP);
-    const isFullyPaid = (lTotalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && (lTotalPaye > 0 || lARemb === 0));
+    const isFullyPaid = (lTotalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && lTotalPaye > 0);
     const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid && lReste > 0;
     const isLineExcluded = (lExcluFromP >= lARemb && lARemb > 0 && lTotalPaye === 0) || l.statut === 'Rejeté';
     const statut = isLineExcluded
       ? 'Rejeté'
-      : isFullyPaid || lReste <= 0
+      : isFullyPaid
       ? 'Payé'
       : isPartiallyPaid
       ? 'Partiellement payé'
@@ -1216,11 +1239,66 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     }));
   };
 
+  // Cascade invoice deletion handlers
+  const handleRequestDeleteFacture = (facture: GroupedFacture) => {
+    if (facture.totalPaye > 0 || facture.bordereaux.length > 0) {
+      setFactureDeleteBlocked({
+        facture,
+        montantPaye: facture.totalPaye,
+        bordereaux: facture.bordereaux.map(b => b.bordereau),
+      });
+      return;
+    }
+    setFactureToDelete(facture);
+  };
+
+  const handleConfirmDeleteFacture = () => {
+    if (!factureToDelete) return;
+    if (onDeleteFacture) {
+      onDeleteFacture(factureToDelete.numeroFacture);
+    } else {
+      factureToDelete.prestations.forEach(p => onDeletePrestation(p.id));
+    }
+    setFactureToDelete(null);
+    if (viewingFacture?.numeroFacture === factureToDelete.numeroFacture) {
+      setViewingFacture(null);
+    }
+  };
+
+  const handleRequestDeletePrestation = (prestation: Prestation) => {
+    const fin = getPrestationFinancials(prestation);
+    if (fin.totalPaye > 0) {
+      setPrestationDeleteBlocked({
+        prestation,
+        montantPaye: fin.totalPaye,
+      });
+      return;
+    }
+    setPrestationToDelete(prestation);
+  };
+
+  const handleConfirmDeletePrestation = () => {
+    if (!prestationToDelete) return;
+    onDeletePrestation(prestationToDelete.id);
+    setPrestationToDelete(null);
+    if (viewingPrestation?.id === prestationToDelete.id) {
+      setViewingPrestation(null);
+    }
+  };
+
   const handleSubmitForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.numeroFacture || !formData.personneId || !formData.societeId) {
       alert('Veuillez remplir tous les champs obligatoires (Facture, Société, Assuré).');
       return;
+    }
+
+    // Check if duplicate invoice already exists in database (when creating new)
+    const cleanNum = (n?: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+    const isDupFacture = !editingPrestation && prestations.some(p => cleanNum(p.numeroFacture) === cleanNum(formData.numeroFacture));
+    if (isDupFacture) {
+      const proceed = confirm(`Attention : La facture N° "${formData.numeroFacture}" existe déjà dans la base. Souhaitez-vous quand même l'enregistrer ?`);
+      if (!proceed) return;
     }
 
     const prestationToSave: Prestation = {
@@ -1639,6 +1717,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           factureSortDirection={factureSortDirection}
           onSort={handleFactureSort}
           onViewFacture={(f) => setViewingFacture(f)}
+          onDeleteFacture={handleRequestDeleteFacture}
           getPersonne={getPersonne}
         />
       ) : (
@@ -1942,12 +2021,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => {
-                                if (confirm(`Êtes-vous sûr de vouloir supprimer la facture ${prestation.numeroFacture} ?`)) {
-                                  onDeletePrestation(prestation.id);
-                                }
-                              }}
-                              title="Supprimer"
+                              onClick={() => handleRequestDeletePrestation(prestation)}
+                              title="Supprimer le dossier de soins"
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -2683,6 +2758,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         societes={societes}
         personnes={personnes}
         familles={familles}
+        prestations={prestations}
         defaultSocieteId={filterSocieteId !== 'ALL' ? filterSocieteId : (selectedSocieteId !== 'ALL' ? selectedSocieteId : undefined)}
         onImportPrestations={(newPrests, newSocs, newPers) => {
           if (onImportPrestations) {
@@ -2692,6 +2768,272 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           }
         }}
       />
+
+      {/* Facture Detail Modal */}
+      {viewingFacture && (
+        <FactureDetailModal
+          facture={viewingFacture}
+          onClose={() => setViewingFacture(null)}
+          onDeleteFacture={handleRequestDeleteFacture}
+          getPersonne={getPersonne}
+          getSocieteNom={getSocieteNom}
+        />
+      )}
+
+      {/* Confirmation Modal: Cascade Delete Entire Invoice */}
+      {factureToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-rose-100 flex flex-col">
+            <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 text-rose-900">
+                <div className="p-2 bg-rose-100 rounded-xl text-rose-700">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Supprimer la Facture en Cascade ?</h3>
+                  <p className="text-xs text-rose-700 font-medium">Action irréversible sur tous les dossiers liés</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFactureToDelete(null)}
+                className="p-1.5 text-rose-400 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs text-slate-700">
+              <p className="text-sm">
+                Êtes-vous sûr de vouloir supprimer définitivement la facture <strong className="font-bold text-slate-900 font-mono text-sm">{factureToDelete.numeroFacture}</strong> et l'ensemble de ses prescriptions et actes associés ?
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Société / Garant :</span>
+                  <span className="font-semibold text-slate-900">{factureToDelete.societeNom}</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Période / Date :</span>
+                  <span className="font-semibold text-slate-900">
+                    {factureToDelete.dateMin ? (factureToDelete.dateMin === factureToDelete.dateMax ? formatDate(factureToDelete.dateMin) : `${formatDate(factureToDelete.dateMin)} - ${formatDate(factureToDelete.dateMax)}`) : '-'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Dossiers / Prescriptions à supprimer :</span>
+                  <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                    {factureToDelete.prestations.length} bénéficiaire(s)
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Nombre total d'actes médicaux :</span>
+                  <span className="font-semibold text-slate-900">{factureToDelete.nombreActes} acte(s)</span>
+                </div>
+                <div className="flex justify-between items-center py-1">
+                  <span className="text-slate-500 font-medium">Montant total brut :</span>
+                  <span className="font-bold text-slate-900">{formatMoney(factureToDelete.totalFacture)}</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Contrôle de conformité validé :</strong> Aucun règlement ni bordereau de paiement n'a été rattaché à cette facture.
+                </span>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setFactureToDelete(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-700 bg-white hover:bg-slate-100 transition cursor-pointer"
+              >
+                Non, Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteFacture}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Oui, Supprimer toute la facture en cascade</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Blocked Modal: Invoice with Payments Cannot Be Deleted */}
+      {factureDeleteBlocked && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-amber-200 flex flex-col">
+            <div className="px-6 py-4 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 text-amber-900">
+                <div className="p-2 bg-amber-100 rounded-xl text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Suppression Impossible</h3>
+                  <p className="text-xs text-amber-700 font-medium">Des règlements ont déjà été enregistrés</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFactureDeleteBlocked(null)}
+                className="p-1.5 text-amber-400 hover:text-amber-700 hover:bg-amber-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3.5 text-xs text-slate-700">
+              <p>
+                La facture <strong className="font-bold text-slate-900 font-mono">{factureDeleteBlocked.facture.numeroFacture}</strong> ne peut pas être supprimée car elle est liée à des règlements comptables existants :
+              </p>
+
+              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2">
+                <div className="flex justify-between items-center py-0.5">
+                  <span className="text-slate-600 font-medium">Montant déjà réglé :</span>
+                  <span className="font-bold text-emerald-700">{formatMoney(factureDeleteBlocked.montantPaye)}</span>
+                </div>
+                {factureDeleteBlocked.bordereaux.length > 0 && (
+                  <div className="flex justify-between items-start py-0.5">
+                    <span className="text-slate-600 font-medium">Bordereau(x) de règlement :</span>
+                    <span className="font-semibold text-slate-900 text-right">
+                      {factureDeleteBlocked.bordereaux.join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-slate-100 rounded-xl text-slate-600 text-[11px] leading-relaxed">
+                <strong>Règle de gestion :</strong> Pour supprimer cette facture, vous devez d'abord supprimer ou délier les règlements correspondants dans l'onglet <strong>« Règlements »</strong>.
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setFactureDeleteBlocked(null)}
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+              >
+                Compris
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Single Dossier */}
+      {prestationToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-rose-100 flex flex-col">
+            <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 text-rose-900">
+                <div className="p-2 bg-rose-100 rounded-xl text-rose-700">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Supprimer le Dossier de Soins ?</h3>
+                  <p className="text-xs text-rose-700 font-medium">Suppression de la prescription individuelle</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPrestationToDelete(null)}
+                className="p-1.5 text-rose-400 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3.5 text-xs text-slate-700">
+              <p>
+                Êtes-vous sûr de vouloir supprimer ce dossier de soins ?
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Patient / Assuré :</span>
+                  <span className="font-bold text-slate-900">{prestationToDelete.nomAgent || getPersonne(prestationToDelete.personneId)?.nomPrenom}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">N° Facture :</span>
+                  <span className="font-mono font-semibold text-slate-900">{prestationToDelete.numeroFacture}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Date des soins :</span>
+                  <span className="font-semibold text-slate-900">{formatDate(prestationToDelete.date)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Total brut :</span>
+                  <span className="font-bold text-slate-900">{formatMoney(prestationToDelete.totalPrestation || prestationToDelete.montantTotal || 0)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPrestationToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-200 text-slate-700 bg-white hover:bg-slate-100 transition cursor-pointer"
+              >
+                Non, Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePrestation}
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Oui, Supprimer le dossier</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Blocked Modal: Single Dossier with Payments Cannot Be Deleted */}
+      {prestationDeleteBlocked && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-amber-200 flex flex-col">
+            <div className="px-6 py-4 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 text-amber-900">
+                <div className="p-2 bg-amber-100 rounded-xl text-amber-700">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Suppression Impossible</h3>
+                  <p className="text-xs text-amber-700 font-medium">Dossier avec règlement associé</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPrestationDeleteBlocked(null)}
+                className="p-1.5 text-amber-400 hover:text-amber-700 hover:bg-amber-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3.5 text-xs text-slate-700">
+              <p>
+                Ce dossier de soins ne peut pas être supprimé car un montant de <strong className="text-emerald-700 font-bold">{formatMoney(prestationDeleteBlocked.montantPaye)}</strong> a déjà été réglé.
+              </p>
+              <div className="p-3 bg-slate-100 rounded-xl text-slate-600 text-[11px] leading-relaxed">
+                Veuillez d'abord annuler ou supprimer le règlement dans l'onglet <strong>« Règlements »</strong> avant de supprimer ce dossier.
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPrestationDeleteBlocked(null)}
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+              >
+                Compris
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -117,6 +117,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const [expandedGroupRows, setExpandedGroupRows] = useState<Record<string, boolean>>({});
   const [groupLinesInBordereau, setGroupLinesInBordereau] = useState<boolean>(true);
   const [viewingPaiement, setViewingPaiement] = useState<Paiement | null>(null);
+  const [paiementToDelete, setPaiementToDelete] = useState<Paiement | null>(null);
   const [isDecompteModalOpen, setIsDecompteModalOpen] = useState<boolean>(false);
 
   // Sorting state for bordereaux
@@ -812,6 +813,15 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
       alert('Veuillez spécifier une référence de bordereau.');
       return;
     }
+    
+    // Check if duplicate bordereau already exists in database
+    const cleanRef = (r: string) => (r || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
+    const isDupBordereau = paiements.some(p => cleanRef(p.numeroBordereau) === cleanRef(bordereauRef));
+    if (isDupBordereau) {
+      alert(`Attention : Le bordereau de paiement N° "${bordereauRef}" existe déjà dans la base de données. Veuillez utiliser une référence unique pour éviter les doublons.`);
+      return;
+    }
+
     if (selectedStaged.length === 0) {
       alert('Veuillez cocher au moins une ligne de prestation à régler.');
       return;
@@ -1011,7 +1021,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                 }`}
               >
                 <Layers className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Regroupé par Patient + Date + Actes</span>
+                <span>Vue Détaillée (Dossiers)</span>
                 <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-emerald-100 text-emerald-800 font-bold">
                   {groupedPaymentActs.length}
                 </span>
@@ -1499,12 +1509,8 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                 <Eye className="w-3.5 h-3.5" />
                               </button>
                               <button
-                                onClick={() => {
-                                  if (confirm(`Voulez-vous supprimer le bordereau ${p.numeroBordereau} ?`)) {
-                                    onDeletePaiement(p.id);
-                                  }
-                                }}
-                                title="Supprimer"
+                                onClick={() => setPaiementToDelete(p)}
+                                title="Supprimer le bordereau de règlement"
                                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2208,10 +2214,23 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               </div>
             )}
 
-            <div className="flex justify-end pt-2">
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const toDel = viewingPaiement;
+                  setViewingPaiement(null);
+                  setPaiementToDelete(toDel);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Supprimer ce règlement</span>
+              </button>
+
               <button
                 onClick={() => setViewingPaiement(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition cursor-pointer"
               >
                 Fermer
               </button>
@@ -2493,6 +2512,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         personnes={personnes}
         prestations={prestations}
         familles={familles}
+        paiements={paiements}
         onSavePaiement={(newPaiement, updatedPrestations, newSocietes, newPersonnes) => {
           if (onImportPaiements) {
             onImportPaiements(newPaiement, updatedPrestations, newSocietes, newPersonnes);
@@ -2501,6 +2521,105 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           }
         }}
       />
+
+      {/* Confirmation Modal: Delete Entire Payment / Bordereau */}
+      {paiementToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-rose-100 flex flex-col">
+            <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 text-rose-900">
+                <div className="p-2 bg-rose-100 rounded-xl text-rose-700">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Supprimer le Règlement ?</h3>
+                  <p className="text-xs text-rose-700 font-medium">Bordereau comptable N° {paiementToDelete.numeroBordereau}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPaiementToDelete(null)}
+                className="p-1.5 text-rose-400 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs text-slate-700">
+              <p className="text-sm">
+                Êtes-vous sûr de vouloir supprimer définitivement ce bordereau de règlement ?
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">N° Bordereau :</span>
+                  <span className="font-mono font-bold text-slate-900">{paiementToDelete.numeroBordereau}</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Société / Garant :</span>
+                  <span className="font-semibold text-slate-900">
+                    {societes.find(s => s.id === paiementToDelete.societeId)?.nom || 'Société'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Date de règlement :</span>
+                  <span className="font-semibold text-slate-900">{formatDate(paiementToDelete.datePaiement)}</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Mode & Réf :</span>
+                  <span className="font-semibold text-slate-900">
+                    {paiementToDelete.modePaiement} {paiementToDelete.referencePaiement ? `(${paiementToDelete.referencePaiement})` : ''}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Lignes / Actes réglés :</span>
+                  <span className="font-semibold text-slate-900">{paiementToDelete.lignes.length} acte(s)</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-slate-500 font-medium">Total Réclamé :</span>
+                  <span className="font-semibold text-slate-700">{formatMoney(paiementToDelete.totalReclame)}</span>
+                </div>
+                <div className="flex justify-between items-center py-1 bg-emerald-50/70 -mx-1 px-2 rounded-lg">
+                  <span className="text-emerald-900 font-bold">Montant Total Réglé (Net) :</span>
+                  <span className="font-bold text-emerald-700 text-sm">{formatMoney(paiementToDelete.totalPaye)}</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Conséquence de la suppression :</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-800">
+                  Les montants réglés seront déduits de toutes les factures et actes associés. Leurs statuts repasseront automatiquement en <strong>« En attente » / non soldé</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPaiementToDelete(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-700 bg-white hover:bg-slate-100 transition cursor-pointer"
+              >
+                Non, Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (paiementToDelete) {
+                    onDeletePaiement(paiementToDelete.id);
+                    setPaiementToDelete(null);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Oui, Supprimer définitivement ce règlement</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

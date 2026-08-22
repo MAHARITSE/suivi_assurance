@@ -69,6 +69,8 @@ export interface Prestation {
   statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté';
   lignes: LignePrestation[];
   dateCreation: string;
+  datePaiement?: string;
+  numeroBordereau?: string;
   commentaires?: string;
 }
 
