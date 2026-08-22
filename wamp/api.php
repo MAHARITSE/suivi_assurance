@@ -623,6 +623,122 @@ function suiviWampMapPaiement(array $row, array $lines): array
 }
 
 /**
+ * Génère un diagnostic complet de l'installation WAMP : version de PHP,
+ * extension MySQL, serveur web, connexion et contenu de la base.
+ *
+ * Accessible via : api.php?action=diagnostic
+ *
+ * @return array<string, mixed>
+ */
+function suiviWampDiagnostic(): array
+{
+    $checks = [];
+    $ok = true;
+
+    // 1) Version de PHP — le connecteur exige PHP 7.1 minimum.
+    $phpOk = version_compare(PHP_VERSION, '7.1.0', '>=');
+    $checks[] = [
+        'check' => 'Version PHP',
+        'ok' => $phpOk,
+        'detail' => 'PHP ' . PHP_VERSION . ' détecté. Version minimale requise : PHP 7.1 (PHP 7.4 ou supérieur recommandé). '
+            . 'En cas de problème, changez la version via l\'icône WAMP → Apache → Version.',
+    ];
+    $ok = $ok && $phpOk;
+
+    // 2) Extension PDO MySQL.
+    $pdoOk = extension_loaded('pdo_mysql');
+    $checks[] = [
+        'check' => 'Extension PHP pdo_mysql',
+        'ok' => $pdoOk,
+        'detail' => $pdoOk
+            ? 'L\'extension pdo_mysql est activée.'
+            : 'L\'extension pdo_mysql est absente. Activez-la via l\'icône WAMP → Apache → Modules → pdo_mysql (puis redémarrez Apache).',
+    ];
+    $ok = $ok && $pdoOk;
+
+    // 3) Serveur web (Apache attendu avec WAMP).
+    $serverSoftware = suiviWampString($_SERVER['SERVER_SOFTWARE'] ?? '');
+    $checks[] = [
+        'check' => 'Serveur web',
+        'ok' => $serverSoftware !== '',
+        'detail' => $serverSoftware !== ''
+            ? $serverSoftware
+            : 'Serveur web inconnu (le fichier est probablement exécuté hors Apache : ouvrez la page via http://localhost/...).',
+    ];
+
+    // 4) Connexion MySQL puis état de la base et des tables.
+    $database = [
+        'connected' => false,
+        'host' => SUIVI_DB_HOST,
+        'port' => SUIVI_DB_PORT,
+        'name' => SUIVI_DB_NAME,
+        'user' => SUIVI_DB_USER,
+    ];
+
+    try {
+        $pdo = suiviWampPdo();
+        $pdo->query('SELECT 1');
+        $database['connected'] = true;
+        $database['serverVersion'] = suiviWampString($pdo->getAttribute(PDO::ATTR_SERVER_VERSION));
+
+        $expectedTables = [
+            'societes',
+            'personnes',
+            'familles',
+            'prestations',
+            'lignes_prestation',
+            'paiements',
+            'lignes_paiement',
+        ];
+
+        $statement = $pdo->query('SHOW TABLES');
+        $existingTables = array_map('strval', $statement->fetchAll(PDO::FETCH_COLUMN));
+
+        $missingTables = array_values(array_diff($expectedTables, $existingTables));
+        $database['missingTables'] = $missingTables;
+
+        $tablesOk = $missingTables === [];
+        $checks[] = [
+            'check' => 'Base de données « ' . SUIVI_DB_NAME . ' »',
+            'ok' => $tablesOk,
+            'detail' => $tablesOk
+                ? 'Connexion réussie et les 7 tables sont présentes.'
+                : 'Connexion réussie mais tables manquantes : ' . implode(', ', $missingTables)
+                    . '. Importez le fichier schema_wamp.sql dans phpMyAdmin (onglet Importer).',
+        ];
+        $ok = $ok && $tablesOk;
+
+        // 5) Contenu de la base (utile pour distinguer une base vide d'un problème d'accès).
+        $counts = [];
+        foreach ($expectedTables as $table) {
+            if (in_array($table, $existingTables, true)) {
+                $count = $pdo->query('SELECT COUNT(*) FROM `' . $table . '`');
+                $counts[$table] = (int) $count->fetchColumn();
+            }
+        }
+        $database['rowCounts'] = $counts;
+    } catch (Throwable $error) {
+        $database['error'] = $error->getMessage();
+        $checks[] = [
+            'check' => 'Connexion MySQL',
+            'ok' => false,
+            'detail' => 'Connexion impossible sur ' . SUIVI_DB_HOST . ':' . SUIVI_DB_PORT
+                . ' avec l\'utilisateur « ' . SUIVI_DB_USER . ' ». Vérifiez que le service MySQL est démarré '
+                . '(icône WAMP verte), que le port est correct (3306 par défaut, parfois 3308) et que le mot de passe '
+                . 'dans config.php correspond à votre installation. Erreur : ' . $error->getMessage(),
+        ];
+        $ok = false;
+    }
+
+    return [
+        'ok' => $ok,
+        'checks' => $checks,
+        'database' => $database,
+        'timestamp' => gmdate('c'),
+    ];
+}
+
+/**
  * Lit une collection complète en la convertissant dans le format camelCase attendu par React.
  * @return array<int, mixed>
  */
@@ -690,10 +806,19 @@ function suiviWampFetchAction(PDO $pdo, string $action): array
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $action = strtolower(suiviWampString($_GET['action'] ?? ''));
-$actions = ['societes', 'personnes', 'familles', 'prestations', 'paiements', 'health'];
+$actions = ['societes', 'personnes', 'familles', 'prestations', 'paiements', 'health', 'diagnostic'];
 
 if (!in_array($action, $actions, true)) {
     suiviWampError('Action WAMP inconnue.', 404);
+}
+
+// Le diagnostic s'exécute sans connexion préalable : il doit rester utilisable
+// même lorsque MySQL n'est pas démarré ou mal configuré.
+if ($action === 'diagnostic') {
+    suiviWampJsonResponse([
+        'success' => true,
+        'data' => suiviWampDiagnostic(),
+    ]);
 }
 
 try {
@@ -800,7 +925,8 @@ try {
 } catch (PDOException $error) {
     error_log('[suivi_assurance WAMP] ' . $error->getMessage());
     suiviWampError(
-        'Connexion ou requête MySQL impossible. Vérifiez que WAMP, Apache et MySQL sont démarrés et que la base suivi_assurance_salfa a été importée.',
+        'Connexion ou requête MySQL impossible. Vérifiez que WAMP, Apache et MySQL sont démarrés et que la base suivi_assurance_salfa a été importée. '
+        . 'Ouvrez api.php?action=diagnostic pour identifier précisément le problème.',
         503
     );
 } catch (Throwable $error) {

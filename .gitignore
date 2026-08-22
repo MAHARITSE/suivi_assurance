@@ -6,3 +6,4 @@ dist/
 # Bundle statique généré pour la copie dans WAMP
 wamp/index.html
 wamp/assets/
+wamp/schema_wamp.sql
