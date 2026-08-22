@@ -2,3 +2,7 @@ node_modules/
 dist/
 .env
 *.log
+
+# Bundle statique généré pour la copie dans WAMP
+wamp/index.html
+wamp/assets/

@@ -262,6 +262,7 @@ export function generateMySQLDump(data: {
   lines.push(`  \`montant_reclame\` DECIMAL(15,2) DEFAULT 0.00,`);
   lines.push(`  \`code_acte\` VARCHAR(50) DEFAULT NULL,`);
   lines.push(`  \`libelle_acte\` VARCHAR(255) DEFAULT NULL,`);
+  lines.push(`  \`actes_payes\` LONGTEXT DEFAULT NULL,`);
   lines.push(`  \`commentaire\` TEXT DEFAULT NULL,`);
   lines.push(`  PRIMARY KEY (\`id\`),`);
   lines.push(`  KEY \`idx_lp_paiement\` (\`paiement_id\`)`);
@@ -271,9 +272,9 @@ export function generateMySQLDump(data: {
   const allLignesPaiement = (data.paiements || []).flatMap(p => p.lignes || []);
   if (allLignesPaiement.length > 0) {
     lines.push(`-- Contenu de la table \`lignes_paiement\``);
-    lines.push(`INSERT INTO \`lignes_paiement\` (\`id\`, \`paiement_id\`, \`ligne_prestation_id\`, \`prestation_id\`, \`immatriculation\`, \`nom_base_assurance\`, \`nom_agent\`, \`prestation_numero\`, \`date_soins\`, \`total_paye\`, \`ticket_moderateur\`, \`montant_exclu\`, \`montant_reclame\`, \`code_acte\`, \`libelle_acte\`, \`commentaire\`) VALUES`);
+    lines.push(`INSERT INTO \`lignes_paiement\` (\`id\`, \`paiement_id\`, \`ligne_prestation_id\`, \`prestation_id\`, \`immatriculation\`, \`nom_base_assurance\`, \`nom_agent\`, \`prestation_numero\`, \`date_soins\`, \`total_paye\`, \`ticket_moderateur\`, \`montant_exclu\`, \`montant_reclame\`, \`code_acte\`, \`libelle_acte\`, \`actes_payes\`, \`commentaire\`) VALUES`);
     const values = allLignesPaiement.map(l => 
-      `(${escapeSQL(l.id)}, ${escapeSQL(l.paiementId)}, ${escapeSQL(l.lignePrestationId)}, ${escapeSQL(l.prestationId)}, ${escapeSQL(l.immatriculation)}, ${escapeSQL(l.nomBaseAssurance)}, ${escapeSQL(l.nomAgent)}, ${escapeSQL(l.prestationNumero)}, ${escapeSQL(l.dateSoins)}, ${escapeSQL(l.totalPaye ?? l.montantPaye ?? 0)}, ${escapeSQL(l.ticketModerateur ?? 0)}, ${escapeSQL(l.montantExclu ?? 0)}, ${escapeSQL(l.montantReclame ?? 0)}, ${escapeSQL(l.codeActe)}, ${escapeSQL(l.libelleActe)}, ${escapeSQL(l.commentaire)})`
+      `(${escapeSQL(l.id)}, ${escapeSQL(l.paiementId)}, ${escapeSQL(l.lignePrestationId)}, ${escapeSQL(l.prestationId)}, ${escapeSQL(l.immatriculation)}, ${escapeSQL(l.nomBaseAssurance)}, ${escapeSQL(l.nomAgent)}, ${escapeSQL(l.prestationNumero)}, ${escapeSQL(l.dateSoins)}, ${escapeSQL(l.totalPaye ?? l.montantPaye ?? 0)}, ${escapeSQL(l.ticketModerateur ?? 0)}, ${escapeSQL(l.montantExclu ?? 0)}, ${escapeSQL(l.montantReclame ?? 0)}, ${escapeSQL(l.codeActe)}, ${escapeSQL(l.libelleActe)}, ${escapeSQL(l.actesPayes || [])}, ${escapeSQL(l.commentaire)})`
     );
     lines.push(values.join(',\n') + ';');
     lines.push(``);
