@@ -161,4 +161,28 @@ CREATE TABLE `lignes_paiement` (
   KEY `idx_lp_paiement` (`paiement_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- --------------------------------------------------------
+-- Données initiales : societes
+-- --------------------------------------------------------
+INSERT INTO `societes` (`id`, `nom`, `code`, `contact`, `telephone`, `email`, `adresse`, `taux_couverture_defaut`) VALUES
+('soc-mcicare', 'MCI CARE', 'MCI CARE', 'Direction Santé & Tiers-Payant', '+261 20 22 200 00', 'contact@mcicare.mg', 'Antananarivo, Madagascar', 100.00),
+('soc-nyhavana', 'NY HAVANA', 'NY HAVANA', 'Direction Santé & Sinistres', '+261 20 22 211 44', 'sante@nyhavana.mg', 'Antananarivo, Madagascar', 100.00),
+('soc-bsa', 'BSA', 'BSA', 'Direction Médicale', '+261 20 22 300 00', 'contact@bsa.mg', 'Antananarivo, Madagascar', 100.00),
+('soc-ascoma', 'ASCOMA', 'ASCOMA', 'Direction Santé', '+261 20 22 400 00', 'sante@ascoma.mg', 'Antananarivo, Madagascar', 100.00)
+ON DUPLICATE KEY UPDATE `nom` = VALUES(`nom`);
+
+-- --------------------------------------------------------
+-- Données initiales : familles
+-- --------------------------------------------------------
+INSERT INTO `familles` (`id`, `code`, `libelle`, `plafond_annuel`, `taux_standard`, `tarif_conventionne`, `ticket_moderateur_defaut`, `description`, `aliases`) VALUES
+('fam-cons', 'CONS', 'Consultations & Visites Médicales', NULL, NULL, 20000.00, 0.00, 'Consultations de médecine générale et spécialisée', '["CONS","CG","CONSULTATION","CONSULT","VISITE","VISITE MEDICALE","MEDECIN","CS"]'),
+('fam-medic', 'MEDIC', 'Pharmacie & Médicaments', NULL, NULL, 0.00, 0.00, 'Médicaments prescrits, spécialités pharmaceutiques et consommables', '["MEDIC","PH","PHSB","PHAR","PHARMACIE","STOCK","PRODUITS PHARMACEUTIQUES","DROGUERIE","MEDICAMENTS"]'),
+('fam-labo', 'LABO', 'Analyses & Biologie Médicale', NULL, NULL, 0.00, 0.00, 'Examens de laboratoire, hématologie, biochimie, sérologie', '["LABO","EB","ANALYSES","BIOLOGIE","EXAMENS","TDR","TDR PALU","NFS","BIO"]'),
+('fam-soins', 'SOINS', 'Soins Infirmiers & Actes Externes', NULL, NULL, 0.00, 0.00, 'Injections, pansements, perfusions, aérosols et soins ambulatoires', '["SOINS","SI","PANSEMENT","INJECTION","PERFUSION","ACTES INFIRMIERS","SOIN"]'),
+('fam-dent', 'DENT', 'Soins & Prothèses Dentaires', NULL, NULL, 50000.00, 0.00, 'Soins conservateurs, extractions, détartrage et prothèses dentaires', '["DENT","DC","DK","DENTAIRE","EXTRACTION","DETARTRAGE","ODONTOLOGIE","RADICULAIRE"]'),
+('fam-hosp', 'HOSP', 'Hospitalisation & Séjour', NULL, NULL, 60000.00, 0.00, 'Séjours en clinique, frais de chambre, soins intensifs et chirurgie', '["HOSP","HOSPITALISATION","SEJOUR","CHIRURGIE","CHIRURG","ACCOUCHEMENT","BLOC"]'),
+('fam-echo', 'ECHO', 'Échographie & Imagerie Médicale', NULL, NULL, 30000.00, 0.00, 'Échographies abdominales, pelviennes, radiographies standard', '["ECHO","ECHOGRAPHIE","RADI","RADIO","RADIOLOGIE","SCANNER","IRM","IMAGERIE"]'),
+('fam-opht', 'OPHT', 'Ophtalmologie & Optique', NULL, NULL, 25000.00, 0.00, 'Consultations ophtalmologiques, verres correcteurs et montures', '["OPHT","OPHTALMOLOGIE","OPHTA","LUNETTES","VERRES","OPTIQUE","MONTURE"]')
+ON DUPLICATE KEY UPDATE `libelle` = VALUES(`libelle`);
+
 SET FOREIGN_KEY_CHECKS = 1;
