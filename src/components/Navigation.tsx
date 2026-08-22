@@ -10,6 +10,7 @@ import {
   Layers,
   Printer,
   Type,
+  BookOpen,
 } from 'lucide-react';
 import { ActiveTab } from '../types';
 
@@ -35,6 +36,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }
     { id: 'familles', label: 'Actes', icon: Layers },
     { id: 'etats', label: 'Rapports', icon: Printer },
     { id: 'entete', label: 'Entête', icon: Type, startsGroup: true },
+    { id: 'tuto', label: 'Tutoriel', icon: BookOpen },
   ];
 
   return (
