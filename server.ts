@@ -1018,12 +1018,65 @@ Décompose rigoureusement chaque acte médical, les matricules, les montants ré
     }
   });
 
-  // Support for api.php in dev preview server
+  // Support for api.php in dev preview server (in-memory mock store)
+  const devDb: Record<string, any[]> = {
+    societes: [],
+    personnes: [],
+    familles: [],
+    prestations: [],
+    paiements: []
+  };
+
   app.all('/api.php', (req, res) => {
-    const action = req.query.action;
+    const action = String(req.query.action || '').toLowerCase();
+    const method = req.method.toUpperCase();
+
     if (action === 'check_db' || action === 'health') {
-      return res.json({ success: true, db_connected: true, message: 'Dev Mode Active' });
+      return res.json({
+        success: true,
+        database: 'suivi_assurance_salfa',
+        server: 'NodeJS Dev Preview',
+        counts: {
+          societes: devDb.societes.length,
+          personnes: devDb.personnes.length,
+          familles: devDb.familles.length,
+          prestations: devDb.prestations.length,
+          lignes_prestation: 0,
+          paiements: devDb.paiements.length,
+          lignes_paiement: 0
+        },
+        timestamp: new Date().toISOString()
+      });
     }
+
+    if (!devDb[action]) {
+      devDb[action] = [];
+    }
+
+    if (method === 'GET') {
+      return res.json({ success: true, count: devDb[action].length, data: devDb[action] });
+    }
+
+    if (method === 'POST') {
+      const body = req.body;
+      const items = Array.isArray(body) ? body : (body ? [body] : []);
+      items.forEach(item => {
+        if (!item || !item.id) return;
+        const idx = devDb[action].findIndex(x => x.id === item.id);
+        if (idx >= 0) devDb[action][idx] = item;
+        else devDb[action].push(item);
+      });
+      return res.json({ success: true, count: items.length, message: `${items.length} enregistré(s)` });
+    }
+
+    if (method === 'DELETE') {
+      const id = String(req.query.id || '');
+      if (id) {
+        devDb[action] = devDb[action].filter(x => x.id !== id);
+      }
+      return res.json({ success: true, message: 'Supprimé' });
+    }
+
     return res.json({ success: true, data: [] });
   });
 
