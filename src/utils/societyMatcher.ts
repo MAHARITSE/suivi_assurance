@@ -33,14 +33,22 @@ export function findBestMatchingSociete(
   );
   if (exact) return exact;
 
-  // 3. Known Insurance Keywords Priority (prevents false matches between MCI CARE and BSA)
+  // 3. Known Insurance Keywords Priority (prevents false matches between MCI CARE, BSA, ASCOMA, SANLAM, NY HAVANA)
   if (
     clean.includes('mci') || 
     clean.includes('mcicare') || 
     clean.includes('mci care') || 
+    clean.includes('sanlamallianz') ||
+    clean.includes('sanlam allianz') ||
+    clean.includes('compagnie sanlamallianz') ||
+    clean.includes('sanlam') ||
     clean.includes('conservation international') ||
     clean.includes('conservation internationale')
   ) {
+    // If SANLAM exists separately in societes, match it, otherwise match MCI CARE
+    const sanlam = societes.find(s => s.nom.toUpperCase().includes('SANLAM') || s.code.toUpperCase().includes('SANLAM'));
+    if (sanlam && (clean.includes('sanlam') || clean.includes('sanlamallianz'))) return sanlam;
+
     const mci = societes.find(s => s.code.toUpperCase().includes('MCI') || s.nom.toUpperCase().includes('MCI'));
     if (mci) return mci;
   }
@@ -55,18 +63,30 @@ export function findBestMatchingSociete(
     if (havana) return havana;
   }
 
-  if (clean.includes('ascoma')) {
+  if (
+    clean.includes('ascoma') ||
+    clean.includes('decompte de reglement tiers payant') ||
+    clean.includes('décompte de règlement tiers payant') ||
+    clean.includes('centre : dispensaire lutherien toliara code : 599') ||
+    clean.includes('code : 599')
+  ) {
     const ascoma = societes.find(s => s.nom.toUpperCase().includes('ASCOMA') || s.code.toUpperCase().includes('ASCOMA'));
     if (ascoma) return ascoma;
   }
 
   if (
     clean.includes('bsa') || 
+    clean.includes('ask gs') ||
+    clean.includes('bsa / ask gs') ||
     clean.includes('gras savoye') || 
     clean.includes('ask gras') ||
-    clean.includes('ask gras savoye')
+    clean.includes('ask gras savoye') ||
+    clean.includes('releve de remboursements des frais de sante') ||
+    clean.includes('relevé de remboursements des frais de santé') ||
+    clean.includes('bfv') ||
+    clean.includes('bred madagasikara')
   ) {
-    const bsa = societes.find(s => s.code.toUpperCase() === 'BSA' || s.nom.toUpperCase().includes('BSA'));
+    const bsa = societes.find(s => s.code.toUpperCase() === 'BSA' || s.nom.toUpperCase().includes('BSA') || s.nom.toUpperCase().includes('GRAS SAVOYE'));
     if (bsa) return bsa;
   }
 

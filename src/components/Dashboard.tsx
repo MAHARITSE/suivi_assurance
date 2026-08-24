@@ -311,30 +311,49 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </td>
                   </tr>
                 )}
-                {filteredPrestations.slice(0, 5).map(prestation => (
-                  <tr key={prestation.id} className="hover:bg-slate-50/80 transition">
-                    <td className="py-2.5 px-3 text-slate-600">{formatDate(prestation.date)}</td>
-                    <td className="py-2.5 px-3 font-semibold text-indigo-600">{prestation.numeroFacture}</td>
-                    <td className="py-2.5 px-3 font-medium text-slate-900">{getPersonneNom(prestation.personneId)}</td>
-                    <td className="py-2.5 px-3 text-slate-600">{getSocieteNom(prestation.societeId)}</td>
-                    <td className="py-2.5 px-3 text-right font-semibold text-slate-900">
-                      {formatMoney(prestation.totalPrestation)}
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        prestation.statut === 'Payé'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : prestation.statut === 'Partiellement payé'
-                          ? 'bg-sky-100 text-sky-800'
-                          : prestation.statut === 'Rejeté'
-                          ? 'bg-rose-100 text-rose-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {prestation.statut}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {filteredPrestations.slice(0, 5).map(prestation => {
+                  const pTot = prestation.totalPrestation || 0;
+                  const pMod = prestation.participation || 0;
+                  const pRemb = prestation.montantARembourser ?? Math.max(0, pTot - pMod);
+                  const pPaye = prestation.totalPaye || 0;
+                  const pExclu = prestation.montantExclu || 0;
+                  const pReste = Math.max(0, pRemb - pPaye - pExclu);
+                  const isFullyPaid = (pPaye >= pRemb && pRemb > 0) || (pReste <= 0 && pPaye > 0);
+                  const isPartiallyPaid = pPaye > 0 && !isFullyPaid && pReste > 0;
+                  const isExclu = pExclu >= pRemb && pRemb > 0 && pPaye === 0;
+                  const statutDisplay = isExclu
+                    ? 'Rejeté'
+                    : isFullyPaid
+                    ? 'Payé'
+                    : isPartiallyPaid
+                    ? 'Partiellement payé'
+                    : 'En attente';
+
+                  return (
+                    <tr key={prestation.id} className="hover:bg-slate-50/80 transition">
+                      <td className="py-2.5 px-3 text-slate-600">{formatDate(prestation.date)}</td>
+                      <td className="py-2.5 px-3 font-semibold text-indigo-600">{prestation.numeroFacture}</td>
+                      <td className="py-2.5 px-3 font-medium text-slate-900">{getPersonneNom(prestation.personneId)}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{getSocieteNom(prestation.societeId)}</td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-slate-900">
+                        {formatMoney(prestation.totalPrestation)}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          statutDisplay === 'Payé'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : statutDisplay === 'Partiellement payé'
+                            ? 'bg-sky-100 text-sky-800'
+                            : statutDisplay === 'Rejeté'
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {statutDisplay}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

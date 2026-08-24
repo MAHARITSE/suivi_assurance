@@ -31,6 +31,7 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingFamille, setEditingFamille] = useState<Famille | null>(null);
+  const [familleToDelete, setFamilleToDelete] = useState<Famille | null>(null);
   
   // Quick inline alias input state on cards: { [familleId]: currentText }
   const [quickAliasInputs, setQuickAliasInputs] = useState<Record<string, string>>({});
@@ -226,12 +227,9 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => {
-                        if (confirm(`Supprimer l'acte médical ${fam.libelle} (${fam.code}) ?`)) {
-                          onDeleteFamille(fam.id);
-                        }
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                      type="button"
+                      onClick={() => setFamilleToDelete(fam)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
                       title="Supprimer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -477,6 +475,48 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmation de Suppression */}
+      {familleToDelete && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-600">
+              <div className="p-2.5 bg-rose-100 rounded-full">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Supprimer l'acte médical ?</h3>
+                <p className="text-[11px] text-slate-500 font-mono">Code: {familleToDelete.code}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Voulez-vous vraiment supprimer l'acte médical <strong className="text-slate-900 font-bold">{familleToDelete.libelle}</strong> ?
+              Cette action le retirera du catalogue d'actes.
+            </p>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setFamilleToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-100 transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteFamille(familleToDelete.id);
+                  setFamilleToDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-sm transition cursor-pointer"
+              >
+                Confirmer la suppression
+              </button>
+            </div>
           </div>
         </div>
       )}

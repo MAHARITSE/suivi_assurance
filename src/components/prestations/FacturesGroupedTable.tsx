@@ -409,7 +409,18 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
                                     const pPart = p.participation || 0;
                                     const pRemb = Math.max(0, pTot - pPart);
                                     const pPaye = p.totalPaye || 0;
-                                    const pReste = Math.max(0, pRemb - pPaye);
+                                    const pExclu = p.montantExclu || 0;
+                                    const pReste = Math.max(0, pRemb - pPaye - pExclu);
+                                    const isFullyPaid = (pPaye >= pRemb && pRemb > 0) || (pReste <= 0 && pPaye > 0);
+                                    const isPartiallyPaid = pPaye > 0 && !isFullyPaid && pReste > 0;
+                                    const isExcluded = pExclu >= pRemb && pRemb > 0 && pPaye === 0;
+                                    const pStatut = isExcluded
+                                      ? 'Rejeté'
+                                      : isFullyPaid
+                                      ? 'Payé'
+                                      : isPartiallyPaid
+                                      ? 'Partiellement payé'
+                                      : 'En attente';
 
                                     return (
                                       <tr key={p.id || pIdx} className="hover:bg-slate-50/80">
@@ -445,15 +456,15 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
                                         </td>
                                         <td className="py-2 px-2.5 text-center">
                                           <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                            p.statut === 'Payé'
+                                            pStatut === 'Payé'
                                               ? 'bg-emerald-100 text-emerald-800'
-                                              : p.statut === 'Partiellement payé'
+                                              : pStatut === 'Partiellement payé'
                                               ? 'bg-sky-100 text-sky-800'
-                                              : p.statut === 'Rejeté'
+                                              : pStatut === 'Rejeté'
                                               ? 'bg-rose-100 text-rose-800'
                                               : 'bg-amber-100 text-amber-800'
                                           }`}>
-                                            {p.statut}
+                                            {pStatut}
                                           </span>
                                         </td>
                                       </tr>

@@ -46,6 +46,8 @@ export interface LignePrestation {
   ticketModerateur?: number; // Part modérateur assuré sur cet acte
   montantARembourser?: number; // Net à rembourser sur cet acte
   totalPaye: number; // Montant cumulé payé à travers tous les règlements
+  montantExclu?: number; // Montant exclu / rejeté
+  motifExclusion?: string; // Motif de l'exclusion
   statut?: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté';
 }
 
@@ -65,6 +67,8 @@ export interface Prestation {
   ticketModerateur?: number; // Alias ticket modérateur
   montantARembourser?: number; // Montant à rembourser (total - ticket modérateur)
   totalPaye?: number; // Somme cumulée payée (règlements multiples)
+  montantExclu?: number; // Montant exclu / rejeté
+  motifExclusion?: string; // Motif d'exclusion / rejet
   resteAPayer?: number; // Reste à recouvrer
   statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté';
   lignes: LignePrestation[];
@@ -195,8 +199,7 @@ export type ActiveTab =
   | 'personnes'
   | 'familles'
   | 'etats'
-  | 'entete'
-  | 'tuto';
+  | 'entete';
 
 export interface EnteteConfig {
   etablissement: string;

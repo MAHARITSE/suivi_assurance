@@ -792,9 +792,25 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const handleUpdateStagedLine = (index: number, field: keyof StagedPaymentLine, value: any) => {
     setStagedLines(prev => {
       const updated = [...prev];
+      const target = { ...updated[index] };
+      let finalValue = value;
+
+      if (field === 'montantExclu') {
+        const inputNum = Number(value) || 0;
+        const totalActe = Number(target.montantFacture || target.resteAPayer || 0);
+        // Si le montant à exclure dépasse le montant total de l'acte, mettre automatiquement le montant total de l'acte
+        if (totalActe > 0 && inputNum > totalActe) {
+          finalValue = totalActe;
+        } else if (inputNum < 0) {
+          finalValue = 0;
+        } else {
+          finalValue = inputNum;
+        }
+      }
+
       updated[index] = {
-        ...updated[index],
-        [field]: value,
+        ...target,
+        [field]: finalValue,
       };
       return updated;
     });
@@ -2438,10 +2454,12 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                               <input
                                 type="number"
                                 min="0"
+                                max={line.montantFacture || undefined}
                                 disabled={!line.selected}
                                 value={line.montantExclu}
                                 onChange={(e) => handleUpdateStagedLine(idx, 'montantExclu', Number(e.target.value) || 0)}
                                 className="w-full p-1 border border-slate-300 rounded text-right font-medium text-rose-600 bg-white"
+                                title={`Montant exclu (Max: ${formatMoney(line.montantFacture)})`}
                               />
                             </td>
                             <td className="p-2">

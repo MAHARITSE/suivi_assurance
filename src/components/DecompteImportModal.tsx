@@ -261,9 +261,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   paiements = [],
   onSavePaiement,
 }) => {
-  const [importMode, setImportMode] = useState<'excel' | 'pdf'>('excel');
-  const [selectedInsurance, setSelectedInsurance] = useState<string>('AUTO');
-  const [customInsurance, setCustomInsurance] = useState<string>('');
+  const [selectedInsurance, setSelectedInsurance] = useState<string>('');
   const [parsedDoc, setParsedDoc] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -277,7 +275,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
   const [actSearchQuery, setActSearchQuery] = useState<string>('');
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   const activeSocietesList = useMemo(() => {
@@ -285,8 +282,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   }, [societes]);
 
   const getEffectiveInsurance = () => {
-    if (selectedInsurance === 'CUSTOM') return customInsurance.trim();
-    if (selectedInsurance === 'AUTO') return '';
+    if (!selectedInsurance) return '';
     const matched = activeSocietesList.find(s => s.id === selectedInsurance || s.nom === selectedInsurance);
     return matched ? matched.nom : selectedInsurance;
   };
@@ -299,9 +295,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setSearchingRowId(null);
     setIsProcessing(false);
     setConfrontFilter('ALL');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
     if (excelInputRef.current) {
       excelInputRef.current.value = '';
     }
@@ -655,11 +648,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   const processFile = async (file: File) => {
+    const chosenOrg = getEffectiveInsurance();
+
     setIsProcessing(true);
     setErrorMessage(null);
     setLastUploadedFile(file);
-
-    const chosenOrg = getEffectiveInsurance();
 
     try {
       if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
@@ -675,7 +668,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             if (jsonRows.length === 0) throw new Error('Le fichier Excel est vide ou ne contient aucune ligne de données.');
 
             let inferredBordereau = '';
-            let inferredOrganisme = chosenOrg || 'MCI CARE';
+            let inferredOrganisme = chosenOrg || '';
             let inferredDateReglement = new Date().toISOString().split('T')[0];
 
             const lignes: FactureLigneParsed[] = jsonRows.map((row, idx) => {
@@ -694,11 +687,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               const rawBord = String(getVal(['Ref_Bordereau', 'RefBordereau', 'Bordereau', 'N° Bordereau', 'Numero_Reglement', 'Ref_Paiement', 'Ref_Decompte']) || '').trim();
               if (rawBord && !inferredBordereau) inferredBordereau = rawBord;
 
-              const rawOrg = chosenOrg || String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client']) || '').trim();
+              const rawOrg = String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client', 'Garant', 'Assureur', 'Payeur', 'Organisme_Payeur']) || '').trim() || chosenOrg;
+              let lineSoc = chosenOrg || '';
               if (rawOrg && rawOrg !== 'Organisme') {
                 const matched = findBestMatchingSociete(rawOrg, societes, chosenOrg);
-                if (matched) inferredOrganisme = matched.nom;
-                else inferredOrganisme = rawOrg;
+                lineSoc = matched ? matched.nom : rawOrg;
+                if (!inferredOrganisme) inferredOrganisme = lineSoc;
               }
 
               const rawDateReg = String(getVal(['Date_Reglement', 'Date_Paiement', 'Date_Reglement_Paiement', 'Date Reglement', 'Date Paiement']) || '').trim();
@@ -748,10 +742,22 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               ]) || '').trim();
               const rawDateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || inferredDateReglement).trim();
               const dateSoins = normalizeDateISO(rawDateSoins);
-              const montantBrut = Number(getVal(['Montant_Reclame_Brut', 'Montant_Brut', 'Montant Total Brut', 'Montant Facture', 'Total Prestation', 'Montant Reclame'])) || 0;
-              const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation'])) || 0;
-              const netAPayer = Number(getVal(['Montant_Paye_Regle', 'Somme_Payee_Net', 'Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé', 'Somme Payée'])) || (montantBrut > 0 ? (montantBrut - participation) : 0);
-              const montantExclu = Number(getVal(['Montant_Exclu', 'Montant_Exclu_Rejet', 'Montant Exclu', 'Exclu', 'Rejet'])) || 0;
+              const montantBrut = Number(getVal([
+                'FR_REELS', 'FR.REELS', 'FRAIS_REELS', 'FRAIS REELS', 'FR REELS', 'FRAIS REEL',
+                'Montant_Reclame_Brut', 'Montant_Brut', 'Montant Total Brut', 'Montant Facture', 'Total Prestation', 'Montant Reclame'
+              ])) || 0;
+              const participation = Number(getVal([
+                'TPG', 'TPG*', 'T.P.G', 'Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation'
+              ])) || 0;
+              const netAPayer = Number(getVal([
+                'REMB', 'REMB.', 'REMBOURSEMENT', 'Montant_Paye_Regle', 'Somme_Payee_Net', 'Net A Payer', 'Montant Regle', 'Montant Réglé', 'Net Payé', 'Montant Remboursé', 'Somme Payée'
+              ])) || 0;
+              const montantExclu = Number(getVal([
+                'NON_REMB', 'NON REMB', 'NON_REMB.', 'Montant_Exclu', 'Montant_Exclu_Rejet', 'Montant Exclu', 'Exclu', 'Rejet'
+              ])) || 0;
+
+              const finalBrut = montantBrut || (netAPayer > 0 ? (netAPayer + participation + montantExclu) : netAPayer);
+              const finalNet = netAPayer || (finalBrut > 0 ? Math.max(0, finalBrut - participation - montantExclu) : 0);
               
               const actCode = String(getVal(['Code_Acte', 'Code Acte', 'Acte', 'Code']) || 'CONS').trim().toUpperCase();
               const actLibelle = String(getVal(['Libelle_Acte', 'Libellé Acte', 'Acte médicale/Prix', 'Actes Médicaux', 'Prestation', 'Libellé']) || actCode).trim();
@@ -767,13 +773,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 nomPrenom: rawNom,
                 societeAffiliee: inferredOrganisme,
                 sousSociete: sousSoc,
-                actes: [{ code: actCode.substring(0, 8), libelle: actLibelle, montant: montantBrut || netAPayer }],
+                actes: [{ code: actCode.substring(0, 8), libelle: actLibelle, montant: finalBrut }],
                 actesTexte: actLibelle,
-                montantBrut: montantBrut || netAPayer,
+                montantBrut: finalBrut,
                 montantExclu,
-                baseReglement: montantBrut || netAPayer,
+                baseReglement: finalBrut,
                 participation,
-                netAPayer,
+                netAPayer: finalNet,
                 observations
               };
             });
@@ -804,60 +810,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         };
         reader.readAsArrayBuffer(file);
       } else {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('docType', 'decompte');
-        if (chosenOrg) {
-          formData.append('targetOrganism', chosenOrg);
-          formData.append('insuranceType', chosenOrg);
-        }
-
-        const response = await fetch('/api/parse-invoice', {
-          method: 'POST',
-          body: formData,
-        });
-
-        let json: any = null;
-        try {
-          const contentType = response.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            json = await response.json();
-          } else {
-            const rawText = await response.text();
-            try {
-              json = JSON.parse(rawText);
-            } catch {
-              // Non-JSON
-            }
-          }
-        } catch {
-          // Ignore parsing error
-        }
-
-        if (!response.ok || !json || json.success === false) {
-          const serverErr = json?.error;
-          if (serverErr) {
-            throw new Error(serverErr);
-          }
-          if (response.status === 413) {
-            throw new Error("Le fichier est trop volumineux (taille maximale: 25 Mo).");
-          }
-          if (response.status === 504 || response.status === 408) {
-            throw new Error("Délai de traitement dépassé par le serveur. Veuillez cliquer sur Réessayer.");
-          }
-          throw new Error("L'extraction automatique du décompte n'a pas pu aboutir. Veuillez cliquer sur Réessayer l'analyse.");
-        }
-
-        const data: ParsedFactureAssurance = json?.data || json;
-        if (!data || !data.lignes) throw new Error(json?.error || 'Format de données invalide après analyse.');
-        if (chosenOrg && (!data.clientDoit || data.clientDoit === 'Organisme' || (data.clientDoit.includes('BSA') && chosenOrg.includes('MCI')))) {
-          data.clientDoit = chosenOrg;
-        }
-        processLoadedDocument(data);
+        throw new Error("Seuls les fichiers Excel (.xlsx, .xls, .csv) sont pris en charge pour l'importation de décompte.");
       }
     } catch (err: any) {
       console.warn('Decompte extraction error:', err);
-      setErrorMessage(err.message || 'Erreur lors de l\'extraction des données du document. Veuillez réessayer.');
+      setErrorMessage(err.message || 'Erreur lors de la lecture du fichier Excel.');
       setIsProcessing(false);
     }
   };
@@ -872,8 +829,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const handleRetryLastFile = () => {
     if (lastUploadedFile) {
       processFile(lastUploadedFile);
-    } else if (importMode === 'pdf') {
-      fileInputRef.current?.click();
     } else {
       excelInputRef.current?.click();
     }
@@ -1331,11 +1286,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   type="button"
                   onClick={() => {
                     setErrorMessage(null);
-                    if (importMode === 'pdf') {
-                      fileInputRef.current?.click();
-                    } else {
-                      excelInputRef.current?.click();
-                    }
+                    excelInputRef.current?.click();
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-medium transition cursor-pointer"
                 >
@@ -1347,206 +1298,65 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           )}
 
           {!parsedDoc && (
-            <div className="space-y-6">
-              {/* Insurance / Client Pre-Selection Selector */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
-                    <ShieldCheck className="h-4 w-4 text-indigo-600" />
-                    <span>Assurance / Organisme payeur du décompte :</span>
-                  </div>
-                  <span className="text-[11px] text-slate-500">
-                    {selectedInsurance === 'AUTO' ? '⚡ Détection auto par IA' : `Sélection forcée : ${getEffectiveInsurance() || 'Personnalisé'}`}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-950">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-700 shrink-0" />
+                  <span>
+                    Importez vos bordereaux de règlement au format Excel. L'organisme et la société payeuse sont automatiquement détectés depuis les colonnes du fichier.
                   </span>
                 </div>
-
-                <div className="flex flex-wrap items-center gap-1.5 max-h-36 overflow-y-auto p-1">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedInsurance('AUTO')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                      selectedInsurance === 'AUTO'
-                        ? 'bg-indigo-600 text-white shadow-xs font-bold'
-                        : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
-                    }`}
-                  >
-                    ⚡ Auto-détection
-                  </button>
-                  {activeSocietesList.map((soc) => (
-                    <button
-                      key={soc.id}
-                      type="button"
-                      onClick={() => setSelectedInsurance(soc.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                        selectedInsurance === soc.id
-                          ? 'bg-indigo-600 text-white shadow-xs font-bold'
-                          : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
-                      }`}
-                    >
-                      <Building2 className="h-3.5 w-3.5 text-indigo-500" />
-                      <span>{soc.nom}</span>
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedInsurance('CUSTOM')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                      selectedInsurance === 'CUSTOM'
-                        ? 'bg-indigo-600 text-white shadow-xs font-bold'
-                        : 'bg-white text-slate-700 hover:bg-slate-200/70 border border-slate-200'
-                    }`}
-                  >
-                    ✏️ Autre / Saisie...
-                  </button>
-                </div>
-
-                {selectedInsurance === 'CUSTOM' && (
-                  <div className="pt-1">
-                    <input
-                      type="text"
-                      value={customInsurance}
-                      onChange={(e) => setCustomInsurance(e.target.value)}
-                      placeholder="Entrez le nom exact de l'organisme payeur (ex: MCI CARE, ALLIANZ, OMNIS)..."
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Import Mode Tabs */}
-              <div className="flex items-center justify-center">
-                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold w-full max-w-md">
-                  <button
-                    type="button"
-                    onClick={() => setImportMode('excel')}
-                    className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2 transition cursor-pointer ${
-                      importMode === 'excel'
-                        ? 'bg-white text-emerald-800 shadow-xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                    <span>Fichier Excel (.xlsx, .csv)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setImportMode('pdf')}
-                    className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2 transition cursor-pointer ${
-                      importMode === 'pdf'
-                        ? 'bg-white text-indigo-700 shadow-xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <ScanLine className="h-4 w-4 text-indigo-600" />
-                    <span>Scan PDF / Image OCR</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* MODE: EXCEL IMPORT */}
-              {importMode === 'excel' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-950">
-                    <div className="flex items-center gap-2">
-                      <FileSpreadsheet className="h-4 w-4 text-emerald-700 shrink-0" />
-                      <span>
-                        Importez vos bordereaux de règlement au format Excel. La confrontation s'effectue automatiquement sur la <strong>Date des soins</strong> et le <strong>Montant brut (sans ticket modérateur)</strong>.
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={downloadDecomptesExcelTemplate}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 font-bold hover:bg-emerald-100 text-xs shrink-0 shadow-2xs transition cursor-pointer"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      <span>Télécharger Modèle Excel</span>
-                    </button>
-                  </div>
-
-                  {/* Excel Upload Area */}
-                  <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const file = e.dataTransfer.files?.[0];
-                      if (file) {
-                        processFile(file);
-                      }
-                    }}
-                    className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
-                  >
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
-                      {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900">
-                        {isProcessing ? 'Confrontation des actes en cours...' : 'Déposez votre fichier Excel de décompte (.xlsx, .xls, .csv)'}
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-1 max-w-md">
-                        Rapprochement automatique par date de soins et montant initial sans ticket modérateur. Exclut les actes déjà réglés.
-                      </p>
-                    </div>
-                    <input
-                      type="file"
-                      ref={excelInputRef}
-                      onChange={handleFileUpload}
-                      accept=".xlsx,.xls,.csv"
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => excelInputRef.current?.click()}
-                      disabled={isProcessing}
-                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer"
-                    >
-                      Parcourir un fichier Excel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* MODE: PDF / IMAGE OCR */}
-              {importMode === 'pdf' && (
-                <div
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) {
-                      processFile(file);
-                    }
-                  }}
-                  className="flex min-h-56 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/20 p-8 text-center transition hover:border-indigo-500 hover:bg-indigo-50/40"
+                <button
+                  type="button"
+                  onClick={downloadDecomptesExcelTemplate}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 font-bold hover:bg-emerald-100 text-xs shrink-0 shadow-2xs transition cursor-pointer"
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-indigo-600 border border-indigo-100">
-                    {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-900">
-                      {isProcessing ? 'Traitement IA et confrontation des actes...' : 'Déposez votre décompte numérisé (PDF ou Image)'}
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md">
-                      Reconnaît les formats de décompte, associe chaque ligne à l'acte prescrit et met à jour le solde restant.
-                    </p>
-                  </div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isProcessing}
-                    className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 shadow-xs cursor-pointer"
-                  >
-                    Parcourir un fichier PDF ou Image
-                  </button>
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Télécharger Modèle Excel</span>
+                </button>
+              </div>
+
+              {/* Excel Upload Area */}
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) {
+                    processFile(file);
+                  }
+                }}
+                className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
+                  {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
                 </div>
-              )}
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-900">
+                    {isProcessing ? 'Confrontation des actes en cours...' : 'Déposez votre fichier Excel de décompte (.xlsx, .xls, .csv)'}
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1 max-w-md">
+                    Rapprochement automatique par date de soins et montant initial sans ticket modérateur. Exclut les actes déjà réglés.
+                  </p>
+                </div>
+                <input
+                  type="file"
+                  ref={excelInputRef}
+                  onChange={handleFileUpload}
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    excelInputRef.current?.click();
+                  }}
+                  disabled={isProcessing}
+                  className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer"
+                >
+                  Parcourir un fichier Excel
+                </button>
+              </div>
             </div>
           )}
 

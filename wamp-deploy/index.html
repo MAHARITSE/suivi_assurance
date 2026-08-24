@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Suivi Assurance SALFA</title>
+    <script>
+      (function() {
+        try {
+          var origFetch = typeof window !== 'undefined' && window.fetch ? window.fetch.bind(window) : null;
+          var customFetch = origFetch;
+          if (typeof window !== 'undefined') {
+            try {
+              Object.defineProperty(window, 'fetch', {
+                get: function() {
+                  return customFetch;
+                },
+                set: function(val) {
+                  customFetch = val;
+                },
+                configurable: true,
+                enumerable: true
+              });
+            } catch (e) {
+              // If window.fetch is already non-configurable, try on Window.prototype or ignore
+              try {
+                if (typeof Window !== 'undefined' && Window.prototype) {
+                  Object.defineProperty(Window.prototype, 'fetch', {
+                    get: function() {
+                      return customFetch;
+                    },
+                    set: function(val) {
+                      customFetch = val;
+                    },
+                    configurable: true,
+                    enumerable: true
+                  });
+                }
+              } catch (e2) {}
+            }
+          }
+        } catch (err) {
+          console.warn('Fetch setter init:', err);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-N0m8ZmKm.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-B3Z0EnGJ.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

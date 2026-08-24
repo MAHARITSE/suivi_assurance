@@ -11,7 +11,6 @@ import { PersonnesView } from './components/PersonnesView';
 import { FamillesView } from './components/FamillesView';
 import { EtatsView } from './components/EtatsView';
 import { EnteteView } from './components/EnteteView';
-import { TutoView } from './components/TutoView';
 
 import { 
   initialSocietes, 
@@ -36,10 +35,8 @@ export function App() {
     if (saved) {
       try {
         const parsed: Societe[] = JSON.parse(saved);
-        if (parsed.length > 0) {
-          const existingNames = new Set(parsed.map(s => s.nom.toUpperCase().trim()));
-          const missing = initialSocietes.filter(s => !existingNames.has(s.nom.toUpperCase().trim()));
-          return [...parsed, ...missing];
+        if (Array.isArray(parsed)) {
+          return parsed;
         }
       } catch {
         return initialSocietes;
@@ -583,10 +580,6 @@ export function App() {
 
         {activeTab === 'entete' && (
           <EnteteView />
-        )}
-
-        {activeTab === 'tuto' && (
-          <TutoView />
         )}
       </main>
 

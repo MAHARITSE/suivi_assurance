@@ -170,7 +170,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [isSalfaModalOpen, setIsSalfaModalOpen] = useState<boolean>(false);
   const [lineEditContext, setLineEditContext] = useState<{ prestation: Prestation, ligne: LignePrestation } | null>(null);
   const [lineExcludeContext, setLineExcludeContext] = useState<{ prestation: Prestation, ligne: LignePrestation, maxExclu: number } | null>(null);
+  const [factureExcludeContext, setFactureExcludeContext] = useState<{ prestation: Prestation, maxExclu: number } | null>(null);
   const [lineExcludeForm, setLineExcludeForm] = useState({ montant: 0, motif: '' });
+  const [factureExcludeForm, setFactureExcludeForm] = useState({ montant: 0, motif: '' });
   const [lineEditForm, setLineEditForm] = useState<{ code: string, libelle: string, totalPrestation: number, ticketModerateur: number }>({ code: '', libelle: '', totalPrestation: 0, ticketModerateur: 0 });
   const [selectedPrestations, setSelectedPrestations] = useState<Set<string>>(new Set());
 
@@ -193,6 +195,15 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       });
     }
   }, [lineExcludeContext]);
+
+  React.useEffect(() => {
+    if (factureExcludeContext) {
+      setFactureExcludeForm({
+        montant: factureExcludeContext.maxExclu,
+        motif: 'Rejet intégral facture'
+      });
+    }
+  }, [factureExcludeContext]);
 
   // Sync prop selectedSocieteId
   React.useEffect(() => {
@@ -324,21 +335,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     (paiements || []).forEach(pm => {
       (pm.lignes || []).forEach(lp => {
         const pId = lp.prestationId;
-        const pNum = lp.prestationNumero ? cleanNum(lp.prestationNumero) : '';
         const lId = lp.lignePrestationId;
         const amount = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
         const exclu = Number(lp.montantExclu || 0);
 
         if (amount > 0 || exclu > 0) {
-          const keysToMap = new Set<string>();
-          if (pId) keysToMap.add(pId);
-          if (pNum) keysToMap.add(pNum);
-
-          keysToMap.forEach(k => {
+          if (pId) {
             if (amount > 0) {
-              prestPaidMap[k] = (prestPaidMap[k] || 0) + amount;
-              if (!prestBordereauxMap[k]) prestBordereauxMap[k] = [];
-              prestBordereauxMap[k].push({
+              prestPaidMap[pId] = (prestPaidMap[pId] || 0) + amount;
+              if (!prestBordereauxMap[pId]) prestBordereauxMap[pId] = [];
+              prestBordereauxMap[pId].push({
                 bordereau: pm.numeroBordereau || pm.referencePaiement || 'Règlement',
                 date: pm.datePaiement,
                 mode: pm.modePaiement || 'Virement',
@@ -349,9 +355,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
               });
             }
             if (exclu > 0) {
-              prestExcluMap[k] = (prestExcluMap[k] || 0) + exclu;
+              prestExcluMap[pId] = (prestExcluMap[pId] || 0) + exclu;
             }
-          });
+          }
 
           if (lId) {
             if (amount > 0) linePaidMap[lId] = (linePaidMap[lId] || 0) + amount;
@@ -409,34 +415,26 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const mod = p.ticketModerateur ?? p.participation ?? 0;
     const remb = p.montantARembourser ?? Math.max(0, tot - mod);
 
-    const cleanNum = (n: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
-    const pNum = cleanNum(p.numeroFacture);
-
-    const paidFromPaiementsDirect = paymentsMap.prestPaidMap[p.id] || 0;
-    const paidFromPaiementsNum = pNum ? (paymentsMap.prestPaidMap[pNum] || 0) : 0;
-    const paidFromPaiements = Math.max(paidFromPaiementsDirect, paidFromPaiementsNum);
-
-    const excluFromPaiementsDirect = paymentsMap.prestExcluMap[p.id] || 0;
-    const excluFromPaiementsNum = pNum ? (paymentsMap.prestExcluMap[pNum] || 0) : 0;
-    const excluFromPaiements = Math.max(excluFromPaiementsDirect, excluFromPaiementsNum);
+    const paidFromPaiements = paymentsMap.prestPaidMap[p.id] || 0;
+    const excluFromPaiements = paymentsMap.prestExcluMap[p.id] || 0;
 
     const paidFromLines = (p.lignes || []).reduce((sum, l) => {
       const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
-      return sum + lPaidFromP;
+      return sum + Math.max(lPaidFromP, l.totalPaye || 0);
     }, 0);
     const excluFromLines = (p.lignes || []).reduce((sum, l) => {
       const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
-      return sum + lExcluFromP;
+      return sum + Math.max(lExcluFromP, l.montantExclu || 0);
     }, 0);
 
-    const totalPaye = Math.max(paidFromPaiements, paidFromLines);
-    const totalExclu = Math.max(excluFromPaiements, excluFromLines);
+    const totalPaye = Math.max(paidFromPaiements, paidFromLines, p.totalPaye || 0);
+    const totalExclu = Math.max(excluFromPaiements, excluFromLines, p.montantExclu || 0);
     const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
 
     const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
     const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
     const isAllExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
-    const statut = p.statut === 'Rejeté' || isAllExcluded 
+    const statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté' = isAllExcluded
       ? 'Rejeté' 
       : isFullyPaid 
       ? 'Payé' 
@@ -498,19 +496,20 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
     const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
     const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
-    const lTotalPaye = lPaidFromP;
+    const lTotalPaye = Math.max(lPaidFromP, l.totalPaye || 0);
+    const lExclu = Math.max(lExcluFromP, l.montantExclu || 0);
     // Deduct exclusions from Reste à Payer since they are rejected
-    const lReste = Math.max(0, lARemb - lTotalPaye - lExcluFromP);
+    const lReste = Math.max(0, lARemb - lTotalPaye - lExclu);
     const isFullyPaid = (lTotalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && lTotalPaye > 0);
     const isPartiallyPaid = lTotalPaye > 0 && !isFullyPaid && lReste > 0;
-    const isLineExcluded = (lExcluFromP >= lARemb && lARemb > 0 && lTotalPaye === 0) || l.statut === 'Rejeté';
-    const statut = isLineExcluded
+    const isLineExcluded = (lExclu >= lARemb && lARemb > 0 && lTotalPaye === 0);
+    const statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté' = isLineExcluded
       ? 'Rejeté'
       : isFullyPaid
       ? 'Payé'
       : isPartiallyPaid
       ? 'Partiellement payé'
-      : (l.statut || 'En attente');
+      : 'En attente';
 
     // Check if line matches a settlement line on date and amount
     const pDate = p.date ? p.date.split('T')[0] : '';
@@ -522,7 +521,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       return matchDate && matchAmount;
     });
 
-    return { lBrut, lPart, lARemb, lTotalPaye, lReste, statut, matchingSettlementLine };
+    return { lBrut, lPart, lARemb, lTotalPaye, lExclu, lReste, statut, matchingSettlementLine };
   };
 
   // Status counters for quick badges
@@ -530,7 +529,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     let paye = 0, enCours = 0;
     prestations.forEach(p => {
       const fin = getPrestationFinancials(p);
-      const isPaid = fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0 || (p.resteAPayer !== undefined && p.resteAPayer <= 0);
+      const isPaid = fin.statut === 'Payé';
       if (isPaid) {
         paye++;
       } else {
@@ -554,13 +553,13 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       // Status filter - Tous, En cours, Totalement payé
       let matchesStatus = true;
       if (statusFilter !== 'ALL') {
-        const isPaid = fin.statut === 'Payé' || p.statut === 'Payé' || fin.resteAPayer <= 0 || (p.resteAPayer !== undefined && p.resteAPayer <= 0);
+        const isPaid = fin.statut === 'Payé';
         if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
           matchesStatus = isPaid;
         } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
           matchesStatus = !isPaid;
         } else {
-          matchesStatus = p.statut === statusFilter || fin.statut === statusFilter;
+          matchesStatus = fin.statut === statusFilter;
         }
       }
 
@@ -862,15 +861,15 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     });
 
     const list: GroupedFacture[] = Array.from(map.values()).map(grp => {
-      const isAllRejete = grp.prestations.every(p => {
+      const isAllRejete = grp.prestations.length > 0 && grp.prestations.every(p => {
         const fin = getPrestationFinancials(p);
-        return fin.statut === 'Rejeté' || p.statut === 'Rejeté';
+        return fin.statut === 'Rejeté';
       });
-      const isFullyPaid = (grp.totalPaye >= grp.totalARembourser && grp.totalARembourser > 0) || (grp.resteAReclamer <= 0 && (grp.totalPaye > 0 || grp.totalARembourser === 0));
+      const isFullyPaid = (grp.totalPaye >= grp.totalARembourser && grp.totalARembourser > 0) || (grp.resteAReclamer <= 0 && grp.totalPaye > 0);
       const isPartiallyPaid = grp.totalPaye > 0 && !isFullyPaid && grp.resteAReclamer > 0;
       const statut: 'En attente' | 'Partiellement payé' | 'Payé' | 'Rejeté' = isAllRejete 
         ? 'Rejeté' 
-        : isFullyPaid || grp.resteAReclamer <= 0 
+        : isFullyPaid 
         ? 'Payé' 
         : isPartiallyPaid 
         ? 'Partiellement payé' 
@@ -1120,10 +1119,20 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     
     const { prestation, ligne, maxExclu } = lineExcludeContext;
     const { montant, motif } = lineExcludeForm;
-    const mnt = Number(montant);
+    let mnt = Number(montant);
+    const totalActe = ligne.totalPrestation || maxExclu;
     
-    if (mnt <= 0 || mnt > maxExclu) {
-       alert('Le montant à exclure doit être supérieur à 0 et inférieur ou égal au reste à payer (' + maxExclu + ').');
+    // Si le montant dépasse le montant total de l'acte, mettre automatiquement le montant total de l'acte
+    if (totalActe > 0 && mnt > totalActe) {
+      mnt = totalActe;
+    }
+    
+    if (mnt <= 0) {
+       alert('Le montant à exclure doit être supérieur à 0.');
+       return;
+    }
+    if (mnt > maxExclu) {
+       alert('Le montant à exclure ne peut pas dépasser le reste à payer (' + maxExclu + ').');
        return;
     }
 
@@ -1162,6 +1171,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           ticketModerateur: 0,
           montantExclu: mnt,
           montantReclame: mnt,
+          codeActe: ligne.code || 'ACTE',
+          libelleActe: ligne.libelle || 'Acte médical',
+          dateSoins: prestation.date,
           actesPayes: [{ code: ligne.code, libelle: ligne.libelle, montant: 0 }],
           commentaire: motif
         }
@@ -1193,6 +1205,135 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
     onSavePaiement(exclusionPaiement, [updatedPrestation]);
     setLineExcludeContext(null);
+  };
+
+  const handleSaveFactureExclude = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!factureExcludeContext || !onSavePaiement) return;
+    
+    const { prestation, maxExclu } = factureExcludeContext;
+    const { montant, motif } = factureExcludeForm;
+    let mnt = Number(montant);
+    const totCharge = prestation.montantARembourser ?? Math.max(0, prestation.totalPrestation - prestation.participation);
+    
+    // Plafonnement automatique
+    if (mnt > maxExclu) {
+      mnt = maxExclu;
+    }
+    
+    if (mnt <= 0) {
+      alert('Le montant à exclure / rejeter doit être supérieur à 0.');
+      return;
+    }
+
+    const pers = personnes.find(p => p.id === prestation.personneId);
+    const newId = generateId('pai-rej');
+    
+    // Si la prestation a des lignes d'actes, répartir le montant exclu proportionnellement ou attribuer par ligne
+    const remainingToDistribute = mnt;
+    let distributed = 0;
+    const lignesPaiement: any[] = [];
+    
+    const updatedLignes = (prestation.lignes || []).map((l, idx) => {
+      const lARemb = l.montantARembourser ?? (l.totalPrestation - (l.ticketModerateur || 0));
+      const lPaid = paymentsMap.linePaidMap[l.id] || 0;
+      const lPrevExclu = paymentsMap.lineExcluMap[l.id] || 0;
+      const lReste = Math.max(0, lARemb - lPaid - lPrevExclu);
+      
+      let lExcluNow = 0;
+      if (idx === (prestation.lignes?.length || 1) - 1) {
+        lExcluNow = Math.max(0, remainingToDistribute - distributed);
+      } else {
+        lExcluNow = Math.min(lReste, Math.max(0, remainingToDistribute - distributed));
+      }
+      distributed += lExcluNow;
+
+      if (lExcluNow > 0) {
+        lignesPaiement.push({
+          id: generateId('lp-rej'),
+          paiementId: newId,
+          lignePrestationId: l.id,
+          prestationId: prestation.id,
+          prestationNumero: prestation.numeroFacture,
+          immatriculation: pers?.matricule || prestation.matricule || '',
+          nomBaseAssurance: pers?.nomPrenom || prestation.nomAgent || '',
+          nomAgent: pers?.nomPrenom || prestation.nomAgent || '',
+          totalPaye: 0,
+          montantPaye: 0,
+          ticketModerateur: 0,
+          montantExclu: lExcluNow,
+          montantReclame: lExcluNow,
+          codeActe: l.code || 'ACTE',
+          libelleActe: l.libelle || 'Acte médical',
+          dateSoins: prestation.date,
+          actesPayes: [{ code: l.code, libelle: l.libelle, montant: 0 }],
+          commentaire: motif
+        });
+      }
+
+      const isRejet = lPaid === 0 && (lExcluNow + lPrevExclu >= lARemb);
+      return {
+        ...l,
+        statut: isRejet ? ('Rejeté' as const) : l.statut,
+      };
+    });
+
+    if (lignesPaiement.length === 0) {
+      lignesPaiement.push({
+        id: generateId('lp-rej'),
+        paiementId: newId,
+        lignePrestationId: '',
+        prestationId: prestation.id,
+        prestationNumero: prestation.numeroFacture,
+        immatriculation: pers?.matricule || prestation.matricule || '',
+        nomBaseAssurance: pers?.nomPrenom || prestation.nomAgent || '',
+        nomAgent: pers?.nomPrenom || prestation.nomAgent || '',
+        totalPaye: 0,
+        montantPaye: 0,
+        ticketModerateur: 0,
+        montantExclu: mnt,
+        montantReclame: mnt,
+        codeActe: 'GLOBAL',
+        libelleActe: 'Prestation globale',
+        dateSoins: prestation.date,
+        actesPayes: [{ code: 'GLOBAL', libelle: 'Prestation globale', montant: 0 }],
+        commentaire: motif
+      });
+    }
+
+    const exclusionPaiement: Paiement = {
+      id: newId,
+      numeroBordereau: `REJET-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      datePaiement: new Date().toISOString().split('T')[0],
+      dateSaisie: new Date().toISOString().split('T')[0],
+      societeId: prestation.societeId,
+      nomAgent: pers?.nomPrenom || prestation.nomAgent,
+      matricule: pers?.matricule || prestation.matricule,
+      modePaiement: 'Autre',
+      referencePaiement: `REJET-FAC-${prestation.numeroFacture}`,
+      totalReclame: mnt,
+      totalPaye: 0,
+      totalModerateur: 0,
+      totalExclu: mnt,
+      remise: 0,
+      statut: 'Validé',
+      notes: `Rejet facture ${prestation.numeroFacture} : ${motif}`,
+      lignes: lignesPaiement
+    };
+
+    const fin = getPrestationFinancials(prestation);
+    const newReste = Math.max(0, fin.resteAPayer - mnt);
+    const isTotalRejet = newReste <= 0 && fin.totalPaye === 0;
+    
+    const updatedPrestation: Prestation = {
+      ...prestation,
+      resteAPayer: newReste,
+      lignes: updatedLignes.length > 0 ? updatedLignes : prestation.lignes,
+      statut: isTotalRejet ? ('Rejeté' as const) : newReste <= 0 ? ('Payé' as const) : prestation.statut,
+    };
+
+    onSavePaiement(exclusionPaiement, [updatedPrestation]);
+    setFactureExcludeContext(null);
   };
 
   const handleAddLine = () => {
@@ -2020,6 +2161,15 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
+                            {fin.resteAPayer > 0 && onSavePaiement && (
+                              <button
+                                onClick={() => setFactureExcludeContext({ prestation, maxExclu: fin.resteAPayer })}
+                                title="Rejeter / Exclure le reste à payer de cette facture"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleRequestDeletePrestation(prestation)}
                               title="Supprimer le dossier de soins"
@@ -2051,6 +2201,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                     <th className="py-2 px-2 text-right">Ticket Modérateur</th>
                                     <th className="py-2 px-2 text-right">À Rembourser</th>
                                     <th className="py-2 px-2 text-right">Somme Payée</th>
+                                    <th className="py-2 px-2 text-right">Montant Rejeté</th>
                                     <th className="py-2 px-2 text-right">Reste à Payer</th>
                                     <th className="py-2 px-2 text-center">Statut</th>
                                     <th className="py-2 px-2 text-center">Actions</th>
@@ -2091,6 +2242,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                         </td>
                                         <td className="py-2 px-2 text-right font-bold text-emerald-600">
                                           {formatMoney(lFin.lTotalPaye)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right font-bold text-rose-600">
+                                          {formatMoney(lFin.lExclu)}
                                         </td>
                                         <td className="py-2 px-2 text-right font-mono font-semibold">
                                           <span className={lFin.lReste > 0 ? 'text-rose-700' : 'text-slate-400'}>
@@ -2295,6 +2449,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                       <th className="py-2 px-2 text-right">Ticket Modérateur</th>
                       <th className="py-2 px-2 text-right">À Rembourser</th>
                       <th className="py-2 px-2 text-right">Somme Payée</th>
+                      <th className="py-2 px-2 text-right">Montant Rejeté</th>
                       <th className="py-2 px-2 text-right">Reste à payer</th>
                       <th className="py-2 px-2 text-center">Statut</th>
                     </tr>
@@ -2317,6 +2472,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                           </td>
                           <td className="py-3 px-2 text-right text-emerald-700 font-bold whitespace-nowrap">
                             {formatMoney(lFin.lTotalPaye)}
+                          </td>
+                          <td className="py-3 px-2 text-right text-rose-600 font-bold whitespace-nowrap">
+                            {formatMoney(lFin.lExclu)}
                           </td>
                           <td className="py-3 px-2 text-right font-bold whitespace-nowrap">
                             <span className={lFin.lReste > 0 ? 'text-rose-700 font-bold' : 'text-slate-400'}>
@@ -2711,9 +2869,17 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                   type="number"
                   min="0.01"
                   step="0.01"
-                  max={lineExcludeContext.maxExclu}
+                  max={lineExcludeContext.ligne.totalPrestation || lineExcludeContext.maxExclu}
                   value={lineExcludeForm.montant}
-                  onChange={(e) => setLineExcludeForm(prev => ({ ...prev, montant: Number(e.target.value) }))}
+                  onChange={(e) => {
+                    const inputVal = Number(e.target.value) || 0;
+                    const totalActe = lineExcludeContext.ligne.totalPrestation || lineExcludeContext.maxExclu;
+                    if (totalActe > 0 && inputVal > totalActe) {
+                      setLineExcludeForm(prev => ({ ...prev, montant: totalActe }));
+                    } else {
+                      setLineExcludeForm(prev => ({ ...prev, montant: Math.max(0, inputVal) }));
+                    }
+                  }}
                   className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none text-right font-bold text-rose-700"
                   required
                 />
@@ -2742,6 +2908,87 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 <button
                   type="submit"
                   className="px-5 py-2 rounded-xl text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-sm"
+                >
+                  Confirmer le rejet
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Exclude Facture Modal (Rejet intégral ou reste à payer facture) */}
+      {factureExcludeContext && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-rose-100 flex items-center justify-between bg-rose-50/50">
+              <div className="flex items-center space-x-2 text-rose-900">
+                <Ban className="w-5 h-5 text-rose-600" />
+                <div>
+                  <h3 className="text-lg font-bold">Rejeter le Reste Facture</h3>
+                  <p className="text-xs text-rose-600 font-mono">Facture N° {factureExcludeContext.prestation.numeroFacture}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFactureExcludeContext(null)}
+                className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-100 rounded-full transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveFactureExclude} className="p-6 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-amber-800 text-xs mb-4">
+                <p className="font-semibold mb-1 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5"/> Action comptable & Rejets</p>
+                <p>Le montant saisi sera déduit du reste à payer de la facture et envoyé directement dans l'onglet <strong>Rejets</strong> pour suivi et contestation.</p>
+              </div>
+              
+              <div>
+                <label className="block text-slate-700 text-sm font-semibold mb-1">
+                  Montant à rejeter / exclure (Max: {formatMoney(factureExcludeContext.maxExclu)}) *
+                </label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  max={factureExcludeContext.maxExclu}
+                  value={factureExcludeForm.montant}
+                  onChange={(e) => {
+                    const inputVal = Number(e.target.value) || 0;
+                    if (inputVal > factureExcludeContext.maxExclu) {
+                      setFactureExcludeForm(prev => ({ ...prev, montant: factureExcludeContext.maxExclu }));
+                    } else {
+                      setFactureExcludeForm(prev => ({ ...prev, montant: Math.max(0, inputVal) }));
+                    }
+                  }}
+                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none text-right font-bold text-rose-700"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-slate-700 text-sm font-semibold mb-1">Motif du rejet / exclusion *</label>
+                <input
+                  type="text"
+                  value={factureExcludeForm.motif}
+                  onChange={(e) => setFactureExcludeForm(prev => ({ ...prev, motif: e.target.value }))}
+                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                  placeholder="Ex: Rejet global assurance, Non couvert, Dépassement..."
+                  required
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFactureExcludeContext(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-sm cursor-pointer"
                 >
                   Confirmer le rejet
                 </button>

@@ -17,6 +17,7 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSociete, setEditingSociete] = useState<Societe | null>(null);
+  const [societeToDelete, setSocieteToDelete] = useState<Societe | null>(null);
   const [formData, setFormData] = useState<Partial<Societe>>({
     nom: '',
     code: '',
@@ -131,12 +132,9 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                   <Edit3 className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => {
-                    if (confirm(`Supprimer la société ${soc.nom} ?`)) {
-                      onDeleteSociete(soc.id);
-                    }
-                  }}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+                  type="button"
+                  onClick={() => setSocieteToDelete(soc)}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
                   title="Supprimer"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -295,6 +293,48 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmation de Suppression */}
+      {societeToDelete && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-600">
+              <div className="p-2.5 bg-rose-100 rounded-full">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Supprimer la société ?</h3>
+                <p className="text-[11px] text-slate-500 font-mono">{societeToDelete.code}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Voulez-vous vraiment supprimer la société <strong className="text-slate-900 font-bold">{societeToDelete.nom}</strong> ?
+              Cette action retirera la société de votre liste d'organismes payeurs.
+            </p>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSocieteToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-100 transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteSociete(societeToDelete.id);
+                  setSocieteToDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-sm transition cursor-pointer"
+              >
+                Confirmer la suppression
+              </button>
+            </div>
           </div>
         </div>
       )}

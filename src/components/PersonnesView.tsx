@@ -23,6 +23,7 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPersonne, setEditingPersonne] = useState<Personne | null>(null);
+  const [personneToDelete, setPersonneToDelete] = useState<Personne | null>(null);
   const [formData, setFormData] = useState<Partial<Personne>>({
     nomPrenom: '',
     matricule: '',
@@ -176,12 +177,9 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm(`Supprimer l'assuré ${p.nomPrenom} ?`)) {
-                              onDeletePersonne(p.id);
-                            }
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+                          type="button"
+                          onClick={() => setPersonneToDelete(p)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
                           title="Supprimer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -313,6 +311,48 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmation de Suppression */}
+      {personneToDelete && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-600">
+              <div className="p-2.5 bg-rose-100 rounded-full">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Supprimer l'assuré ?</h3>
+                <p className="text-[11px] text-slate-500 font-mono">Matricule: {personneToDelete.matricule || 'N/A'}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Voulez-vous vraiment supprimer l'assuré <strong className="text-slate-900 font-bold">{personneToDelete.nomPrenom}</strong> ?
+              Cette action le retirera de votre répertoire d'adhérents.
+            </p>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setPersonneToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-100 transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeletePersonne(personneToDelete.id);
+                  setPersonneToDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-sm transition cursor-pointer"
+              >
+                Confirmer la suppression
+              </button>
+            </div>
           </div>
         </div>
       )}

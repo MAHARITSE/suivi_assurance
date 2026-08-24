@@ -238,6 +238,7 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
                             <th className="py-1 px-2 text-right">Ticket Mod.</th>
                             <th className="py-1 px-2 text-right">Part Assurance</th>
                             <th className="py-1 px-2 text-right text-emerald-700">Payé</th>
+                            <th className="py-1 px-2 text-right text-rose-600">Rejeté</th>
                             <th className="py-1 px-2 text-right text-rose-700">Reste</th>
                           </tr>
                         </thead>
@@ -247,7 +248,8 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
                             const lPart = l.ticketModerateur || 0;
                             const lRemb = Math.max(0, lBrut - lPart);
                             const lPaye = l.totalPaye || 0;
-                            const lReste = Math.max(0, lRemb - lPaye);
+                            const lExclu = l.montantExclu || 0;
+                            const lReste = Math.max(0, lRemb - lPaye - lExclu);
 
                             return (
                               <tr key={l.id || lIdx}>
@@ -257,6 +259,7 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
                                 <td className="py-1.5 px-2 text-right font-mono text-amber-700">{formatMoney(lPart)}</td>
                                 <td className="py-1.5 px-2 text-right font-mono font-bold text-slate-900">{formatMoney(lRemb)}</td>
                                 <td className="py-1.5 px-2 text-right font-mono font-bold text-emerald-600">{formatMoney(lPaye)}</td>
+                                <td className="py-1.5 px-2 text-right font-mono font-bold text-rose-600">{formatMoney(lExclu)}</td>
                                 <td className="py-1.5 px-2 text-right font-mono font-bold text-rose-600">{formatMoney(lReste)}</td>
                               </tr>
                             );
