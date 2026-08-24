@@ -7,10 +7,12 @@ interface HeaderProps {
   selectedSocieteId?: string;
   onSelectSociete?: (id: string) => void;
   onExportBackup?: () => void;
+  logoUrl?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onExportBackup,
+  logoUrl,
 }) => {
   return (
     <header
@@ -19,9 +21,17 @@ export const Header: React.FC<HeaderProps> = ({
     >
       <div className="flex h-16 w-full items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-200">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt="Logo SALFA"
+              className="h-9 w-9 shrink-0 rounded-xl object-contain bg-white p-0.5 border border-slate-200 shadow-xs"
+            />
+          ) : (
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-200">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+          )}
           <div className="min-w-0">
             <h1 className="truncate text-sm font-bold tracking-tight text-slate-950 sm:text-base">
               Suivi Assurance SALFA

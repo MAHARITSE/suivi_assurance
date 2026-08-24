@@ -1,17 +1,17 @@
 import { build } from 'vite';
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const wampDirectory = path.join(projectRoot, 'wamp');
+const wampDirectory = path.join(projectRoot, 'wamp-deploy');
+const wampSrcDirectory = path.join(projectRoot, 'wamp_src');
 
-// Ne supprimer que les fichiers générés : l'API PHP, la configuration et la
-// documentation présents dans wamp/ sont conservés à chaque génération.
+// Re-créer complètement le dossier wamp-deploy à zéro
+await rm(wampDirectory, { recursive: true, force: true });
 await mkdir(wampDirectory, { recursive: true });
-await rm(path.join(wampDirectory, 'assets'), { recursive: true, force: true });
-await rm(path.join(wampDirectory, 'index.html'), { force: true });
 
+// Compiler le frontend React avec Vite
 await build({
   configFile: path.join(projectRoot, 'vite.config.ts'),
   root: projectRoot,
@@ -21,10 +21,14 @@ await build({
   },
 });
 
-await copyFile(
-  path.join(projectRoot, 'database', 'schema_wamp.sql'),
-  path.join(wampDirectory, 'schema_wamp.sql')
-);
+// Copier l'ensemble de l'API PHP, configurations, scripts SQL et guides d'installation
+try {
+  await cp(wampSrcDirectory, wampDirectory, { recursive: true });
+} catch (err) {
+  console.error('Erreur lors de la copie des fichiers WAMP :', err);
+}
 
-console.log(`Dossier WAMP prêt : ${path.relative(projectRoot, wampDirectory)}`);
-console.log('Copiez son contenu dans le dossier www de WAMP puis ouvrez votre URL localhost.');
+console.log(`\n✓ Dossier WAMP généré avec succès : ${path.relative(projectRoot, wampDirectory)}`);
+console.log('✓ API PHP (api.php, config.php), schéma MySQL (schema.sql) et guides d\'installation (INSTALLATION.md) inclus.');
+console.log('Copiez tout le contenu de wamp-deploy dans le répertoire www de WAMP Server.');
+

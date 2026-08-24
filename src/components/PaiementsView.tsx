@@ -37,6 +37,7 @@ import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from 
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
+import { RelierPaiementModal } from './paiements/RelierPaiementModal';
 import * as XLSX from 'xlsx';
 
 type PaiementSortField = 'datePaiement' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
@@ -133,10 +134,14 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const [filterMode, setFilterMode] = useState<string>('ALL');
   const [filterStatut, setFilterStatut] = useState<string>('ALL');
   const [filterExclusion, setFilterExclusion] = useState<'ALL' | 'AVEC_EXCLUSION' | 'SANS_EXCLUSION'>('ALL');
+  const [filterLiaison, setFilterLiaison] = useState<'ALL' | 'NON_RELIE' | 'RELIE'>('ALL');
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
   const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
+
+  // Modal context for linking unlinked payment lines
+  const [relierModalContext, setRelierModalContext] = useState<{ paiement: Paiement; lignePaiement: LignePaiement } | null>(null);
 
   const toggleRow = (id: string) => {
     setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -343,6 +348,16 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           return false;
         }
 
+        // Liaison filter
+        if (filterLiaison === 'NON_RELIE') {
+          const hasUnlinked = (p.lignes || []).some(l => !l.prestationId && (!l.prestationNumero || l.prestationNumero === '-'));
+          if (!hasUnlinked && p.prestationId) return false;
+        }
+        if (filterLiaison === 'RELIE') {
+          const hasLinked = (p.lignes || []).some(l => Boolean(l.prestationId || (l.prestationNumero && l.prestationNumero !== '-')));
+          if (!hasLinked && !p.prestationId) return false;
+        }
+
         // Date range
         if (dateDebut && p.datePaiement < dateDebut) {
           return false;
@@ -437,6 +452,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     filterMode,
     filterStatut,
     filterExclusion,
+    filterLiaison,
     dateDebut,
     dateFin,
     searchTerm,
@@ -1131,6 +1147,35 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
           {/* Quick Mode Chips */}
           <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Liaison :</span>
+            <button
+              onClick={() => setFilterLiaison('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                filterLiaison === 'ALL' ? 'bg-slate-900 text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Tous
+            </button>
+            <button
+              onClick={() => setFilterLiaison('NON_RELIE')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                filterLiaison === 'NON_RELIE' ? 'bg-amber-600 text-white shadow-2xs' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              <AlertTriangle className="w-3 h-3" />
+              <span>Non reliés</span>
+            </button>
+            <button
+              onClick={() => setFilterLiaison('RELIE')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                filterLiaison === 'RELIE' ? 'bg-indigo-600 text-white shadow-2xs' : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+              }`}
+            >
+              Reliés
+            </button>
+
+            <span className="text-slate-300 mx-1">|</span>
+
             <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Mode :</span>
             {[
               { key: 'ALL', label: 'Tous' },
@@ -1664,8 +1709,32 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                             <td className="py-2 px-2 font-mono text-[11px] text-slate-600">
                                               {l.immatriculation || '-'}
                                             </td>
-                                            <td className="py-2 px-2 font-mono font-bold text-indigo-700">
-                                              {l.prestationNumero || '-'}
+                                            <td className="py-2 px-2">
+                                              <div className="flex items-center gap-1.5">
+                                                {l.prestationNumero && l.prestationNumero !== '-' ? (
+                                                  <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs inline-flex items-center gap-1">
+                                                    <FileText className="w-3 h-3 text-indigo-600" />
+                                                    <span>{l.prestationNumero}</span>
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold shrink-0">
+                                                    <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                                    <span>Non relié</span>
+                                                  </span>
+                                                )}
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setRelierModalContext({ paiement: p, lignePaiement: l });
+                                                  }}
+                                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 transition-colors shadow-2xs cursor-pointer shrink-0"
+                                                  title={l.prestationNumero ? "Changer la prestation reliée" : "Relier ce règlement à une facture de soins"}
+                                                >
+                                                  <Link2 className="w-3 h-3 text-indigo-600" />
+                                                  <span>{l.prestationNumero && l.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
+                                                </button>
+                                              </div>
                                             </td>
                                             <td className="py-2 px-2">
                                               {l.actesPayes && l.actesPayes.length > 0 ? (
@@ -1991,7 +2060,34 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                           {formatDate(sub.datePaiement)}
                                         </td>
                                         <td className="py-2 px-2 font-mono font-bold text-indigo-700">
-                                          {sub.prestationNumero || '-'}
+                                          <div className="flex items-center gap-1.5">
+                                            {sub.prestationNumero && sub.prestationNumero !== '-' ? (
+                                              <span className="bg-indigo-50 text-indigo-800 px-2 py-0.5 rounded border border-indigo-200 text-xs font-mono font-bold">
+                                                {sub.prestationNumero}
+                                              </span>
+                                            ) : (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                                <span>Non relié</span>
+                                              </span>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const parentPaiement = paiements.find(p => p.id === sub.paiementId);
+                                                const parentLigne = parentPaiement?.lignes?.find(l => l.id === sub.ligneId);
+                                                if (parentPaiement && parentLigne) {
+                                                  setRelierModalContext({ paiement: parentPaiement, lignePaiement: parentLigne });
+                                                }
+                                              }}
+                                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold border border-indigo-200 transition-colors cursor-pointer"
+                                              title="Relier à une prestation"
+                                            >
+                                              <Link2 className="w-3 h-3 text-indigo-600" />
+                                              <span>{sub.prestationNumero && sub.prestationNumero !== '-' ? "Relier" : "Relier à une prestation"}</span>
+                                            </button>
+                                          </div>
                                         </td>
                                         <td className="py-2 px-2 text-slate-600">
                                           {sub.commentaire || `${sub.libelleActe || sub.codeActe}`}
@@ -2637,6 +2733,17 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Modal Relier Règlement à Prestation */}
+      {relierModalContext && (
+        <RelierPaiementModal
+          isOpen={Boolean(relierModalContext)}
+          onClose={() => setRelierModalContext(null)}
+          paiement={relierModalContext.paiement}
+          lignePaiement={relierModalContext.lignePaiement}
+          prestations={prestations || []}
+          onSavePaiement={onSavePaiement}
+        />
       )}
     </div>
   );

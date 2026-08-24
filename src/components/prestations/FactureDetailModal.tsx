@@ -11,11 +11,12 @@ import {
   Receipt,
   Download,
   CreditCard,
-  Trash2
+  Trash2,
+  Link2
 } from 'lucide-react';
 import { GroupedFacture } from '../PrestationsView';
 import { formatDate, formatMoney } from '../../utils/formatters';
-import { Personne, Societe } from '../../types';
+import { Personne, Societe, Prestation, LignePrestation } from '../../types';
 
 interface FactureDetailModalProps {
   facture: GroupedFacture | null;
@@ -23,6 +24,7 @@ interface FactureDetailModalProps {
   onDeleteFacture?: (facture: GroupedFacture) => void;
   getPersonne: (id?: string) => Personne | undefined;
   getSocieteNom: (id?: string) => string;
+  onChangeLiaison?: (prestation: Prestation, ligne: LignePrestation) => void;
 }
 
 export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
@@ -31,6 +33,7 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
   onDeleteFacture,
   getPersonne,
   getSocieteNom,
+  onChangeLiaison,
 }) => {
   if (!facture) return null;
 
@@ -240,6 +243,7 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
                             <th className="py-1 px-2 text-right text-emerald-700">Payé</th>
                             <th className="py-1 px-2 text-right text-rose-600">Rejeté</th>
                             <th className="py-1 px-2 text-right text-rose-700">Reste</th>
+                            {onChangeLiaison && <th className="py-1 px-2 text-center">Liaison</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
@@ -261,6 +265,19 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
                                 <td className="py-1.5 px-2 text-right font-mono font-bold text-emerald-600">{formatMoney(lPaye)}</td>
                                 <td className="py-1.5 px-2 text-right font-mono font-bold text-rose-600">{formatMoney(lExclu)}</td>
                                 <td className="py-1.5 px-2 text-right font-mono font-bold text-rose-600">{formatMoney(lReste)}</td>
+                                {onChangeLiaison && (
+                                  <td className="py-1.5 px-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => onChangeLiaison(p, l)}
+                                      className="px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors inline-flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                                      title="Changer la liaison avec un règlement"
+                                    >
+                                      <Link2 className="w-3 h-3 text-indigo-600" />
+                                      <span>Relier</span>
+                                    </button>
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}

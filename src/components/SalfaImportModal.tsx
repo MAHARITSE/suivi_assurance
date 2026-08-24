@@ -93,7 +93,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   defaultSocieteId,
   onImportPrestations,
 }) => {
-  const [importMode, setImportMode] = useState<'pdf' | 'excel'>('pdf');
   const [targetSocietyName, setTargetSocietyName] = useState<string>(societes[0]?.nom || 'MCI CARE');
   const [parsedInvoice, setParsedInvoice] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -103,7 +102,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   const [autoCreateMissingPersonnes, setAutoCreateMissingPersonnes] = useState(true);
   const [missingSocPrompt, setMissingSocPrompt] = useState<{ socName: string } | null>(null);
   const [selectedLines, setSelectedLines] = useState<Record<number, boolean>>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -123,9 +121,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     setErrorMessage(null);
     setIsProcessing(false);
     setLastUploadedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
     if (excelInputRef.current) {
       excelInputRef.current.value = '';
     }
@@ -142,222 +137,141 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     setLastUploadedFile(file);
 
     try {
-      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
-        // Read Excel
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const data = new Uint8Array(event.target?.result as ArrayBuffer);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheetName = workbook.SheetNames[0];
-            const firstSheet = workbook.Sheets[sheetName];
-            const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+      if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls') && !file.name.endsWith('.csv')) {
+        throw new Error('Seuls les fichiers Excel (.xlsx, .xls, .csv) sont pris en charge pour l\'importation des prestations.');
+      }
 
-            if (jsonRows.length === 0) {
-              throw new Error('Le fichier Excel est vide ou ne contient aucune ligne.');
-            }
+      // Read Excel
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const firstSheet = workbook.Sheets[sheetName];
+          const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
 
-            let inferredFactureNum = '';
-            let inferredClient = targetSocietyName || societes[0]?.nom || 'MCI CARE';
+          if (jsonRows.length === 0) {
+            throw new Error('Le fichier Excel est vide ou ne contient aucune ligne.');
+          }
 
-            const lignes = jsonRows.map((row, idx) => {
-              const getVal = (keys: string[]) => {
-                for (const k of keys) {
-                  const cleanK = k.toLowerCase().replace(/[\s_\-\.\/]/g, '');
-                  const foundKey = Object.keys(row).find(rk => {
-                    const cleanRk = rk.toLowerCase().replace(/[\s_\-\.\/]/g, '');
-                    return cleanRk === cleanK;
-                  });
-                  if (foundKey && row[foundKey] !== undefined && row[foundKey] !== '') {
-                    return row[foundKey];
-                  }
-                }
-                return '';
-              };
+          let inferredFactureNum = '';
+          let inferredClient = targetSocietyName || societes[0]?.nom || 'MCI CARE';
 
-              const rawFacture = String(getVal(['Numero_Facture', 'NumeroFacture', 'N° Facture', 'Num Facture', 'Facture']) || '').trim();
-              if (rawFacture && !inferredFactureNum) inferredFactureNum = rawFacture;
-
-              const nomPatientSoin = String(getVal([
-                'Patient', 'Nom_Patient', 'Nom Patient', 'Nom du Patient', 'Nom_du_Patient',
-                'Beneficiaire', 'Bénéficiaire', 'Nom_Beneficiaire', 'Nom_Bénéficiaire', 'Nom Bénéficiaire', 'Nom Beneficiaire',
-                'Ayant_Droit', 'Ayant Droit', 'AyantDroit', 'Nom_Ayant_Droit', 'Nom Ayant Droit', 'Nom_AyantDroit',
-                'Personne_Soignee', 'Personne Soignée', 'Nom_Soigne', 'Nom Soigné', 'Soigné', 'Soigne',
-                'Nom_Soin', 'Nom Soin', 'Nom_Soins', 'Nom Soins', 'Nom_Date_Soin', 'Nom Date Soin', 'Nom_Date_Soins', 'Nom Date des Soins',
-                'Malade', 'Nom_Malade', 'Nom Malade'
-              ]) || '').trim();
-
-              const nomAdherent = String(getVal([
-                'Adherent', 'Adhérent', 'Nom_Adherent', 'Nom_Adhérent', 'Nom Adhérent', 'Nom Adherent', 'Adherent_Nom',
-                'Adhesion', 'Adhésion', 'Titulaire', 'Nom_Titulaire', 'Nom Titulaire'
-              ]) || '').trim();
-
-              const nomGeneral = String(getVal([
-                'Nom_Agent', 'Nom Agent', 'Nom et Prénom', 'Nom et Prenom', 'Nom_Prenom', 'Nom', 'Assuré', 'Assure', 'Nom Assuré', 'Nom Assure', 'Nom_Assure'
-              ]) || '').trim();
-
-              let rawNom = nomPatientSoin || (nomAdherent && !nomGeneral ? nomAdherent : nomGeneral) || nomAdherent || `Patient ${idx + 1}`;
-              let sousSoc = String(getVal(['Sous_Societe', 'Sous-Société', 'Sous Societe', 'Département', 'Section', 'Service']) || '').trim();
-
-              // Extract any sub-society within parentheses from patient or agent name (e.g. "RAZAFY Pierre (CONSERVATION INTERNATIONALE)")
-              const parenMatch = rawNom.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
-              if (parenMatch) {
-                rawNom = parenMatch[1].trim();
-                if (!sousSoc) {
-                  sousSoc = parenMatch[2].trim();
+          const lignes = jsonRows.map((row, idx) => {
+            const getVal = (keys: string[]) => {
+              for (const k of keys) {
+                const cleanK = k.toLowerCase().replace(/[\s_\-\.\/]/g, '');
+                const foundKey = Object.keys(row).find(rk => {
+                  const cleanRk = rk.toLowerCase().replace(/[\s_\-\.\/]/g, '');
+                  return cleanRk === cleanK;
+                });
+                if (foundKey && row[foundKey] !== undefined && row[foundKey] !== '') {
+                  return row[foundKey];
                 }
               }
-
-              const matricule = String(getVal(['Matricule', 'N° Matricule', 'Immatriculation', 'Code']) || '').trim();
-              const rawDateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || new Date().toISOString().split('T')[0]).trim();
-              const dateSoins = normalizeDateISO(rawDateSoins);
-              const montantBrut = Number(getVal(['Montant_Total_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Total', 'Total Prestation', 'Montant Facture', 'Fr. Réels'])) || 0;
-              const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation', 'Franchise'])) || 0;
-              const netAPayer = Number(getVal(['Prise_En_Charge_Net', 'Net A Payer', 'Net Payé', 'Montant Remboursé', 'Prise En Charge', 'Montant Réglé'])) || (montantBrut - participation);
-              const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || targetSocietyName).trim();
-              if (socName) inferredClient = socName;
-
-              const actesRaw = String(getVal(['Acte_Medicale_Prix', 'Acte médicale/Prix', 'Acte médicale / Prix', 'Acte medicale/Prix', 'Actes Médicaux', 'Actes', 'Prestations', 'Detail Actes Medicaux']) || 'CONS : ' + montantBrut);
-              let observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif']) || 'Import Excel').trim();
-              if (nomAdherent && nomAdherent.toLowerCase() !== rawNom.toLowerCase() && !observations.toLowerCase().includes(nomAdherent.toLowerCase())) {
-                observations = observations && observations !== 'Import Excel' ? `${observations} (Adhérent: ${nomAdherent})` : `Adhérent: ${nomAdherent}`;
-              }
-
-              const parsedActes = parseActesFromText(actesRaw, montantBrut);
-
-              return {
-                numeroLigne: idx + 1,
-                dateSoins,
-                matricule,
-                nomPrenom: rawNom,
-                societeAffiliee: socName,
-                sousSociete: sousSoc,
-                actes: parsedActes,
-                actesTexte: actesRaw,
-                montantBrut,
-                montantExclu: 0,
-                baseReglement: montantBrut,
-                participation,
-                netAPayer,
-                observations
-              };
-            });
-
-            const totalBrut = lignes.reduce((s, l) => s + l.montantBrut, 0);
-            const totalPart = lignes.reduce((s, l) => s + l.participation, 0);
-            const totalNet = lignes.reduce((s, l) => s + l.netAPayer, 0);
-
-            const doc: ParsedFactureAssurance = {
-              documentType: 'facture',
-              etablissement: 'CENTRE MÉDICAL / HÔPITAL SALFA',
-              numeroFacture: inferredFactureNum || `FACT-SALFA-${Date.now().toString().substring(6)}`,
-              moisPriseEnCharge: new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
-              clientDoit: inferredClient,
-              dateEmission: new Date().toISOString().split('T')[0],
-              totalMontantBrut: totalBrut,
-              totalParticipation: totalPart,
-              totalNetAPayer: totalNet,
-              lignes
+              return '';
             };
 
-            setParsedInvoice(doc);
-            const initialSelected: Record<number, boolean> = {};
-            doc.lignes.forEach((_, i) => { initialSelected[i] = true; });
-            setSelectedLines(initialSelected);
-            setIsProcessing(false);
-          } catch (err: any) {
-            setErrorMessage(err.message || 'Erreur lors de la lecture du fichier Excel.');
-            setIsProcessing(false);
-          }
-        };
-        reader.readAsArrayBuffer(file);
-      } else {
-        // PDF or Image -> Send to AI OCR server endpoint
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('docType', 'facture');
+            const rawFacture = String(getVal(['Numero_Facture', 'NumeroFacture', 'N° Facture', 'Num Facture', 'Facture']) || '').trim();
+            if (rawFacture && !inferredFactureNum) inferredFactureNum = rawFacture;
 
-        const response = await fetch('/api/parse-invoice', {
-          method: 'POST',
-          body: formData,
-        });
+            const nomPatientSoin = String(getVal([
+              'Patient', 'Nom_Patient', 'Nom Patient', 'Nom du Patient', 'Nom_du_Patient',
+              'Beneficiaire', 'Bénéficiaire', 'Nom_Beneficiaire', 'Nom_Bénéficiaire', 'Nom Bénéficiaire', 'Nom Beneficiaire',
+              'Ayant_Droit', 'Ayant Droit', 'AyantDroit', 'Nom_Ayant_Droit', 'Nom Ayant Droit', 'Nom_AyantDroit',
+              'Personne_Soignee', 'Personne Soignée', 'Nom_Soigne', 'Nom Soigné', 'Soigné', 'Soigne',
+              'Nom_Soin', 'Nom Soin', 'Nom_Soins', 'Nom Soins', 'Nom_Date_Soin', 'Nom Date Soin', 'Nom_Date_Soins', 'Nom Date des Soins',
+              'Malade', 'Nom_Malade', 'Nom Malade'
+            ]) || '').trim();
 
-        let json: any = null;
-        try {
-          const contentType = response.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            json = await response.json();
-          } else {
-            const rawText = await response.text();
-            try {
-              json = JSON.parse(rawText);
-            } catch {
-              // Non-JSON
+            const nomAdherent = String(getVal([
+              'Adherent', 'Adhérent', 'Nom_Adherent', 'Nom_Adhérent', 'Nom Adhérent', 'Nom Adherent', 'Adherent_Nom',
+              'Adhesion', 'Adhésion', 'Titulaire', 'Nom_Titulaire', 'Nom Titulaire'
+            ]) || '').trim();
+
+            const nomGeneral = String(getVal([
+              'Nom_Agent', 'Nom Agent', 'Nom et Prénom', 'Nom et Prenom', 'Nom_Prenom', 'Nom', 'Assuré', 'Assure', 'Nom Assuré', 'Nom Assure', 'Nom_Assure'
+            ]) || '').trim();
+
+            let rawNom = nomPatientSoin || (nomAdherent && !nomGeneral ? nomAdherent : nomGeneral) || nomAdherent || `Patient ${idx + 1}`;
+            let sousSoc = String(getVal(['Sous_Societe', 'Sous-Société', 'Sous Societe', 'Département', 'Section', 'Service']) || '').trim();
+
+            // Extract any sub-society within parentheses from patient or agent name
+            const parenMatch = rawNom.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+            if (parenMatch) {
+              rawNom = parenMatch[1].trim();
+              if (!sousSoc) {
+                sousSoc = parenMatch[2].trim();
+              }
             }
-          }
-        } catch {
-          // Ignore parsing error
-        }
 
-        if (!response.ok || !json || json.success === false) {
-          const serverErr = json?.error;
-          if (serverErr) {
-            throw new Error(serverErr);
-          }
-          if (response.status === 413) {
-            throw new Error("Le fichier est trop volumineux (taille maximale: 25 Mo).");
-          }
-          if (response.status === 504 || response.status === 408) {
-            throw new Error("Délai d'analyse dépassé par le serveur. Veuillez cliquer sur Réessayer.");
-          }
-          throw new Error("L'extraction automatique du document PDF/Image n'a pas pu aboutir. Veuillez cliquer sur Réessayer l'analyse IA.");
-        }
+            const matricule = String(getVal(['Matricule', 'N° Matricule', 'Immatriculation', 'Code']) || '').trim();
+            const rawDateSoins = String(getVal(['Date_Soins', 'Date', 'Date Soins', 'Date des Soins', 'Date Prestation']) || new Date().toISOString().split('T')[0]).trim();
+            const dateSoins = normalizeDateISO(rawDateSoins);
+            const montantBrut = Number(getVal(['Montant_Total_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Total', 'Total Prestation', 'Montant Facture', 'Fr. Réels'])) || 0;
+            const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation', 'Franchise'])) || 0;
+            const netAPayer = Number(getVal(['Prise_En_Charge_Net', 'Net A Payer', 'Net Payé', 'Montant Remboursé', 'Prise En Charge', 'Montant Réglé'])) || (montantBrut - participation);
+            const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || targetSocietyName).trim();
+            if (socName) inferredClient = socName;
 
-        const rawData: ParsedFactureAssurance = json?.data || json;
-        if (!rawData || !Array.isArray(rawData.lignes) || rawData.lignes.length === 0) {
-          throw new Error("Aucune ligne de prestation n'a pu être extraite. Veuillez vérifier la netteté du document et cliquer sur Réessayer.");
-        } else {
-          // Normalize invoice number vs month of coverage
-          let numFact = (rawData.numeroFacture || '').trim();
-          let mois = (rawData.moisPriseEnCharge || '').trim();
-          const isMonth = (v: string) => /^(Janvier|F[ée]vrier|Mars|Avril|Mai|Juin|Juillet|Ao[uû]t|Septembre|Octobre|Novembre|D[ée]cembre)(\s+\d{2,4})?$/i.test(v.trim());
-          
-          if (isMonth(numFact)) {
-            if (!mois || isMonth(numFact)) mois = numFact;
-            numFact = '';
-          }
-          
-          const codeMatch = (str: string) => {
-            const m = str.match(/\b(FA[-_\s]*\d{1,4}\s*\/[A-Za-z0-9\s\-_\.]+\/\s*\d{2,4}(?:[-_\s]*\d+)?)\b/i) 
-              || str.match(/\b(FA[-_][A-Za-z0-9\/\-_]+)\b/i) 
-              || str.match(/\b(FACT[-_][A-Za-z0-9\/\-_]+)\b/i);
-            return m ? m[1].replace(/\s+/g, '').trim() : '';
-          };
-          
-          if (!numFact || isMonth(numFact)) {
-            const inMois = codeMatch(mois);
-            if (inMois) {
-              numFact = inMois;
-              mois = mois.replace(inMois, '').trim();
+            const actesRaw = String(getVal(['Acte_Medicale_Prix', 'Acte médicale/Prix', 'Acte médicale / Prix', 'Acte medicale/Prix', 'Actes Médicaux', 'Actes', 'Prestations', 'Detail Actes Medicaux']) || 'CONS : ' + montantBrut);
+            let observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif']) || 'Import Excel').trim();
+            if (nomAdherent && nomAdherent.toLowerCase() !== rawNom.toLowerCase() && !observations.toLowerCase().includes(nomAdherent.toLowerCase())) {
+              observations = observations && observations !== 'Import Excel' ? `${observations} (Adhérent: ${nomAdherent})` : `Adhérent: ${nomAdherent}`;
             }
-          }
 
-          const data: ParsedFactureAssurance = {
-            ...rawData,
-            numeroFacture: numFact || rawData.numeroFacture || `FA-${Date.now().toString().substring(6)}`,
-            moisPriseEnCharge: mois || rawData.moisPriseEnCharge || 'Avril 2026'
+            const parsedActes = parseActesFromText(actesRaw, montantBrut);
+
+            return {
+              numeroLigne: idx + 1,
+              dateSoins,
+              matricule,
+              nomPrenom: rawNom,
+              societeAffiliee: socName,
+              sousSociete: sousSoc,
+              actes: parsedActes,
+              actesTexte: actesRaw,
+              montantBrut,
+              montantExclu: 0,
+              baseReglement: montantBrut,
+              participation,
+              netAPayer,
+              observations
+            };
+          });
+
+          const totalBrut = lignes.reduce((s, l) => s + l.montantBrut, 0);
+          const totalPart = lignes.reduce((s, l) => s + l.participation, 0);
+          const totalNet = lignes.reduce((s, l) => s + l.netAPayer, 0);
+
+          const doc: ParsedFactureAssurance = {
+            documentType: 'facture',
+            etablissement: 'CENTRE MÉDICAL / HÔPITAL SALFA',
+            numeroFacture: inferredFactureNum || `FACT-SALFA-${Date.now().toString().substring(6)}`,
+            moisPriseEnCharge: new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
+            clientDoit: inferredClient,
+            dateEmission: new Date().toISOString().split('T')[0],
+            totalMontantBrut: totalBrut,
+            totalParticipation: totalPart,
+            totalNetAPayer: totalNet,
+            lignes
           };
 
-          setParsedInvoice(data);
+          setParsedInvoice(doc);
           const initialSelected: Record<number, boolean> = {};
-          data.lignes.forEach((_, i) => { initialSelected[i] = true; });
+          doc.lignes.forEach((_, i) => { initialSelected[i] = true; });
           setSelectedLines(initialSelected);
+          setIsProcessing(false);
+        } catch (err: any) {
+          setErrorMessage(err.message || 'Erreur lors de la lecture du fichier Excel.');
+          setIsProcessing(false);
         }
-        setIsProcessing(false);
-      }
+      };
+      reader.readAsArrayBuffer(file);
     } catch (err: any) {
-      console.error('Erreur analyse document:', err);
-      setErrorMessage(err.message || "L'analyse du document n'a pas pu aboutir. Veuillez réessayer.");
+      console.error('Erreur traitement fichier Excel:', err);
+      setErrorMessage(err.message || 'Erreur lors de la lecture du fichier Excel.');
       setIsProcessing(false);
     }
   };
@@ -372,8 +286,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   const handleRetryLastFile = () => {
     if (lastUploadedFile) {
       processFile(lastUploadedFile);
-    } else if (importMode === 'pdf') {
-      fileInputRef.current?.click();
     } else {
       excelInputRef.current?.click();
     }
@@ -624,10 +536,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                {parsedInvoice ? `Aperçu Facture : ${parsedInvoice.numeroFacture || parsedInvoice.clientDoit}` : 'Importation des Prestations de Soins'}
+                {parsedInvoice ? `Aperçu Facture : ${parsedInvoice.numeroFacture || parsedInvoice.clientDoit}` : 'Importation Excel des Prestations de Soins'}
               </h3>
               <p className="text-xs text-slate-500">
-                {parsedInvoice ? `${totalDetectedCount} lignes de prestations extraites • Vérifiez et confirmez l'importation` : 'Numérisation automatique par IA ou import de fichier Excel.'}
+                {parsedInvoice ? `${totalDetectedCount} lignes de prestations extraites • Vérifiez et confirmez l'importation` : 'Importez vos données de prestations de soins directement depuis un fichier Excel.'}
               </p>
             </div>
           </div>
@@ -641,16 +553,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* Permanent Info Banner */}
-          <div className="flex items-start gap-3 rounded-xl bg-indigo-50/60 border border-indigo-100 p-4 text-xs text-indigo-950 shadow-2xs">
-            <Info className="h-5 w-5 shrink-0 text-indigo-600 mt-0.5" />
-            <div>
-              <h4 className="font-bold text-indigo-950 mb-1">Extraction Exhaustive des Prestations</h4>
-              <p className="leading-relaxed text-indigo-900">
-                L'intelligence artificielle analyse scrupuleusement l'ensemble des pages de votre facture numérisée (PDF ou photo) pour extraire la totalité des patients, dates, sous-sociétés et actes de soins associés.
-              </p>
-            </div>
-          </div>
 
           {/* Error Message with Immediate Retry Button */}
           {errorMessage && (
@@ -658,7 +560,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-5 w-5 shrink-0 text-rose-600 mt-0.5" />
                 <div>
-                  <div className="font-bold text-rose-950 text-sm">Échec de l'extraction</div>
+                  <div className="font-bold text-rose-950 text-sm">Échec de l'importation</div>
                   <div className="font-medium text-rose-800 mt-0.5 leading-relaxed">{errorMessage}</div>
                   {lastUploadedFile && (
                     <div className="text-[11px] text-rose-700/80 font-mono mt-1">
@@ -672,20 +574,16 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                   type="button"
                   onClick={handleRetryLastFile}
                   disabled={isProcessing}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 font-bold shadow-xs transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 text-white hover:bg-emerald-600 font-bold shadow-xs transition cursor-pointer"
                 >
                   <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                  <span>{isProcessing ? 'Nouvelle tentative en cours...' : "Réessayer l'extraction IA"}</span>
+                  <span>{isProcessing ? 'Lecture en cours...' : 'Réessayer la lecture Excel'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setErrorMessage(null);
-                    if (importMode === 'pdf') {
-                      fileInputRef.current?.click();
-                    } else {
-                      excelInputRef.current?.click();
-                    }
+                    excelInputRef.current?.click();
                   }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-semibold transition cursor-pointer"
                 >
@@ -705,111 +603,30 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
           {!parsedInvoice && (
             <div className="space-y-4">
-              {/* Import Mode Selector: PDF (AI) vs Excel */}
-              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setImportMode('pdf')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    importMode === 'pdf'
-                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80 font-bold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <ScanLine className="h-4 w-4 text-indigo-600" />
-                  <span>Scan PDF / Image (Reconnaissance IA)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportMode('excel')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    importMode === 'excel'
-                      ? 'bg-white text-emerald-700 shadow-xs border border-slate-200/80 font-bold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                  <span>Fichier Excel (.xlsx, .csv)</span>
-                </button>
-              </div>
-
-              {/* Mode: PDF / IMAGE OCR (AI) */}
-              {importMode === 'pdf' && (
-                <div
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) {
-                      processFile(file);
-                    }
-                  }}
-                  className="flex min-h-60 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/20 p-8 text-center transition hover:border-indigo-500 hover:bg-indigo-50/40"
-                >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-indigo-600 border border-indigo-100">
-                    {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
+              {/* Mode: EXCEL */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-xl bg-emerald-50/80 border border-emerald-200 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700 mt-0.5">
+                      <FileSpreadsheet className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-emerald-950">Modèle Excel pour Prestations de Soins</h4>
+                      <p className="text-xs text-emerald-800 mt-0.5 max-w-lg">
+                        Téléchargez le fichier modèle prêt à remplir contenant toutes les colonnes requises : 
+                        <strong> Numero_Facture, Nom_Agent, Societe, Sous_Societe, Acte_Medicale_Prix, Montants</strong>...
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-900">
-                      {isProcessing ? 'Lecture et extraction IA de toutes les pages en cours...' : 'Déposez votre facture de soins numérisée (PDF ou Image)'}
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md">
-                      Lecture exhaustive de toutes les pages : détection des assurés, matricules, sous-sociétés et décomposition des actes médicaux.
-                    </p>
-                  </div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                  />
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isProcessing}
-                    className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500 shadow-xs cursor-pointer flex items-center gap-2"
+                    onClick={() => downloadPrestationsExcelTemplate()}
+                    className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 shadow-xs shrink-0 cursor-pointer"
                   >
-                    {isProcessing ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                        <span>Analyse en cours...</span>
-                      </>
-                    ) : (
-                      <>
-                        <ScanLine className="h-4 w-4" />
-                        <span>Parcourir un document PDF ou Image</span>
-                      </>
-                    )}
+                    <Download className="h-4 w-4" />
+                    <span>Télécharger le modèle Excel</span>
                   </button>
                 </div>
-              )}
-
-              {/* Mode: EXCEL */}
-              {importMode === 'excel' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between rounded-xl bg-emerald-50/80 border border-emerald-200 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700 mt-0.5">
-                        <FileSpreadsheet className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-emerald-950">Modèle Excel pour Prestations de Soins</h4>
-                        <p className="text-xs text-emerald-800 mt-0.5 max-w-lg">
-                          Téléchargez le fichier modèle prêt à remplir contenant toutes les colonnes requises : 
-                          <strong> Numero_Facture, Nom_Agent, Societe, Sous_Societe, Acte_Medicale_Prix, Montants</strong>...
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => downloadPrestationsExcelTemplate()}
-                      className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 shadow-xs shrink-0 cursor-pointer"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>Télécharger le modèle Excel</span>
-                    </button>
-                  </div>
 
                   <div
                     onDragOver={(e) => e.preventDefault()}
@@ -850,7 +667,6 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     </button>
                   </div>
                 </div>
-              )}
             </div>
           )}
 

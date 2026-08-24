@@ -1018,6 +1018,15 @@ Décompose rigoureusement chaque acte médical, les matricules, les montants ré
     }
   });
 
+  // Support for api.php in dev preview server
+  app.all('/api.php', (req, res) => {
+    const action = req.query.action;
+    if (action === 'check_db' || action === 'health') {
+      return res.json({ success: true, db_connected: true, message: 'Dev Mode Active' });
+    }
+    return res.json({ success: true, data: [] });
+  });
+
   // Explicit JSON 404 handler for unmatched /api/* calls
   app.all('/api/*all', (req, res) => {
     res.status(404).json({

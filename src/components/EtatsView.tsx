@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
+import { getStoredEnteteConfig } from '../utils/enteteStorage';
 import * as XLSX from 'xlsx';
 
 interface EtatsViewProps {
@@ -548,16 +549,25 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
       {/* Printable Official Header (Shown during print) */}
       <div className="hidden print:block mb-6 border-b-2 border-slate-900 pb-4">
         <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-xl font-bold text-slate-950 uppercase tracking-tight">
-              FIANGONANA LOTERANA MALAGASY - SALFA
-            </h1>
-            <p className="text-sm font-semibold text-slate-800">
-              HÔPITALY LOTERANA TOLIARY TANAMBAO
-            </p>
-            <p className="text-xs text-slate-600">
-              Département de Santé · Suivi & Comptabilité Tiers-Payant Assurance
-            </p>
+          <div className="flex items-center space-x-4">
+            {getStoredEnteteConfig().logoUrl && (
+              <img
+                src={getStoredEnteteConfig().logoUrl}
+                alt="Logo SALFA"
+                className="w-14 h-14 object-contain shrink-0"
+              />
+            )}
+            <div>
+              <h1 className="text-xl font-bold text-slate-950 uppercase tracking-tight">
+                {getStoredEnteteConfig().etablissement || 'FIANGONANA LOTERANA MALAGASY - SALFA'}
+              </h1>
+              <p className="text-sm font-semibold text-slate-800">
+                {getStoredEnteteConfig().sousTitre || 'HÔPITALY LOTERANA TOLIARY TANAMBAO'}
+              </p>
+              <p className="text-xs text-slate-600">
+                {getStoredEnteteConfig().departement || 'Département de Santé · Suivi & Comptabilité Tiers-Payant Assurance'}
+              </p>
+            </div>
           </div>
           <div className="text-right text-xs text-slate-600">
             <p>Date d'édition : <strong>{formatDate(new Date().toISOString())}</strong></p>

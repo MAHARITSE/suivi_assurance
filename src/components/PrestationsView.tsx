@@ -38,6 +38,7 @@ import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPrestationsPdf } from '../utils/recouvrementPdf';
 import { SalfaImportModal } from './SalfaImportModal';
 import { FacturesGroupedTable } from './prestations/FacturesGroupedTable';
+import { ChangerLiaisonModal } from './prestations/ChangerLiaisonModal';
 import { FactureDetailModal } from './prestations/FactureDetailModal';
 import * as XLSX from 'xlsx';
 
@@ -168,6 +169,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [viewingFacture, setViewingFacture] = useState<GroupedFacture | null>(null);
   const [editingPrestation, setEditingPrestation] = useState<Prestation | null>(null);
   const [isSalfaModalOpen, setIsSalfaModalOpen] = useState<boolean>(false);
+  const [changerLiaisonContext, setChangerLiaisonContext] = useState<{ prestation: Prestation, lignePrestation: LignePrestation } | null>(null);
   const [lineEditContext, setLineEditContext] = useState<{ prestation: Prestation, ligne: LignePrestation } | null>(null);
   const [lineExcludeContext, setLineExcludeContext] = useState<{ prestation: Prestation, ligne: LignePrestation, maxExclu: number } | null>(null);
   const [factureExcludeContext, setFactureExcludeContext] = useState<{ prestation: Prestation, maxExclu: number } | null>(null);
@@ -2265,7 +2267,19 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                           </span>
                                         </td>
                                         <td className="py-2 px-2 text-center">
-                                          <div className="flex items-center justify-center gap-2">
+                                          <div className="flex items-center justify-center gap-1.5">
+                                            <button 
+                                              type="button"
+                                              onClick={(e) => { 
+                                                e.stopPropagation(); 
+                                                setChangerLiaisonContext({ prestation, lignePrestation: ligne }); 
+                                              }}
+                                              className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors flex items-center gap-1 text-[10px] font-bold cursor-pointer" 
+                                              title="Changer ou gérer la liaison avec un règlement / bordereau"
+                                            >
+                                              <Link2 className="w-3.5 h-3.5 text-indigo-600" />
+                                              <span>Liaison</span>
+                                            </button>
                                             <button 
                                               onClick={(e) => { e.stopPropagation(); setLineEditContext({ prestation, ligne }); }}
                                               className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition" 
@@ -3024,6 +3038,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           onDeleteFacture={handleRequestDeleteFacture}
           getPersonne={getPersonne}
           getSocieteNom={getSocieteNom}
+          onChangeLiaison={(p, l) => setChangerLiaisonContext({ prestation: p, lignePrestation: l })}
         />
       )}
 
@@ -3280,6 +3295,17 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Modal Changer Liaison de l'Acte */}
+      {changerLiaisonContext && (
+        <ChangerLiaisonModal
+          isOpen={Boolean(changerLiaisonContext)}
+          onClose={() => setChangerLiaisonContext(null)}
+          prestation={changerLiaisonContext.prestation}
+          lignePrestation={changerLiaisonContext.lignePrestation}
+          paiements={paiements || []}
+          onSavePaiement={onSavePaiement || (() => {})}
+        />
       )}
     </div>
   );

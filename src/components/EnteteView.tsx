@@ -18,7 +18,11 @@ import {
   FileCode,
   Layers,
   Sparkles,
-  Download
+  Download,
+  Upload,
+  Trash2,
+  FileImage,
+  Image as ImageIcon
 } from 'lucide-react';
 import { EnteteConfig, defaultEnteteConfig } from '../types';
 import { getStoredEnteteConfig, saveStoredEnteteConfig, resetStoredEnteteConfig } from '../utils/enteteStorage';
@@ -40,6 +44,29 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
     const updated = { ...config, [key]: value };
     setConfig(updated);
     if (onConfigChange) onConfigChange(updated);
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert('L’image sélectionnée est trop volumineuse (maximum 2 Mo). Veuillez choisir une image plus petite.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        handleChange('logoUrl', base64);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveLogo = () => {
+    handleChange('logoUrl', undefined);
   };
 
   const handleSave = () => {
@@ -222,6 +249,55 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
             </div>
 
             <div className="space-y-3">
+              {/* Logo / Icône de l'Application & Entête */}
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <FileImage className="w-4 h-4 text-indigo-600" />
+                    <span className="text-xs font-bold text-slate-800">Icône / Logo de l'Établissement & Application</span>
+                  </div>
+                  {config.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 flex items-center space-x-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Supprimer</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                    {config.logoUrl ? (
+                      <img src={config.logoUrl} alt="Logo SALFA" className="w-full h-full object-contain p-1" />
+                    ) : (
+                      <div className="text-center text-slate-400 p-1">
+                        <Building2 className="w-5 h-5 mx-auto" />
+                        <span className="text-[8px] block font-medium">Aucun</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-1">
+                    <label className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-all">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Ajouter / Importer une Icône</span>
+                      <input
+                        type="file"
+                        accept="image/png, image/jpeg, image/svg+xml, image/x-icon, image/webp"
+                        onChange={handleLogoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    <p className="text-[10px] text-slate-500">
+                      Format PNG/JPG/SVG/ICO. Utilisée dans l'en-tête de l'application et les états PDF (remplace l'icône WAMP par défaut).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nom de l'Établissement / Centre Médical
@@ -648,11 +724,20 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
                         : '#1e293b',
                   }}
                 >
-                  <div
-                    className={`${getFontFamilyStyle()} ${getFontWeightStyle()} ${getFontStyleItalic()}`}
-                    style={{ fontSize: `${config.titreTaille}px` }}
-                  >
-                    {config.majusculesTitre ? config.etablissement.toUpperCase() : config.etablissement}
+                  <div className="flex items-center space-x-3">
+                    {config.logoUrl && (
+                      <img
+                        src={config.logoUrl}
+                        alt="Logo"
+                        className="w-8 h-8 object-contain bg-white/10 p-0.5 rounded-lg border border-white/20 shrink-0"
+                      />
+                    )}
+                    <div
+                      className={`${getFontFamilyStyle()} ${getFontWeightStyle()} ${getFontStyleItalic()}`}
+                      style={{ fontSize: `${config.titreTaille}px` }}
+                    >
+                      {config.majusculesTitre ? config.etablissement.toUpperCase() : config.etablissement}
+                    </div>
                   </div>
                   {config.afficherDateGeneration && (
                     <div className="text-[10px] opacity-85 font-sans">
@@ -671,11 +756,20 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
                   }`}
                 >
                   <div className="flex items-start justify-between">
-                    <div
-                      className={`${getFontFamilyStyle()} ${getFontWeightStyle()} ${getFontStyleItalic()} text-slate-900`}
-                      style={{ fontSize: `${config.titreTaille * 1.15}px` }}
-                    >
-                      {config.majusculesTitre ? config.etablissement.toUpperCase() : config.etablissement}
+                    <div className="flex items-center space-x-3">
+                      {config.logoUrl && (
+                        <img
+                          src={config.logoUrl}
+                          alt="Logo"
+                          className="w-10 h-10 object-contain rounded-lg border border-slate-200 p-0.5 shrink-0"
+                        />
+                      )}
+                      <div
+                        className={`${getFontFamilyStyle()} ${getFontWeightStyle()} ${getFontStyleItalic()} text-slate-900`}
+                        style={{ fontSize: `${config.titreTaille * 1.15}px` }}
+                      >
+                        {config.majusculesTitre ? config.etablissement.toUpperCase() : config.etablissement}
+                      </div>
                     </div>
                     {config.alignement === 'between' && config.afficherDateGeneration && (
                       <div className="text-[11px] text-slate-400 font-sans">

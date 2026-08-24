@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ServerOff, AlertTriangle, RefreshCw, Database } from 'lucide-react';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -18,85 +19,86 @@ import {
   initialFamilles, 
   initialPaiements 
 } from './data/initialData';
-import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab } from './types';
+import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab, EnteteConfig } from './types';
 import { generateMySQLDump } from './utils/sqlExporter';
-import { fetchWampData, saveWampData, deleteWampData } from './utils/wampApi';
+import { checkWampDbConnection, fetchWampData, saveWampData, deleteWampData } from './utils/wampApi';
+import { getStoredEnteteConfig } from './utils/enteteStorage';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
+  const [enteteConfig, setEnteteConfig] = useState<EnteteConfig>(getStoredEnteteConfig());
 
-  // Persistence initialized with restored initial societes (MCI CARE, NY HAVANA, BSA, ASCOMA)
+  // Dynamically sync browser favicon with entete config logoUrl
+  useEffect(() => {
+    if (enteteConfig?.logoUrl) {
+      let link = document.querySelector<HTMLLinkElement>("link[rel*='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'shortcut icon';
+        document.getElementsByTagName('head')[0].appendChild(link);
+      }
+      link.href = enteteConfig.logoUrl;
+    }
+  }, [enteteConfig?.logoUrl]);
+
+  // Database Connection blocking status
+  const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'error'>('checking');
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [isRetryingDb, setIsRetryingDb] = useState(false);
+
+  // Data states initialized with localStorage backup or initialData
   const [societes, setSocietes] = useState<Societe[]>(() => {
-    localStorage.removeItem('suivi_assurance_societes');
-    localStorage.removeItem('suivi_assurance_bsa_v3_societes');
-    localStorage.removeItem('suivi_assurance_bsa_clean_societes');
-    const saved = localStorage.getItem('suivi_assurance_mcicare_societes') || localStorage.getItem('suivi_assurance_nyhavana_societes');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_societes');
     if (saved) {
       try {
-        const parsed: Societe[] = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      } catch {
-        return initialSocietes;
-      }
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
     }
     return initialSocietes;
   });
 
   const [personnes, setPersonnes] = useState<Personne[]>(() => {
-    localStorage.removeItem('suivi_assurance_personnes');
-    localStorage.removeItem('suivi_assurance_bsa_v3_personnes');
-    localStorage.removeItem('suivi_assurance_bsa_clean_personnes');
-    localStorage.removeItem('suivi_assurance_nyhavana_personnes');
     const saved = localStorage.getItem('suivi_assurance_mcicare_personnes');
     if (saved) {
       try {
-        const parsed: Personne[] = JSON.parse(saved);
-        return parsed;
-      } catch {
-        return initialPersonnes;
-      }
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
     }
     return initialPersonnes;
   });
 
   const [familles, setFamilles] = useState<Famille[]>(() => {
-    localStorage.removeItem('suivi_assurance_familles');
-    localStorage.removeItem('suivi_assurance_bsa_v3_familles');
-    localStorage.removeItem('suivi_assurance_nyhavana_familles');
+    const saved = localStorage.getItem('suivi_assurance_mcicare_familles');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
     return initialFamilles;
   });
 
   const [prestations, setPrestations] = useState<Prestation[]>(() => {
-    localStorage.removeItem('suivi_assurance_prestations');
-    localStorage.removeItem('suivi_assurance_bsa_v3_prestations');
-    localStorage.removeItem('suivi_assurance_bsa_clean_prestations');
-    localStorage.removeItem('suivi_assurance_nyhavana_prestations');
     const saved = localStorage.getItem('suivi_assurance_mcicare_prestations');
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch {
-        return [];
-      }
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
     }
     return [];
   });
 
   const [paiements, setPaiements] = useState<Paiement[]>(() => {
-    localStorage.removeItem('suivi_assurance_paiements');
-    localStorage.removeItem('suivi_assurance_bsa_v3_paiements');
-    localStorage.removeItem('suivi_assurance_bsa_clean_paiements');
-    localStorage.removeItem('suivi_assurance_nyhavana_paiements');
     const saved = localStorage.getItem('suivi_assurance_mcicare_paiements');
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch {
-        return initialPaiements;
-      }
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
     }
     return initialPaiements;
   });
@@ -105,49 +107,77 @@ export function App() {
   const [isPrestationModalOpen, setIsPrestationModalOpen] = useState(false);
   const [isPaiementModalOpen, setIsPaiementModalOpen] = useState(false);
 
-  // Sync with WAMP API on load if present
-  useEffect(() => {
-    async function syncFromWamp() {
-      try {
-        const [sData, pData, fData, prData, paData] = await Promise.all([
-          fetchWampData('societes'),
-          fetchWampData('personnes'),
-          fetchWampData('familles'),
-          fetchWampData('prestations'),
-          fetchWampData('paiements')
-        ]);
-        if (sData && sData.length > 0) setSocietes(sData);
-        if (pData && pData.length > 0) setPersonnes(pData);
-        if (fData && fData.length > 0) setFamilles(fData);
-        if (prData && prData.length > 0) setPrestations(prData);
-        if (paData && paData.length > 0) setPaiements(paData);
-      } catch {
-        // Ignore errors when running outside WAMP
-      }
+  // Check database connection and load WAMP data
+  const checkAndLoadWampData = async () => {
+    setDbStatus('checking');
+    setIsRetryingDb(true);
+    const conn = await checkWampDbConnection();
+    if (!conn.connected) {
+      setDbStatus('error');
+      setDbError(conn.error || 'Connexion à la base de données MySQL WAMP non établie.');
+      setIsRetryingDb(false);
+      return;
     }
-    syncFromWamp();
+
+    setDbStatus('connected');
+    setDbError(null);
+
+    try {
+      const [sData, pData, fData, prData, paData] = await Promise.all([
+        fetchWampData('societes'),
+        fetchWampData('personnes'),
+        fetchWampData('familles'),
+        fetchWampData('prestations'),
+        fetchWampData('paiements')
+      ]);
+      if (sData && Array.isArray(sData) && sData.length > 0) setSocietes(sData);
+      if (pData && Array.isArray(pData) && pData.length > 0) setPersonnes(pData);
+      if (fData && Array.isArray(fData) && fData.length > 0) setFamilles(fData);
+      if (prData && Array.isArray(prData) && prData.length > 0) setPrestations(prData);
+      if (paData && Array.isArray(paData) && paData.length > 0) setPaiements(paData);
+    } catch (err: any) {
+      console.error('Erreur chargement WAMP:', err);
+      setDbStatus('error');
+      setDbError('Erreur de lecture des données depuis la base de données MySQL WAMP.');
+    } finally {
+      setIsRetryingDb(false);
+    }
+  };
+
+  useEffect(() => {
+    checkAndLoadWampData();
   }, []);
 
-  // Sync to localStorage
+  // Sync to localStorage as backup
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
-  }, [societes]);
+    if (dbStatus === 'connected') {
+      localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
+    }
+  }, [societes, dbStatus]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_mcicare_personnes', JSON.stringify(personnes));
-  }, [personnes]);
+    if (dbStatus === 'connected') {
+      localStorage.setItem('suivi_assurance_mcicare_personnes', JSON.stringify(personnes));
+    }
+  }, [personnes, dbStatus]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_mcicare_familles', JSON.stringify(familles));
-  }, [familles]);
+    if (dbStatus === 'connected') {
+      localStorage.setItem('suivi_assurance_mcicare_familles', JSON.stringify(familles));
+    }
+  }, [familles, dbStatus]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_mcicare_prestations', JSON.stringify(prestations));
-  }, [prestations]);
+    if (dbStatus === 'connected') {
+      localStorage.setItem('suivi_assurance_mcicare_prestations', JSON.stringify(prestations));
+    }
+  }, [prestations, dbStatus]);
 
   useEffect(() => {
-    localStorage.setItem('suivi_assurance_mcicare_paiements', JSON.stringify(paiements));
-  }, [paiements]);
+    if (dbStatus === 'connected') {
+      localStorage.setItem('suivi_assurance_mcicare_paiements', JSON.stringify(paiements));
+    }
+  }, [paiements, dbStatus]);
 
   // Handlers for Prestations
   const handleSavePrestation = (prestation: Prestation) => {
@@ -452,6 +482,70 @@ export function App() {
     URL.revokeObjectURL(url);
   };
 
+  if (dbStatus === 'error') {
+    return (
+      <div className="fixed inset-0 z-[9999] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 font-sans antialiased select-none">
+        <div className="max-w-xl w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+          <div className="bg-rose-600 px-6 py-5 text-white flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md shrink-0">
+              <ServerOff className="h-7 w-7 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold">Application Bloquée : Base de données déconnectée</h2>
+              <p className="text-xs text-rose-100">Le fonctionnement en mode local est désactivé</p>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-5">
+            <div className="rounded-2xl bg-rose-50 border border-rose-200 p-4 space-y-2">
+              <div className="flex items-center gap-2 text-rose-950 font-bold text-xs">
+                <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                <span>Raison du blocage de l'application :</span>
+              </div>
+              <p className="text-xs text-rose-900 leading-relaxed font-mono bg-white/80 p-3 rounded-xl border border-rose-200 break-words">
+                {dbError || 'Impossible de se connecter au serveur MySQL WAMP (suivi_assurance_salfa).'}
+              </p>
+            </div>
+
+            <div className="space-y-2 text-xs text-slate-700">
+              <h4 className="font-bold text-slate-900">Procédure pour débloquer l'application :</h4>
+              <ol className="list-decimal list-inside space-y-1.5 text-slate-600 pl-1 leading-relaxed">
+                <li>Vérifiez que <strong>WAMP Server</strong> est démarré (icône <strong>VERTE</strong> dans la barre des tâches).</li>
+                <li>Assurez-vous que le service <strong>MySQL</strong> (Port 3306) est démarré.</li>
+                <li>Vérifiez la configuration dans <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">wamp-deploy/api/config.php</code>.</li>
+                <li>Importez le fichier <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">schema.sql</code> si la base <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">suivi_assurance_salfa</code> n'existe pas.</li>
+              </ol>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={checkAndLoadWampData}
+                disabled={isRetryingDb}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRetryingDb ? 'animate-spin' : ''}`} />
+                <span>{isRetryingDb ? 'Vérification de la connexion MySQL en cours...' : 'Réessayer la connexion à la base de données MySQL'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (dbStatus === 'checking') {
+    return (
+      <div className="fixed inset-0 z-[9999] bg-slate-900 flex flex-col items-center justify-center p-4 text-white font-sans">
+        <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-md mb-4 animate-bounce">
+          <Database className="h-8 w-8 text-emerald-400" />
+        </div>
+        <h2 className="text-base font-bold">Vérification de la connexion à la base de données MySQL...</h2>
+        <p className="text-xs text-slate-400 mt-1">Connexion au serveur WAMP en cours</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 antialiased">
       {/* Top Header */}
@@ -460,6 +554,7 @@ export function App() {
         selectedSocieteId={selectedSocieteId}
         onSelectSociete={setSelectedSocieteId}
         onExportBackup={handleExportBackup}
+        logoUrl={enteteConfig.logoUrl}
       />
 
       {/* Navigation Tab Bar */}
@@ -579,7 +674,7 @@ export function App() {
         )}
 
         {activeTab === 'entete' && (
-          <EnteteView />
+          <EnteteView onConfigChange={setEnteteConfig} />
         )}
       </main>
 

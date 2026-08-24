@@ -2,6 +2,30 @@
  * Service de synchronisation API Backend WAMP (PHP / MySQL)
  */
 
+export async function checkWampDbConnection(): Promise<{ connected: boolean; error?: string }> {
+  try {
+    const res = await fetch('api.php?action=check_db');
+    let json: any = null;
+    try {
+      json = await res.json();
+    } catch {
+      // Body not JSON
+    }
+
+    if (!res.ok || !json || json.success === false) {
+      const errMsg = json?.error || (res.status !== 200 ? `Erreur HTTP ${res.status}: Base de données WAMP / MySQL non accessible.` : 'La connexion à la base de données MySQL a échoué.');
+      return { connected: false, error: errMsg };
+    }
+
+    return { connected: true };
+  } catch (err: any) {
+    return {
+      connected: false,
+      error: err?.message || 'Serveur WAMP (Apache/PHP) injoignable ou service MySQL déconnecté.'
+    };
+  }
+}
+
 export async function fetchWampData(action: string) {
   try {
     const res = await fetch(`api.php?action=${action}`);
@@ -38,3 +62,4 @@ export async function deleteWampData(action: string, id: string) {
     return null;
   }
 }
+
