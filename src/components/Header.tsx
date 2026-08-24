@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Database } from 'lucide-react';
+import { ShieldCheck, Database, UploadCloud } from 'lucide-react';
 import { Societe } from '../types';
 
 interface HeaderProps {
@@ -7,11 +7,15 @@ interface HeaderProps {
   selectedSocieteId?: string;
   onSelectSociete?: (id: string) => void;
   onExportBackup?: () => void;
+  onSyncToWamp?: () => void;
+  isSyncingWamp?: boolean;
   logoUrl?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onExportBackup,
+  onSyncToWamp,
+  isSyncingWamp,
   logoUrl,
 }) => {
   return (
@@ -40,8 +44,21 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {onExportBackup && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          {onSyncToWamp && (
+            <button
+              id="btn-sync-wamp"
+              onClick={onSyncToWamp}
+              disabled={isSyncingWamp}
+              title="Envoyer les données locales (factures, dossiers, personnes) vers la base MySQL WAMP"
+              className="inline-flex h-9 items-center gap-2 rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+            >
+              <UploadCloud className={`h-4 w-4 ${isSyncingWamp ? 'animate-bounce' : ''}`} />
+              <span>{isSyncingWamp ? 'Envoi vers MySQL...' : 'Synchroniser vers MySQL'}</span>
+            </button>
+          )}
+
+          {onExportBackup && (
             <button
               id="btn-backup-export"
               onClick={onExportBackup}
@@ -50,10 +67,10 @@ export const Header: React.FC<HeaderProps> = ({
               className="inline-flex h-9 items-center gap-2 rounded-xl bg-slate-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 active:scale-95"
             >
               <Database className="h-4 w-4 text-emerald-400" />
-              <span>Sauvegarder (.SQL WAMP)</span>
+              <span>Sauvegarder (.SQL)</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );

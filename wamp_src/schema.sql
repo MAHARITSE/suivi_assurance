@@ -43,10 +43,9 @@ CREATE TABLE `lignes_paiement` (
   `libelle_acte`       VARCHAR(255) DEFAULT NULL,
   `actes_payes`        LONGTEXT     DEFAULT NULL,
   `commentaire`        TEXT         DEFAULT NULL,
-  `position`           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `position`           INT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
-  KEY `idx_lgp_paiement` (`paiement_id`),
-  KEY `idx_lgp_position` (`paiement_id`, `position`)
+  KEY `idx_lgp_paiement` (`paiement_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -97,10 +96,9 @@ CREATE TABLE `lignes_prestation` (
   `montant_exclu`        DECIMAL(15,2) DEFAULT 0.00,
   `motif_exclusion`      TEXT         DEFAULT NULL,
   `statut`               VARCHAR(50)  DEFAULT 'En attente',
-  `position`             INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `position`             INT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
-  KEY `idx_lpp_prestation` (`prestation_id`),
-  KEY `idx_lpp_position` (`prestation_id`, `position`)
+  KEY `idx_lpp_prestation` (`prestation_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -193,6 +191,22 @@ CREATE TABLE `familles` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_familles_code` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Insertion des familles par défaut avec leurs alias complets (synonymes, codes & mots-clés)
+INSERT INTO `familles` (`id`, `code`, `libelle`, `plafond_annuel`, `taux_standard`, `tarif_conventionne`, `ticket_moderateur_defaut`, `description`, `aliases`) VALUES
+('fam-cons', 'CONS', 'Consultations & Visites Médicales', NULL, NULL, 20000.00, 0.00, 'Consultations de médecine générale et spécialisée', '["CONS","CG","C","CS","CONSULTATION","CONSULT","VISITE","VISITE MEDICALE","MEDECIN","CONSULT. GENERALISTE","GENERALISTE"]'),
+('fam-medic', 'MEDIC', 'Pharmacie & Médicaments', NULL, NULL, 0.00, 0.00, 'Médicaments prescrits, spécialités pharmaceutiques et consommables', '["MEDIC","PH","PHSB","PHAR","PHARMACIE","STOCK","PRODUITS PHARMACEUTIQUES","DROGUERIE","MEDICAMENTS","AMLOZAAR","AMOXICILLINE","AMOXICLAV","DOLIPRANE","ZERODOL","MAXILASE","HERBOKOF","MAG 2","BACTOCLAV","DOLOWIN","VITAMINE C"]'),
+('fam-labo', 'LABO', 'Analyses & Biologie Médicale', NULL, NULL, 0.00, 0.00, 'Examens de laboratoire, hématologie, biochimie, sérologie', '["LABO","EB","ANALYSES","BIOLOGIE","EXAMENS","TDR","TDR PALU","NFS","BIO","ANALYSE DE LABORATOIRE","SERVICE BIOLOGIE","BIOLOGISTE"]'),
+('fam-soins', 'SOINS', 'Soins Infirmiers & Actes Externes', NULL, NULL, 0.00, 0.00, 'Injections, pansements, perfusions, aérosols et soins ambulatoires', '["SOINS","SI","PANSEMENT","INJECTION","PERFUSION","ACTES INFIRMIERS","SOIN","AMI"]'),
+('fam-dent', 'DENT', 'Soins & Prothèses Dentaires', NULL, NULL, 50000.00, 0.00, 'Soins conservateurs, extractions, détartrage et prothèses dentaires', '["DENT","DC","DK","CD","DETAR","DSC","SUP 90","DENTAIRE","EXTRACTION","DETARTRAGE","ODONTOLOGIE","RADICULAIRE","PROTHESE DENTAIRE"]'),
+('fam-hosp', 'HOSP', 'Hospitalisation & Séjour', NULL, NULL, 60000.00, 0.00, 'Séjours en clinique, frais de chambre, soins intensifs et chirurgie', '["HOSP","HOSPITALISATION","SEJOUR","CHIRURGIE","CHIRURG","ACCOUCHEMENT","BLOC"]'),
+('fam-echo', 'ECHO', 'Échographie & Imagerie Médicale', NULL, NULL, 30000.00, 0.00, 'Échographies abdominales, pelviennes, radiographies standard', '["ECHO","ECH","ECHOGRAPHIE","ECHOGRAPHIE PELVIENNE","RADI","RADIO","RADIOLOGIE","SCANNER","IRM","IMAGERIE"]'),
+('fam-opht', 'OPHT', 'Ophtalmologie & Optique', NULL, NULL, 25000.00, 0.00, 'Consultations ophtalmologiques, verres correcteurs et montures', '["OPHT","OPHTALMOLOGIE","OPHTA","LUNETTES","VERRES","OPTIQUE","MONTURE"]')
+ON DUPLICATE KEY UPDATE
+  `libelle` = VALUES(`libelle`),
+  `description` = VALUES(`description`),
+  `tarif_conventionne` = VALUES(`tarif_conventionne`),
+  `aliases` = VALUES(`aliases`);
 
 SET FOREIGN_KEY_CHECKS = 1;
 

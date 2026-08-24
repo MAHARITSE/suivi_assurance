@@ -130,11 +130,62 @@ export function App() {
         fetchWampData('prestations'),
         fetchWampData('paiements')
       ]);
-      if (sData && Array.isArray(sData) && sData.length > 0) setSocietes(sData);
-      if (pData && Array.isArray(pData) && pData.length > 0) setPersonnes(pData);
-      if (fData && Array.isArray(fData) && fData.length > 0) setFamilles(fData);
-      if (prData && Array.isArray(prData) && prData.length > 0) setPrestations(prData);
-      if (paData && Array.isArray(paData) && paData.length > 0) setPaiements(paData);
+      if (sData && Array.isArray(sData) && sData.length > 0) {
+        setSocietes(sData);
+      } else if (societes && societes.length > 0) {
+        saveWampData('societes', societes);
+      }
+
+      if (pData && Array.isArray(pData) && pData.length > 0) {
+        setPersonnes(pData);
+      } else if (personnes && personnes.length > 0) {
+        saveWampData('personnes', personnes);
+      }
+      
+      // Combiner et synchroniser automatiquement les alias des familles locales vers MySQL
+      if (fData && Array.isArray(fData) && fData.length > 0) {
+        const mergedMap = new Map<string, Famille>();
+
+        fData.forEach((f: Famille) => {
+          mergedMap.set(f.id, f);
+        });
+
+        initialFamilles.forEach((initF: Famille) => {
+          const existing = Array.from(mergedMap.values()).find(
+            f => f.id === initF.id || f.code.toUpperCase() === initF.code.toUpperCase()
+          );
+
+          if (existing) {
+            const combinedAliases = Array.from(new Set([...(initF.aliases || []), ...(existing.aliases || [])]));
+            if (!existing.aliases || existing.aliases.length < combinedAliases.length) {
+              const updatedF = { ...existing, aliases: combinedAliases };
+              mergedMap.set(existing.id, updatedF);
+              saveWampData('familles', updatedF);
+            }
+          } else {
+            mergedMap.set(initF.id, initF);
+            saveWampData('familles', initF);
+          }
+        });
+
+        setFamilles(Array.from(mergedMap.values()));
+      } else {
+        setFamilles(initialFamilles);
+        initialFamilles.forEach(f => saveWampData('familles', f));
+      }
+
+      if (prData && Array.isArray(prData) && prData.length > 0) {
+        setPrestations(prData);
+      } else if (prestations && prestations.length > 0) {
+        // Synchroniser automatiquement l'ensemble des factures & dossiers locaux vers MySQL
+        saveWampData('prestations', prestations);
+      }
+
+      if (paData && Array.isArray(paData) && paData.length > 0) {
+        setPaiements(paData);
+      } else if (paiements && paiements.length > 0) {
+        saveWampData('paiements', paiements);
+      }
     } catch (err: any) {
       console.error('Erreur chargement WAMP:', err);
       setDbStatus('error');
@@ -470,6 +521,45 @@ export function App() {
     setActiveTab('paiements');
   };
 
+  const [isSyncingWamp, setIsSyncingWamp] = useState(false);
+
+  const handleSyncToWamp = async () => {
+    setIsSyncingWamp(true);
+    const results: string[] = [];
+    const allErrors: string[] = [];
+    try {
+      const actions: { name: string; data: any[] }[] = [
+        { name: 'societes', data: societes },
+        { name: 'personnes', data: personnes },
+        { name: 'familles', data: familles },
+        { name: 'prestations', data: prestations },
+        { name: 'paiements', data: paiements },
+      ];
+      for (const { name, data } of actions) {
+        if (data.length > 0) {
+          const res = await saveWampData(name, data);
+          if (res && res.success) {
+            results.push(`${name}: ${res.count ?? data.length} enregistré(s)`);
+            if (res.errors && res.errors.length > 0) {
+              allErrors.push(...res.errors.map((e: string) => `[${name}] ${e}`));
+            }
+          } else {
+            results.push(`${name}: ÉCHEC`);
+          }
+        }
+      }
+      await checkAndLoadWampData();
+      const msg = '✅ Synchronisation terminée:\n' + results.join('\n')
+        + (allErrors.length > 0 ? '\n\n⚠️ Avertissements:\n' + allErrors.join('\n') : '');
+      alert(msg);
+    } catch (err) {
+      console.error('Erreur de synchronisation globale WAMP:', err);
+      alert('❌ Erreur lors de la synchronisation vers MySQL. Consultez la console (F12) pour plus de détails.');
+    } finally {
+      setIsSyncingWamp(false);
+    }
+  };
+
   const handleExportBackup = () => {
     const data = { societes, personnes, familles, prestations, paiements };
     const sqlContent = generateMySQLDump(data);
@@ -554,6 +644,8 @@ export function App() {
         selectedSocieteId={selectedSocieteId}
         onSelectSociete={setSelectedSocieteId}
         onExportBackup={handleExportBackup}
+        onSyncToWamp={handleSyncToWamp}
+        isSyncingWamp={isSyncingWamp}
         logoUrl={enteteConfig.logoUrl}
       />
 

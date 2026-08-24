@@ -37,16 +37,27 @@ export async function fetchWampData(action: string) {
   }
 }
 
-export async function saveWampData(action: string, data: any) {
+export async function saveWampData(action: string, data: any): Promise<{ success: boolean; message?: string; count?: number; errors?: string[] } | null> {
   try {
     const res = await fetch(`api.php?action=${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    if (!res.ok) {
+      console.error(`[saveWampData] HTTP ${res.status} pour action=${action}`);
+      return null;
+    }
+    const json = await res.json();
+    if (json && !json.success) {
+      console.error(`[saveWampData] Échec API action=${action}:`, json.error || json.message);
+    }
+    if (json && json.errors && json.errors.length > 0) {
+      console.warn(`[saveWampData] ${json.errors.length} erreur(s) pour action=${action}:`, json.errors);
+    }
+    return json;
+  } catch (err) {
+    console.error(`[saveWampData] Exception pour action=${action}:`, err);
     return null;
   }
 }

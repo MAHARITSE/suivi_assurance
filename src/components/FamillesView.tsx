@@ -12,9 +12,11 @@ import {
   Info,
   HelpCircle,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Database
 } from 'lucide-react';
 import { Famille } from '../types';
+import { initialFamilles } from '../data/initialData';
 import { generateId } from '../utils/formatters';
 
 interface FamillesViewProps {
@@ -32,9 +34,33 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingFamille, setEditingFamille] = useState<Famille | null>(null);
   const [familleToDelete, setFamilleToDelete] = useState<Famille | null>(null);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   
   // Quick inline alias input state on cards: { [familleId]: currentText }
   const [quickAliasInputs, setQuickAliasInputs] = useState<Record<string, string>>({});
+
+  const handleSyncAllAliases = () => {
+    let count = 0;
+    initialFamilles.forEach(initF => {
+      const existing = familles.find(
+        f => f.id === initF.id || f.code.toUpperCase() === initF.code.toUpperCase()
+      );
+      const combinedAliases = Array.from(new Set([
+        ...(initF.aliases || []),
+        ...(existing?.aliases || [])
+      ]));
+
+      const familleToSave: Famille = existing
+        ? { ...existing, aliases: combinedAliases }
+        : { ...initF, aliases: combinedAliases };
+
+      onSaveFamille(familleToSave);
+      count++;
+    });
+
+    setSyncStatus(`✅ ${count} familles d'actes et tous leurs alias ont été copiés/synchronisés vers MySQL !`);
+    setTimeout(() => setSyncStatus(null), 5000);
+  };
 
   // Modal Form State
   const [formCode, setFormCode] = useState('');
@@ -159,14 +185,31 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={handleOpenCreate}
-            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nouvel Acte Médical</span>
-          </button>
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              onClick={handleSyncAllAliases}
+              title="Copier et synchroniser l'ensemble des alias d'actes locaux vers la base de données MySQL WAMP"
+              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition"
+            >
+              <Database className="w-4 h-4" />
+              <span>Copier les Alias vers MySQL</span>
+            </button>
+            <button
+              onClick={handleOpenCreate}
+              className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nouvel Acte Médical</span>
+            </button>
+          </div>
         </div>
+
+        {syncStatus && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs font-bold text-emerald-800 flex items-center space-x-2 animate-fade-in">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{syncStatus}</span>
+          </div>
+        )}
 
         {/* Quick helper tip */}
         <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-3.5 flex items-start space-x-3 text-xs text-indigo-900">
