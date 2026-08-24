@@ -1,0 +1,7 @@
+# =====================================================================
+#  Dossier « api/ » — contient uniquement le fichier de configuration
+#  PHP (config.php), inclus par api.php.
+#  Tout accès direct est refusé (double protection avec le garde-fou
+#  interne de config.php).
+# =====================================================================
+Require all denied
