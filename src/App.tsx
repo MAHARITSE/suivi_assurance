@@ -47,67 +47,18 @@ export function App() {
   const [dbError, setDbError] = useState<string | null>(null);
   const [isRetryingDb, setIsRetryingDb] = useState(false);
 
-  // Data states initialized with localStorage backup or initialData
-  const [societes, setSocietes] = useState<Societe[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_mcicare_societes');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return initialSocietes;
-  });
-
-  const [personnes, setPersonnes] = useState<Personne[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_mcicare_personnes');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return initialPersonnes;
-  });
-
-  const [familles, setFamilles] = useState<Famille[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_mcicare_familles');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return initialFamilles;
-  });
-
-  const [prestations, setPrestations] = useState<Prestation[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_mcicare_prestations');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {}
-    }
-    return [];
-  });
-
-  const [paiements, setPaiements] = useState<Paiement[]>(() => {
-    const saved = localStorage.getItem('suivi_assurance_mcicare_paiements');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return initialPaiements;
-  });
+  // Data states — MySQL is the single source of truth
+  const [societes, setSocietes] = useState<Societe[]>(initialSocietes);
+  const [personnes, setPersonnes] = useState<Personne[]>(initialPersonnes);
+  const [familles, setFamilles] = useState<Famille[]>(initialFamilles);
+  const [prestations, setPrestations] = useState<Prestation[]>([]);
+  const [paiements, setPaiements] = useState<Paiement[]>(initialPaiements);
 
   // Modals quick trigger
   const [isPrestationModalOpen, setIsPrestationModalOpen] = useState(false);
   const [isPaiementModalOpen, setIsPaiementModalOpen] = useState(false);
 
-  // Check database connection and load WAMP data
+  // Check database connection and load WAMP data directly from MySQL
   const checkAndLoadWampData = async () => {
     setDbStatus('checking');
     setIsRetryingDb(true);
@@ -130,61 +81,69 @@ export function App() {
         fetchWampData('prestations'),
         fetchWampData('paiements')
       ]);
-      if (sData && Array.isArray(sData) && sData.length > 0) {
-        setSocietes(sData);
-      } else if (societes && societes.length > 0) {
-        saveWampData('societes', societes);
+
+      // Sociétés
+      if (Array.isArray(sData)) {
+        if (sData.length > 0) {
+          setSocietes(sData);
+        } else {
+          // Si la base MySQL vient d'être créée et est vide, initialiser avec les sociétés standards
+          setSocietes(initialSocietes);
+          await saveWampData('societes', initialSocietes);
+        }
       }
 
-      if (pData && Array.isArray(pData) && pData.length > 0) {
+      // Personnes
+      if (Array.isArray(pData)) {
         setPersonnes(pData);
-      } else if (personnes && personnes.length > 0) {
-        saveWampData('personnes', personnes);
       }
-      
-      // Combiner et synchroniser automatiquement les alias des familles locales vers MySQL
-      if (fData && Array.isArray(fData) && fData.length > 0) {
-        const mergedMap = new Map<string, Famille>();
 
-        fData.forEach((f: Famille) => {
-          mergedMap.set(f.id, f);
-        });
+      // Familles
+      if (Array.isArray(fData)) {
+        if (fData.length > 0) {
+          const mergedMap = new Map<string, Famille>();
+          fData.forEach((f: Famille) => {
+            mergedMap.set(f.id, f);
+          });
 
-        initialFamilles.forEach((initF: Famille) => {
-          const existing = Array.from(mergedMap.values()).find(
-            f => f.id === initF.id || f.code.toUpperCase() === initF.code.toUpperCase()
-          );
+          const toUpdateList: Famille[] = [];
+          initialFamilles.forEach((initF: Famille) => {
+            const existing = Array.from(mergedMap.values()).find(
+              f => f.id === initF.id || f.code.toUpperCase() === initF.code.toUpperCase()
+            );
 
-          if (existing) {
-            const combinedAliases = Array.from(new Set([...(initF.aliases || []), ...(existing.aliases || [])]));
-            if (!existing.aliases || existing.aliases.length < combinedAliases.length) {
-              const updatedF = { ...existing, aliases: combinedAliases };
-              mergedMap.set(existing.id, updatedF);
-              saveWampData('familles', updatedF);
+            if (existing) {
+              const combinedAliases = Array.from(new Set([...(initF.aliases || []), ...(existing.aliases || [])]));
+              if (!existing.aliases || existing.aliases.length < combinedAliases.length) {
+                const updatedF = { ...existing, aliases: combinedAliases };
+                mergedMap.set(existing.id, updatedF);
+                toUpdateList.push(updatedF);
+              }
+            } else {
+              mergedMap.set(initF.id, initF);
+              toUpdateList.push(initF);
             }
-          } else {
-            mergedMap.set(initF.id, initF);
-            saveWampData('familles', initF);
+          });
+
+          if (toUpdateList.length > 0) {
+            await saveWampData('familles', toUpdateList);
           }
-        });
 
-        setFamilles(Array.from(mergedMap.values()));
-      } else {
-        setFamilles(initialFamilles);
-        initialFamilles.forEach(f => saveWampData('familles', f));
+          setFamilles(Array.from(mergedMap.values()));
+        } else {
+          setFamilles(initialFamilles);
+          await saveWampData('familles', initialFamilles);
+        }
       }
 
-      if (prData && Array.isArray(prData) && prData.length > 0) {
+      // Prestations
+      if (Array.isArray(prData)) {
         setPrestations(prData);
-      } else if (prestations && prestations.length > 0) {
-        // Synchroniser automatiquement l'ensemble des factures & dossiers locaux vers MySQL
-        saveWampData('prestations', prestations);
       }
 
-      if (paData && Array.isArray(paData) && paData.length > 0) {
+      // Paiements
+      if (Array.isArray(paData)) {
         setPaiements(paData);
-      } else if (paiements && paiements.length > 0) {
-        saveWampData('paiements', paiements);
       }
     } catch (err: any) {
       console.error('Erreur chargement WAMP:', err);
@@ -199,40 +158,50 @@ export function App() {
     checkAndLoadWampData();
   }, []);
 
-  // Sync to localStorage as backup
+  // Sync to localStorage as passive backup
   useEffect(() => {
     if (dbStatus === 'connected') {
-      localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
+      try {
+        localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
+      } catch {}
     }
   }, [societes, dbStatus]);
 
   useEffect(() => {
     if (dbStatus === 'connected') {
-      localStorage.setItem('suivi_assurance_mcicare_personnes', JSON.stringify(personnes));
+      try {
+        localStorage.setItem('suivi_assurance_mcicare_personnes', JSON.stringify(personnes));
+      } catch {}
     }
   }, [personnes, dbStatus]);
 
   useEffect(() => {
     if (dbStatus === 'connected') {
-      localStorage.setItem('suivi_assurance_mcicare_familles', JSON.stringify(familles));
+      try {
+        localStorage.setItem('suivi_assurance_mcicare_familles', JSON.stringify(familles));
+      } catch {}
     }
   }, [familles, dbStatus]);
 
   useEffect(() => {
     if (dbStatus === 'connected') {
-      localStorage.setItem('suivi_assurance_mcicare_prestations', JSON.stringify(prestations));
+      try {
+        localStorage.setItem('suivi_assurance_mcicare_prestations', JSON.stringify(prestations));
+      } catch {}
     }
   }, [prestations, dbStatus]);
 
   useEffect(() => {
     if (dbStatus === 'connected') {
-      localStorage.setItem('suivi_assurance_mcicare_paiements', JSON.stringify(paiements));
+      try {
+        localStorage.setItem('suivi_assurance_mcicare_paiements', JSON.stringify(paiements));
+      } catch {}
     }
   }, [paiements, dbStatus]);
 
   // Handlers for Prestations
-  const handleSavePrestation = (prestation: Prestation) => {
-    saveWampData('prestations', prestation);
+  const handleSavePrestation = async (prestation: Prestation) => {
+    await saveWampData('prestations', prestation);
     setPrestations(prev => {
       const idx = prev.findIndex(p => p.id === prestation.id);
       if (idx >= 0) {
@@ -244,24 +213,26 @@ export function App() {
     });
   };
 
-  const handleDeletePrestation = (id: string) => {
-    deleteWampData('prestations', id);
+  const handleDeletePrestation = async (id: string) => {
+    await deleteWampData('prestations', id);
     setPrestations(prev => prev.filter(p => p.id !== id));
   };
 
-  const handleDeleteFacture = (numeroFacture: string) => {
+  const handleDeleteFacture = async (numeroFacture: string) => {
     const cleanNum = (n: string) => (n || '').replace(/[\s\-\_\.\/]/g, '').toUpperCase();
     const target = cleanNum(numeroFacture);
     const toDelete = prestations.filter(p => cleanNum(p.numeroFacture) === target);
-    toDelete.forEach(p => deleteWampData('prestations', p.id));
+    for (const p of toDelete) {
+      await deleteWampData('prestations', p.id);
+    }
     setPrestations(prev => prev.filter(p => cleanNum(p.numeroFacture) !== target));
   };
 
   // Handlers for Paiements
-  const handleSavePaiement = (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
-    saveWampData('paiements', newPaiement);
+  const handleSavePaiement = async (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
+    await saveWampData('paiements', newPaiement);
     if (updatedPrestations && updatedPrestations.length > 0) {
-      updatedPrestations.forEach(up => saveWampData('prestations', up));
+      await saveWampData('prestations', updatedPrestations);
     }
 
     setPaiements(prev => {
@@ -289,8 +260,8 @@ export function App() {
     }
   };
 
-  const handleDeletePaiement = (id: string) => {
-    deleteWampData('paiements', id);
+  const handleDeletePaiement = async (id: string) => {
+    await deleteWampData('paiements', id);
     const remainingPaiements = paiements.filter(p => p.id !== id);
     setPaiements(remainingPaiements);
 
@@ -333,66 +304,66 @@ export function App() {
       });
     });
 
-    setPrestations(prev => {
-      return prev.map(p => {
-        const num = cleanNum(p.numeroFacture);
-        const pPaidData = remainingPaidMap.get(p.id) || remainingPaidMap.get(num) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
+    const updatedPrestationsList: Prestation[] = prestations.map(p => {
+      const num = cleanNum(p.numeroFacture);
+      const pPaidData = remainingPaidMap.get(p.id) || remainingPaidMap.get(num) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
 
-        let linesTotalPaye = 0;
-        let linesTotalExclu = 0;
-        const updatedLignes = (p.lignes || []).map(l => {
-          const lPaidData = remainingLinePaidMap.get(l.id) || { totalPaye: 0, totalExclu: 0 };
-          const lBrut = l.totalPrestation || 0;
-          const lPart = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes?.length || 1));
-          const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
-          const lReste = Math.max(0, lARemb - lPaidData.totalPaye - lPaidData.totalExclu);
-          const lStatut = lPaidData.totalExclu >= lARemb && lARemb > 0 && lPaidData.totalPaye === 0
-            ? 'Rejeté'
-            : (lPaidData.totalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && lPaidData.totalPaye > 0)
-            ? 'Payé'
-            : lPaidData.totalPaye > 0
-            ? 'Partiellement payé'
-            : 'En attente';
+      let linesTotalPaye = 0;
+      let linesTotalExclu = 0;
+      const updatedLignes = (p.lignes || []).map(l => {
+        const lPaidData = remainingLinePaidMap.get(l.id) || { totalPaye: 0, totalExclu: 0 };
+        const lBrut = l.totalPrestation || 0;
+        const lPart = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes?.length || 1));
+        const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
+        const lReste = Math.max(0, lARemb - lPaidData.totalPaye - lPaidData.totalExclu);
+        const lStatut = lPaidData.totalExclu >= lARemb && lARemb > 0 && lPaidData.totalPaye === 0
+          ? 'Rejeté'
+          : (lPaidData.totalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && lPaidData.totalPaye > 0)
+          ? 'Payé'
+          : lPaidData.totalPaye > 0
+          ? 'Partiellement payé'
+          : 'En attente';
 
-          linesTotalPaye += lPaidData.totalPaye;
-          linesTotalExclu += lPaidData.totalExclu;
+        linesTotalPaye += lPaidData.totalPaye;
+        linesTotalExclu += lPaidData.totalExclu;
 
-          return {
-            ...l,
-            totalPaye: lPaidData.totalPaye,
-            statut: lStatut as any,
-          };
-        });
-
-        const totalPaye = Math.max(pPaidData.totalPaye, linesTotalPaye);
-        const totalExclu = Math.max(pPaidData.totalExclu, linesTotalExclu);
-        const tot = p.montantTotal ?? p.totalPrestation ?? 0;
-        const mod = p.ticketModerateur ?? p.participation ?? 0;
-        const remb = p.montantARembourser ?? Math.max(0, tot - mod);
-        const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
-
-        const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
-        const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
-        const isExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
-
-        const updatedP: Prestation = {
-          ...p,
-          totalPaye,
-          resteAPayer,
-          lignes: updatedLignes,
-          statut: isExcluded ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
-          datePaiement: pPaidData.latestDate || undefined,
+        return {
+          ...l,
+          totalPaye: lPaidData.totalPaye,
+          statut: lStatut as any,
         };
-
-        saveWampData('prestations', updatedP);
-        return updatedP;
       });
+
+      const totalPaye = Math.max(pPaidData.totalPaye, linesTotalPaye);
+      const totalExclu = Math.max(pPaidData.totalExclu, linesTotalExclu);
+      const tot = p.montantTotal ?? p.totalPrestation ?? 0;
+      const mod = p.ticketModerateur ?? p.participation ?? 0;
+      const remb = p.montantARembourser ?? Math.max(0, tot - mod);
+      const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
+
+      const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
+      const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
+      const isExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
+
+      return {
+        ...p,
+        totalPaye,
+        resteAPayer,
+        lignes: updatedLignes,
+        statut: isExcluded ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
+        datePaiement: pPaidData.latestDate || undefined,
+      };
     });
+
+    setPrestations(updatedPrestationsList);
+    if (updatedPrestationsList.length > 0) {
+      await saveWampData('prestations', updatedPrestationsList);
+    }
   };
 
   // Handlers for Societes
-  const handleSaveSociete = (societe: Societe) => {
-    saveWampData('societes', societe);
+  const handleSaveSociete = async (societe: Societe) => {
+    await saveWampData('societes', societe);
     setSocietes(prev => {
       const idx = prev.findIndex(s => s.id === societe.id);
       if (idx >= 0) {
@@ -404,14 +375,14 @@ export function App() {
     });
   };
 
-  const handleDeleteSociete = (id: string) => {
-    deleteWampData('societes', id);
+  const handleDeleteSociete = async (id: string) => {
+    await deleteWampData('societes', id);
     setSocietes(prev => prev.filter(s => s.id !== id));
   };
 
   // Handlers for Personnes
-  const handleSavePersonne = (personne: Personne) => {
-    saveWampData('personnes', personne);
+  const handleSavePersonne = async (personne: Personne) => {
+    await saveWampData('personnes', personne);
     setPersonnes(prev => {
       const idx = prev.findIndex(p => p.id === personne.id);
       if (idx >= 0) {
@@ -423,14 +394,14 @@ export function App() {
     });
   };
 
-  const handleDeletePersonne = (id: string) => {
-    deleteWampData('personnes', id);
+  const handleDeletePersonne = async (id: string) => {
+    await deleteWampData('personnes', id);
     setPersonnes(prev => prev.filter(p => p.id !== id));
   };
 
   // Handlers for Familles
-  const handleSaveFamille = (famille: Famille) => {
-    saveWampData('familles', famille);
+  const handleSaveFamille = async (famille: Famille) => {
+    await saveWampData('familles', famille);
     setFamilles(prev => {
       const idx = prev.findIndex(f => f.id === famille.id);
       if (idx >= 0) {
@@ -442,83 +413,96 @@ export function App() {
     });
   };
 
-  const handleDeleteFamille = (id: string) => {
-    deleteWampData('familles', id);
+  const handleDeleteFamille = async (id: string) => {
+    await deleteWampData('familles', id);
     setFamilles(prev => prev.filter(f => f.id !== id));
   };
 
-  // Bulk Import Handlers
-  const handleImportPrestations = (
+  // Bulk Import Handlers (Excel) — Atomic batch writes to MySQL
+  const handleImportPrestations = async (
     newPrestations: Prestation[],
     newSocietes?: Societe[],
     newPersonnes?: Personne[]
   ) => {
-    if (newSocietes && newSocietes.length > 0) {
-      newSocietes.forEach(ns => saveWampData('societes', ns));
-      setSocietes(prev => {
-        const copy = [...prev];
-        newSocietes.forEach(ns => {
-          const idx = copy.findIndex(s => s.id === ns.id);
-          if (idx >= 0) copy[idx] = ns;
-          else copy.push(ns);
+    try {
+      if (newSocietes && newSocietes.length > 0) {
+        await saveWampData('societes', newSocietes);
+        setSocietes(prev => {
+          const copy = [...prev];
+          newSocietes.forEach(ns => {
+            const idx = copy.findIndex(s => s.id === ns.id);
+            if (idx >= 0) copy[idx] = ns;
+            else copy.push(ns);
+          });
+          return copy;
         });
-        return copy;
-      });
-    }
-    if (newPersonnes && newPersonnes.length > 0) {
-      newPersonnes.forEach(np => saveWampData('personnes', np));
-      setPersonnes(prev => {
-        const copy = [...prev];
-        newPersonnes.forEach(np => {
-          const idx = copy.findIndex(p => p.id === np.id);
-          if (idx >= 0) copy[idx] = np;
-          else copy.push(np);
+      }
+      if (newPersonnes && newPersonnes.length > 0) {
+        await saveWampData('personnes', newPersonnes);
+        setPersonnes(prev => {
+          const copy = [...prev];
+          newPersonnes.forEach(np => {
+            const idx = copy.findIndex(p => p.id === np.id);
+            if (idx >= 0) copy[idx] = np;
+            else copy.push(np);
+          });
+          return copy;
         });
-        return copy;
-      });
+      }
+      if (newPrestations && newPrestations.length > 0) {
+        const res = await saveWampData('prestations', newPrestations);
+        if (!res || !res.success) {
+          console.error('Erreur lors de l\'enregistrement des prestations dans MySQL WAMP:', res);
+        }
+        setPrestations(prev => [...newPrestations, ...prev]);
+      }
+      setActiveTab('prestations');
+    } catch (err) {
+      console.error('Erreur import prestations:', err);
     }
-    newPrestations.forEach(p => saveWampData('prestations', p));
-    setPrestations(prev => [...newPrestations, ...prev]);
-    setActiveTab('prestations');
   };
 
-  const handleImportPaiements = (
+  const handleImportPaiements = async (
     newPaiement: Paiement,
     updatedPrestations: Prestation[],
     newSocietes?: Societe[],
     newPersonnes?: Personne[]
   ) => {
-    saveWampData('paiements', newPaiement);
-    if (updatedPrestations && updatedPrestations.length > 0) {
-      updatedPrestations.forEach(up => saveWampData('prestations', up));
-    }
-    if (newSocietes && newSocietes.length > 0) {
-      newSocietes.forEach(ns => saveWampData('societes', ns));
-      setSocietes(prev => {
-        const copy = [...prev];
-        newSocietes.forEach(ns => {
-          const idx = copy.findIndex(s => s.id === ns.id);
-          if (idx >= 0) copy[idx] = ns;
-          else copy.push(ns);
+    try {
+      if (newSocietes && newSocietes.length > 0) {
+        await saveWampData('societes', newSocietes);
+        setSocietes(prev => {
+          const copy = [...prev];
+          newSocietes.forEach(ns => {
+            const idx = copy.findIndex(s => s.id === ns.id);
+            if (idx >= 0) copy[idx] = ns;
+            else copy.push(ns);
+          });
+          return copy;
         });
-        return copy;
-      });
-    }
-    if (newPersonnes && newPersonnes.length > 0) {
-      newPersonnes.forEach(np => saveWampData('personnes', np));
-      setPersonnes(prev => {
-        const copy = [...prev];
-        newPersonnes.forEach(np => {
-          const idx = copy.findIndex(p => p.id === np.id);
-          if (idx >= 0) copy[idx] = np;
-          else copy.push(np);
+      }
+      if (newPersonnes && newPersonnes.length > 0) {
+        await saveWampData('personnes', newPersonnes);
+        setPersonnes(prev => {
+          const copy = [...prev];
+          newPersonnes.forEach(np => {
+            const idx = copy.findIndex(p => p.id === np.id);
+            if (idx >= 0) copy[idx] = np;
+            else copy.push(np);
+          });
+          return copy;
         });
-        return copy;
-      });
+      }
+      await saveWampData('paiements', newPaiement);
+      if (updatedPrestations && updatedPrestations.length > 0) {
+        await saveWampData('prestations', updatedPrestations);
+      }
+      setPaiements(prev => [newPaiement, ...prev]);
+      setPrestations(updatedPrestations);
+      setActiveTab('paiements');
+    } catch (err) {
+      console.error('Erreur import paiements:', err);
     }
-    setPaiements(prev => [newPaiement, ...prev]);
-    setPrestations(updatedPrestations);
-    setActiveTab('paiements');
   };
 
   const [isSyncingWamp, setIsSyncingWamp] = useState(false);
@@ -582,7 +566,7 @@ export function App() {
             </div>
             <div>
               <h2 className="text-lg font-bold">Application Bloquée : Base de données déconnectée</h2>
-              <p className="text-xs text-rose-100">Le fonctionnement en mode local est désactivé</p>
+              <p className="text-xs text-rose-100">Le fonctionnement sans MySQL WAMP est désactivé</p>
             </div>
           </div>
 
@@ -602,8 +586,8 @@ export function App() {
               <ol className="list-decimal list-inside space-y-1.5 text-slate-600 pl-1 leading-relaxed">
                 <li>Vérifiez que <strong>WAMP Server</strong> est démarré (icône <strong>VERTE</strong> dans la barre des tâches).</li>
                 <li>Assurez-vous que le service <strong>MySQL</strong> (Port 3306) est démarré.</li>
-                <li>Vérifiez la configuration dans <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">wamp-deploy/api/config.php</code>.</li>
-                <li>Importez le fichier <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">schema.sql</code> si la base <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">suivi_assurance_salfa</code> n'existe pas.</li>
+                <li>Vérifiez la configuration dans <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">api/config.php</code>.</li>
+                <li>Importez le fichier <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">schema.sql</code> dans phpMyAdmin si la base <code className="bg-slate-100 px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-900">suivi_assurance_salfa</code> n'existe pas.</li>
               </ol>
             </div>
 
@@ -631,7 +615,7 @@ export function App() {
           <Database className="h-8 w-8 text-emerald-400" />
         </div>
         <h2 className="text-base font-bold">Vérification de la connexion à la base de données MySQL...</h2>
-        <p className="text-xs text-slate-400 mt-1">Connexion au serveur WAMP en cours</p>
+        <p className="text-xs text-slate-400 mt-1">Lecture des données WAMP en cours</p>
       </div>
     );
   }
@@ -652,7 +636,7 @@ export function App() {
       {/* Navigation Tab Bar */}
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {/* Main Content Area — volontairement fluide pour exploiter toute la largeur disponible */}
+      {/* Main Content Area */}
       <main className="w-full min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
         {activeTab === 'dashboard' && (
           <Dashboard
@@ -775,4 +759,3 @@ export function App() {
 }
 
 export default App;
-

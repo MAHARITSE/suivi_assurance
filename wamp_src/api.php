@@ -12,12 +12,8 @@
  *    GET    api.php?action=familles            → liste des familles
  *    GET    api.php?action=prestations         → prestations (+ lignes)
  *    GET    api.php?action=paiements           → paiements (+ lignes)
- *    POST   api.php?action=<entite>            → création / mise à jour (upsert)
- *         (corps JSON : un objet, ou un tableau d'objets pour un import groupé)
+ *    POST   api.php?action=<entite>            → création / mise à jour (upsert unitaire ou lot)
  *    DELETE api.php?action=<entite>&id=<id>    → suppression (lignes enfants incluses)
- *
- *  ⛔ L'application web est BLOQUÉE tant que cette API ne répond pas
- *     correctement au test « check_db » (Apache/PHP + MySQL opérationnels).
  *
  *  Exigences : WAMP Server (Apache 2.4, PHP >= 8.0 avec l'extension
  *  pdo_mysql activée), MySQL 5.7+ / 8.x ou MariaDB 10.4+.
@@ -28,14 +24,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/api/config.php';
 
 /* ===================================================================== */
-/*  En-têtes HTTP                                                        */
+/*  En-têtes HTTP & CORS                                                 */
 /* ===================================================================== */
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Cache-Control: no-store');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Cache-Control: no-store, no-cache, must-revalidate');
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     http_response_code(204);
@@ -60,28 +56,34 @@ function fail(string $error, int $httpCode = 200): void
     json_out(['success' => false, 'error' => $error], $httpCode);
 }
 
-/** Convertit une valeur MySQL en nombre flottant (null si vide). */
-function num(?string $v): ?float
+/** Convertit une valeur (nombre, chaîne, avec virgule ou espaces) en float ou null. */
+function num($v): ?float
 {
-    return ($v === null || $v === '') ? null : (float) $v;
+    if ($v === null || $v === '') {
+        return null;
+    }
+    if (is_numeric($v)) {
+        return (float) $v;
+    }
+    if (is_string($v)) {
+        $clean = str_replace([' ', "\u{00A0}", "\u{202F}"], '', $v);
+        $clean = str_replace(',', '.', $clean);
+        return is_numeric($clean) ? (float) $clean : null;
+    }
+    return null;
 }
 
 /** Nombre flottant avec valeur par défaut. */
-function num_or($v, float $default): float
+function num_or($v, float $default = 0.0): float
 {
-    if ($v === null || $v === '') {
-        return $default;
-    }
-    return is_numeric($v) ? (float) $v : $default;
+    $n = num($v);
+    return $n !== null ? $n : $default;
 }
 
 /** Nombre flottant nullable. */
 function num_null($v): ?float
 {
-    if ($v === null || $v === '') {
-        return null;
-    }
-    return is_numeric($v) ? (float) $v : null;
+    return num($v);
 }
 
 /** Chaîne non vide ou null. */
@@ -97,6 +99,9 @@ function nullable_str($v): ?string
 /** Décodage JSON tolérant : renvoie toujours un tableau. */
 function json_array($v): array
 {
+    if (is_array($v)) {
+        return $v;
+    }
     if (!is_string($v) || trim($v) === '') {
         return [];
     }
@@ -163,14 +168,14 @@ function list_societes(PDO $pdo): array
     $data = [];
     foreach ($rows as $r) {
         $data[] = [
-            'id'                   => $r['id'],
-            'nom'                  => $r['nom'],
-            'code'                 => $r['code'],
-            'contact'              => $r['contact'],
-            'telephone'            => $r['telephone'],
-            'email'                => $r['email'],
-            'adresse'              => $r['adresse'],
-            'tauxCouvertureDefaut' => num($r['taux_couverture_defaut']) ?? 80.0,
+            'id'                   => (string) $r['id'],
+            'nom'                  => (string) $r['nom'],
+            'code'                 => (string) $r['code'],
+            'contact'              => nullable_str($r['contact']),
+            'telephone'            => nullable_str($r['telephone']),
+            'email'                => nullable_str($r['email']),
+            'adresse'              => nullable_str($r['adresse']),
+            'tauxCouvertureDefaut' => num_or($r['taux_couverture_defaut'], 100.0),
         ];
     }
     return $data;
@@ -183,17 +188,17 @@ function list_personnes(PDO $pdo): array
     $data = [];
     foreach ($rows as $r) {
         $data[] = [
-            'id'             => $r['id'],
-            'nomPrenom'      => $r['nom_prenom'],
-            'matricule'      => $r['matricule'],
-            'societeId'      => $r['societe_id'],
-            'sousSociete'    => $r['sous_societe'],
-            'qualite'        => $r['qualite'],
-            'familleCode'    => $r['famille_code'],
-            'dateNaissance'  => $r['date_naissance'],
-            'telephone'      => $r['telephone'],
-            'email'          => $r['email'],
-            'tauxCouverture' => num($r['taux_couverture']),
+            'id'             => (string) $r['id'],
+            'nomPrenom'      => (string) $r['nom_prenom'],
+            'matricule'      => (string) $r['matricule'],
+            'societeId'      => (string) $r['societe_id'],
+            'sousSociete'    => nullable_str($r['sous_societe']),
+            'qualite'        => nullable_str($r['qualite']) ?: 'Adhérent Principal',
+            'familleCode'    => nullable_str($r['famille_code']),
+            'dateNaissance'  => nullable_str($r['date_naissance']),
+            'telephone'      => nullable_str($r['telephone']),
+            'email'          => nullable_str($r['email']),
+            'tauxCouverture' => num_null($r['taux_couverture']),
             'statut'         => $r['statut'] ?: 'Actif',
         ];
     }
@@ -207,15 +212,15 @@ function list_familles(PDO $pdo): array
     $data = [];
     foreach ($rows as $r) {
         $data[] = [
-            'id'                    => $r['id'],
-            'code'                  => $r['code'],
-            'libelle'               => $r['libelle'],
-            'plafondAnnuel'         => num($r['plafond_annuel']),
-            'tauxStandard'          => num($r['taux_standard']),
-            'tarifConventionne'     => num($r['tarif_conventionne']),
-            'ticketModerateurDefaut' => num($r['ticket_moderateur_defaut']),
-            'description'           => $r['description'],
-            'aliases'               => json_array($r['aliases']),
+            'id'                     => (string) $r['id'],
+            'code'                   => (string) $r['code'],
+            'libelle'                => (string) $r['libelle'],
+            'plafondAnnuel'          => num_null($r['plafond_annuel']),
+            'tauxStandard'           => num_null($r['taux_standard']),
+            'tarifConventionne'      => num_null($r['tarif_conventionne']),
+            'ticketModerateurDefaut' => num_null($r['ticket_moderateur_defaut']),
+            'description'            => nullable_str($r['description']),
+            'aliases'                => json_array($r['aliases']),
         ];
     }
     return $data;
@@ -231,19 +236,25 @@ function map_lignes_prestation(PDO $pdo): array
     }
     $byPrestation = [];
     foreach ($rows as $l) {
+        $brut = num_or($l['total_prestation'], 0.0);
+        $part = num_or($l['ticket_moderateur'], 0.0);
+        $remb = num_or($l['montant_a_rembourser'], max(0.0, $brut - $part));
+        $paye = num_or($l['total_paye'], 0.0);
+        $exclu = num_or($l['montant_exclu'], 0.0);
+
         $byPrestation[$l['prestation_id']][] = [
-            'id'                => $l['id'],
-            'prestationId'      => $l['prestation_id'],
-            'code'              => $l['code'],
-            'libelle'           => $l['libelle'],
-            'totalPrestation'   => num($l['total_prestation']) ?? 0.0,
-            'montant'           => num($l['total_prestation']) ?? 0.0,
-            'ticketModerateur'  => num($l['ticket_moderateur']) ?? 0.0,
-            'montantARembourser' => num($l['montant_a_rembourser']) ?? 0.0,
-            'totalPaye'         => num($l['total_paye']) ?? 0.0,
-            'montantExclu'      => num($l['montant_exclu']) ?? 0.0,
-            'motifExclusion'    => $l['motif_exclusion'],
-            'statut'            => $l['statut'] ?: 'En attente',
+            'id'                 => (string) $l['id'],
+            'prestationId'       => (string) $l['prestation_id'],
+            'code'               => (string) $l['code'],
+            'libelle'            => nullable_str($l['libelle']) ?: (string) $l['code'],
+            'totalPrestation'    => $brut,
+            'montant'            => $brut,
+            'ticketModerateur'   => $part,
+            'montantARembourser' => $remb,
+            'totalPaye'          => $paye,
+            'montantExclu'       => $exclu,
+            'motifExclusion'     => nullable_str($l['motif_exclusion']),
+            'statut'             => $l['statut'] ?: 'En attente',
         ];
     }
     return $byPrestation;
@@ -261,33 +272,38 @@ function list_prestations(PDO $pdo): array
 
     $data = [];
     foreach ($rows as $r) {
-        $brut  = num($r['total_prestation']) ?? 0.0;
-        $part  = num($r['participation']) ?? 0.0;
+        $brut  = num_or($r['total_prestation'], 0.0);
+        $part  = num_or($r['participation'], 0.0);
+        $remb  = num_or($r['montant_a_rembourser'], max(0.0, $brut - $part));
+        $paye  = num_or($r['total_paye'], 0.0);
+        $exclu = num_or($r['montant_exclu'], 0.0);
+        $reste = num_or($r['reste_a_payer'], max(0.0, $remb - $paye - $exclu));
+
         $data[] = [
-            'id'               => $r['id'],
-            'numeroFacture'    => $r['numero_facture'],
-            'date'             => $r['date'],
-            'societeId'        => $r['societe_id'],
-            'societeNom'       => $r['societe_nom'],
-            'sousSociete'      => $r['sous_societe'],
-            'personneId'       => $r['personne_id'],
-            'nomAgent'         => $r['nom_agent'],
-            'matricule'        => $r['matricule'],
-            'totalPrestation'  => $brut,
-            'montantTotal'     => $brut,
-            'participation'    => $part,
-            'ticketModerateur' => $part,
-            'montantARembourser' => num($r['montant_a_rembourser']) ?? max(0.0, $brut - $part),
-            'totalPaye'        => num($r['total_paye']) ?? 0.0,
-            'montantExclu'     => num($r['montant_exclu']) ?? 0.0,
-            'motifExclusion'   => $r['motif_exclusion'],
-            'resteAPayer'      => num($r['reste_a_payer']),
-            'statut'           => $r['statut'] ?: 'En attente',
-            'lignes'           => $lignesByPrestation[$r['id']] ?? [],
-            'dateCreation'     => $r['date_creation'],
-            'datePaiement'     => $r['date_paiement'],
-            'numeroBordereau'  => $r['numero_bordereau'],
-            'commentaires'     => $r['commentaires'],
+            'id'                 => (string) $r['id'],
+            'numeroFacture'      => (string) $r['numero_facture'],
+            'date'               => nullable_str($r['date']) ?: '',
+            'societeId'          => (string) $r['societe_id'],
+            'societeNom'         => nullable_str($r['societe_nom']) ?: '',
+            'sousSociete'        => nullable_str($r['sous_societe']) ?: '',
+            'personneId'         => (string) $r['personne_id'],
+            'nomAgent'           => nullable_str($r['nom_agent']) ?: '',
+            'matricule'          => nullable_str($r['matricule']) ?: '',
+            'totalPrestation'    => $brut,
+            'montantTotal'       => $brut,
+            'participation'      => $part,
+            'ticketModerateur'   => $part,
+            'montantARembourser' => $remb,
+            'totalPaye'          => $paye,
+            'montantExclu'       => $exclu,
+            'motifExclusion'     => nullable_str($r['motif_exclusion']),
+            'resteAPayer'        => $reste,
+            'statut'             => $r['statut'] ?: 'En attente',
+            'lignes'             => $lignesByPrestation[$r['id']] ?? [],
+            'dateCreation'       => nullable_str($r['date_creation']) ?: '',
+            'datePaiement'       => nullable_str($r['date_paiement']),
+            'numeroBordereau'    => nullable_str($r['numero_bordereau']),
+            'commentaires'       => nullable_str($r['commentaires']),
         ];
     }
     return $data;
@@ -303,26 +319,26 @@ function map_lignes_paiement(PDO $pdo): array
     }
     $byPaiement = [];
     foreach ($rows as $l) {
-        $paye = num($l['total_paye']) ?? 0.0;
+        $paye = num_or($l['total_paye'], 0.0);
         $byPaiement[$l['paiement_id']][] = [
-            'id'                => $l['id'],
-            'paiementId'        => $l['paiement_id'],
-            'lignePrestationId' => $l['ligne_prestation_id'],
-            'prestationId'      => $l['prestation_id'],
-            'immatriculation'   => $l['immatriculation'],
-            'nomBaseAssurance'  => $l['nom_base_assurance'],
-            'nomAgent'          => $l['nom_agent'],
-            'prestationNumero'  => $l['prestation_numero'],
-            'dateSoins'         => $l['date_soins'],
+            'id'                => (string) $l['id'],
+            'paiementId'        => (string) $l['paiement_id'],
+            'lignePrestationId' => nullable_str($l['ligne_prestation_id']) ?: '',
+            'prestationId'      => nullable_str($l['prestation_id']) ?: '',
+            'immatriculation'   => nullable_str($l['immatriculation']) ?: '-',
+            'nomBaseAssurance'  => nullable_str($l['nom_base_assurance']) ?: '',
+            'nomAgent'          => nullable_str($l['nom_agent']) ?: '',
+            'prestationNumero'  => nullable_str($l['prestation_numero']) ?: '',
+            'dateSoins'         => nullable_str($l['date_soins']),
             'totalPaye'         => $paye,
             'montantPaye'       => $paye,
-            'ticketModerateur'  => num($l['ticket_moderateur']) ?? 0.0,
-            'montantExclu'      => num($l['montant_exclu']) ?? 0.0,
-            'montantReclame'    => num($l['montant_reclame']) ?? 0.0,
-            'codeActe'          => $l['code_acte'],
-            'libelleActe'       => $l['libelle_acte'],
+            'ticketModerateur'  => num_or($l['ticket_moderateur'], 0.0),
+            'montantExclu'      => num_or($l['montant_exclu'], 0.0),
+            'montantReclame'    => num_or($l['montant_reclame'], 0.0),
+            'codeActe'          => nullable_str($l['code_acte']) ?: 'CONS',
+            'libelleActe'       => nullable_str($l['libelle_acte']) ?: 'Acte de soins',
             'actesPayes'        => json_array($l['actes_payes']),
-            'commentaire'       => $l['commentaire'],
+            'commentaire'       => nullable_str($l['commentaire']),
         ];
     }
     return $byPaiement;
@@ -340,37 +356,37 @@ function list_paiements(PDO $pdo): array
 
     $data = [];
     foreach ($rows as $r) {
-        $reclame = num($r['total_reclame']) ?? 0.0;
-        $paye    = num($r['total_paye']) ?? 0.0;
-        $mod     = num($r['total_moderateur']) ?? 0.0;
-        $exclu   = num($r['total_exclu']) ?? 0.0;
+        $reclame = num_or($r['total_reclame'], 0.0);
+        $paye    = num_or($r['total_paye'], 0.0);
+        $mod     = num_or($r['total_moderateur'], 0.0);
+        $exclu   = num_or($r['total_exclu'], 0.0);
         $data[] = [
-            'id'               => $r['id'],
-            'numeroBordereau'  => $r['numero_bordereau'],
-            'datePaiement'     => $r['date_paiement'],
-            'dateSoins'        => $r['date_soins'],
-            'dateSaisie'       => $r['date_saisie'],
-            'societeId'        => $r['societe_id'],
-            'societeNom'       => $r['societe_nom'],
-            'sousSociete'      => $r['sous_societe'],
-            'nomAgent'         => $r['nom_agent'],
-            'matricule'        => $r['matricule'],
-            'prestationId'     => $r['prestation_id'],
-            'prestationNumero' => $r['prestation_numero'],
-            'modePaiement'     => $r['mode_paiement'],
-            'referencePaiement' => $r['reference_paiement'],
-            'totalReclame'     => $reclame,
-            'montantAPayer'    => $reclame,
-            'totalPaye'        => $paye,
-            'sommePayee'       => $paye,
-            'totalModerateur'  => $mod,
-            'ticketModerateur' => $mod,
-            'totalExclu'       => $exclu,
-            'montantExclu'     => $exclu,
-            'remise'           => num($r['remise']) ?? 0.0,
-            'statut'           => $r['statut'] ?: 'Validé',
-            'lignes'           => $lignesByPaiement[$r['id']] ?? [],
-            'notes'            => $r['notes'],
+            'id'                => (string) $r['id'],
+            'numeroBordereau'   => (string) $r['numero_bordereau'],
+            'datePaiement'      => nullable_str($r['date_paiement']) ?: '',
+            'dateSoins'         => nullable_str($r['date_soins']),
+            'dateSaisie'        => nullable_str($r['date_saisie']) ?: '',
+            'societeId'         => (string) $r['societe_id'],
+            'societeNom'        => nullable_str($r['societe_nom']) ?: '',
+            'sousSociete'       => nullable_str($r['sous_societe']) ?: '',
+            'nomAgent'          => nullable_str($r['nom_agent']) ?: '',
+            'matricule'         => nullable_str($r['matricule']) ?: '',
+            'prestationId'      => nullable_str($r['prestation_id']),
+            'prestationNumero'  => nullable_str($r['prestation_numero']),
+            'modePaiement'      => nullable_str($r['mode_paiement']) ?: 'Virement bancaire',
+            'referencePaiement' => nullable_str($r['reference_paiement']) ?: '',
+            'totalReclame'      => $reclame,
+            'montantAPayer'     => $reclame,
+            'totalPaye'         => $paye,
+            'sommePayee'        => $paye,
+            'totalModerateur'   => $mod,
+            'ticketModerateur'  => $mod,
+            'totalExclu'        => $exclu,
+            'montantExclu'      => $exclu,
+            'remise'            => num_or($r['remise'], 0.0),
+            'statut'            => $r['statut'] ?: 'Validé',
+            'lignes'            => $lignesByPaiement[$r['id']] ?? [],
+            'notes'             => nullable_str($r['notes']),
         ];
     }
     return $data;
@@ -452,81 +468,102 @@ function replace_child_rows(PDO $pdo, string $table, string $parentCol, string $
     }
 }
 
-/** Enregistre (upsert) une société. */
+/** Enregistre (upsert) une société avec tolérance aux champs manquants. */
 function save_societe(PDO $pdo, array $o): void
 {
-    $id   = trim((string) val($o, 'id'));
-    $nom  = trim((string) val($o, 'nom'));
+    $id = trim((string) val($o, 'id'));
+    if ($id === '') {
+        $id = 'soc-' . bin2hex(random_bytes(4));
+    }
+    $nom = trim((string) val($o, 'nom'));
+    if ($nom === '') {
+        $nom = 'Société ' . $id;
+    }
     $code = trim((string) val($o, 'code'));
-    if ($id === '' || $nom === '') {
-        throw new InvalidArgumentException('Société invalide : les champs « id » et « nom » sont obligatoires.');
+    if ($code === '') {
+        $code = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $nom) ?: 'SOC', 0, 8));
     }
 
     upsert_row($pdo, 'societes', [
-        'id'                   => $id,
-        'nom'                  => $nom,
-        'code'                 => $code,
-        'contact'              => nullable_str(val($o, 'contact')),
-        'telephone'            => nullable_str(val($o, 'telephone')),
-        'email'                => nullable_str(val($o, 'email')),
-        'adresse'              => nullable_str(val($o, 'adresse')),
-        'taux_couverture_defaut' => num_or(val($o, 'tauxCouvertureDefaut'), 80.0),
+        'id'                     => $id,
+        'nom'                    => $nom,
+        'code'                   => $code,
+        'contact'                => nullable_str(val($o, 'contact')),
+        'telephone'              => nullable_str(val($o, 'telephone')),
+        'email'                  => nullable_str(val($o, 'email')),
+        'adresse'                => nullable_str(val($o, 'adresse')),
+        'taux_couverture_defaut' => num_or(val($o, 'tauxCouvertureDefaut'), 100.0),
     ]);
 }
 
-/** Enregistre (upsert) une personne. */
+/** Enregistre (upsert) une personne avec tolérance aux champs manquants. */
 function save_personne(PDO $pdo, array $o): void
 {
-    $id         = trim((string) val($o, 'id'));
-    $nomPrenom  = trim((string) val($o, 'nomPrenom'));
-    $matricule  = trim((string) val($o, 'matricule'));
-    $societeId  = trim((string) val($o, 'societeId'));
-    if ($id === '' || $nomPrenom === '' || $matricule === '' || $societeId === '') {
-        throw new InvalidArgumentException('Personne invalide : les champs « id », « nomPrenom », « matricule » et « societeId » sont obligatoires.');
+    $id = trim((string) val($o, 'id'));
+    if ($id === '') {
+        $id = 'per-' . bin2hex(random_bytes(4));
+    }
+    $nomPrenom = trim((string) val($o, 'nomPrenom'));
+    if ($nomPrenom === '') {
+        $nomPrenom = 'Assuré ' . $id;
+    }
+    $matricule = trim((string) val($o, 'matricule'));
+    if ($matricule === '' || $matricule === '-') {
+        $matricule = 'MAT-' . substr(md5($id), 0, 6);
+    }
+    $societeId = trim((string) val($o, 'societeId'));
+    if ($societeId === '') {
+        $societeId = 'soc-mcicare';
     }
 
     upsert_row($pdo, 'personnes', [
-        'id'             => $id,
-        'nom_prenom'     => $nomPrenom,
-        'matricule'      => $matricule,
-        'societe_id'     => $societeId,
-        'sous_societe'   => nullable_str(val($o, 'sousSociete')),
-        'qualite'        => nullable_str(val($o, 'qualite')),
-        'famille_code'   => nullable_str(val($o, 'familleCode')),
-        'date_naissance' => nullable_str(val($o, 'dateNaissance')),
-        'telephone'      => nullable_str(val($o, 'telephone')),
-        'email'          => nullable_str(val($o, 'email')),
+        'id'              => $id,
+        'nom_prenom'      => $nomPrenom,
+        'matricule'       => $matricule,
+        'societe_id'      => $societeId,
+        'sous_societe'    => nullable_str(val($o, 'sousSociete')),
+        'qualite'         => nullable_str(val($o, 'qualite')) ?: 'Adhérent Principal',
+        'famille_code'    => nullable_str(val($o, 'familleCode')),
+        'date_naissance'  => nullable_str(val($o, 'dateNaissance')),
+        'telephone'       => nullable_str(val($o, 'telephone')),
+        'email'           => nullable_str(val($o, 'email')),
         'taux_couverture' => num_null(val($o, 'tauxCouverture')),
-        'statut'         => trim((string) val($o, 'statut', 'Actif')) ?: 'Actif',
+        'statut'          => trim((string) val($o, 'statut', 'Actif')) ?: 'Actif',
     ]);
 }
 
 /** Enregistre (upsert) une famille de prestations. */
 function save_famille(PDO $pdo, array $o): void
 {
-    $id    = trim((string) val($o, 'id'));
-    $code  = trim((string) val($o, 'code'));
-    $lib   = trim((string) val($o, 'libelle'));
-    if ($id === '' || $code === '' || $lib === '') {
-        throw new InvalidArgumentException('Famille invalide : les champs « id », « code » et « libelle » sont obligatoires.');
+    $code = strtoupper(trim((string) val($o, 'code', 'ACTE')));
+    if ($code === '') {
+        $code = 'ACTE';
+    }
+    $id = trim((string) val($o, 'id'));
+    if ($id === '') {
+        $id = 'fam-' . strtolower($code);
+    }
+    $lib = trim((string) val($o, 'libelle'));
+    if ($lib === '') {
+        $lib = $code;
     }
 
     $aliases = val($o, 'aliases');
     $aliasesJson = json_encode(
-        is_array($aliases) ? array_values($aliases) : [],
+        is_array($aliases) ? array_values($aliases) : [$code],
         JSON_UNESCAPED_UNICODE
     );
 
     upsert_row($pdo, 'familles', [
-        'id'                      => $id,
-        'code'                    => $code,
-        'libelle'                 => $lib,
-        'plafond_annuel'          => num_null(val($o, 'plafondAnnuel')),
-        'taux_standard'           => num_null(val($o, 'tauxStandard')),
-        'tarif_conventionne'      => num_null(val($o, 'tarifConventionne')),
+        'id'                       => $id,
+        'code'                     => $code,
+        'libelle'                  => $lib,
+        'plafond_annuel'           => num_null(val($o, 'plafondAnnuel')),
+        'taux_standard'            => num_null(val($o, 'tauxStandard')),
+        'tarif_conventionne'       => num_null(val($o, 'tarifConventionne')),
         'ticket_moderateur_defaut' => num_null(val($o, 'ticketModerateurDefaut')),
-        'description'             => nullable_str(val($o, 'description')),
-        'aliases'                 => (string) $aliasesJson,
+        'description'              => nullable_str(val($o, 'description')),
+        'aliases'                  => (string) $aliasesJson,
     ]);
 }
 
@@ -545,11 +582,15 @@ function build_lignes_prestation_rows(array $o, string $prestationId): array
         if ($lId === '') {
             $lId = $prestationId . '-ligne-' . ($i + 1);
         }
+        $code = trim((string) val($l, 'code', 'CONS'));
+        if ($code === '') {
+            $code = 'CONS';
+        }
         $rows[] = [
             $lId,
             $prestationId,
-            trim((string) val($l, 'code', '')),
-            nullable_str(val($l, 'libelle')),
+            $code,
+            nullable_str(val($l, 'libelle')) ?: $code,
             num_or(val($l, 'totalPrestation') ?? val($l, 'montant'), 0.0),
             num_or(val($l, 'ticketModerateur'), 0.0),
             num_or(val($l, 'montantARembourser'), 0.0),
@@ -571,16 +612,21 @@ function lignes_prestation_cols(): array
 /** Enregistre (upsert) une prestation et ses lignes. */
 function save_prestation(PDO $pdo, array $o): void
 {
-    $id          = trim((string) val($o, 'id'));
-    $numero      = trim((string) val($o, 'numeroFacture'));
-    $societeId   = trim((string) val($o, 'societeId'));
-    $personneId  = trim((string) val($o, 'personneId'));
+    $id = trim((string) val($o, 'id'));
     if ($id === '') {
-        throw new InvalidArgumentException('Prestation invalide : le champ « id » est obligatoire.');
+        $id = 'prest-' . bin2hex(random_bytes(6));
     }
+    $numero = trim((string) val($o, 'numeroFacture'));
     if ($numero === '') {
-        // Générer un numéro de facture par défaut si absent
         $numero = 'FACT-' . substr($id, 0, 8);
+    }
+    $societeId = trim((string) val($o, 'societeId'));
+    if ($societeId === '') {
+        $societeId = 'soc-mcicare';
+    }
+    $personneId = trim((string) val($o, 'personneId'));
+    if ($personneId === '') {
+        $personneId = 'per-1';
     }
 
     $brut  = num_or(val($o, 'totalPrestation') ?? val($o, 'montantTotal'), 0.0);
@@ -599,7 +645,7 @@ function save_prestation(PDO $pdo, array $o): void
         upsert_row($pdo, 'prestations', [
             'id'                   => $id,
             'numero_facture'       => $numero,
-            'date'                 => nullable_str(val($o, 'date')),
+            'date'                 => nullable_str(val($o, 'date')) ?: date('Y-m-d'),
             'societe_id'           => $societeId,
             'societe_nom'          => nullable_str(val($o, 'societeNom')),
             'sous_societe'         => nullable_str(val($o, 'sousSociete')),
@@ -659,12 +705,15 @@ function build_lignes_paiement_rows(array $o, string $paiementId): array
         $actesPayes = val($l, 'actesPayes');
         $actesPayes = is_array($actesPayes) ? array_values($actesPayes) : [];
 
+        $codeActe = nullable_str(val($l, 'codeActe')) ?: 'CONS';
+        $libelleActe = nullable_str(val($l, 'libelleActe')) ?: $codeActe;
+
         $rows[] = [
             $lId,
             $paiementId,
             nullable_str(val($l, 'lignePrestationId')),
             nullable_str(val($l, 'prestationId')),
-            nullable_str(val($l, 'immatriculation')),
+            nullable_str(val($l, 'immatriculation')) ?: '-',
             nullable_str(val($l, 'nomBaseAssurance')),
             nullable_str(val($l, 'nomAgent')),
             nullable_str(val($l, 'prestationNumero')),
@@ -673,8 +722,8 @@ function build_lignes_paiement_rows(array $o, string $paiementId): array
             num_or(val($l, 'ticketModerateur'), 0.0),
             num_or(val($l, 'montantExclu'), 0.0),
             num_or(val($l, 'montantReclame'), 0.0),
-            nullable_str(val($l, 'codeActe')),
-            nullable_str(val($l, 'libelleActe')),
+            $codeActe,
+            $libelleActe,
             (string) json_encode($actesPayes, JSON_UNESCAPED_UNICODE),
             nullable_str(val($l, 'commentaire')),
         ];
@@ -691,14 +740,17 @@ function lignes_paiement_cols(): array
 /** Enregistre (upsert) un paiement / bordereau et ses lignes. */
 function save_paiement(PDO $pdo, array $o): void
 {
-    $id              = trim((string) val($o, 'id'));
-    $numeroBordereau = trim((string) val($o, 'numeroBordereau'));
-    $societeId       = trim((string) val($o, 'societeId'));
+    $id = trim((string) val($o, 'id'));
     if ($id === '') {
-        throw new InvalidArgumentException('Paiement invalide : le champ « id » est obligatoire.');
+        $id = 'pai-' . bin2hex(random_bytes(6));
     }
+    $numeroBordereau = trim((string) val($o, 'numeroBordereau'));
     if ($numeroBordereau === '') {
         $numeroBordereau = 'BRD-' . substr($id, 0, 8);
+    }
+    $societeId = trim((string) val($o, 'societeId'));
+    if ($societeId === '') {
+        $societeId = 'soc-mcicare';
     }
 
     $inTx = $pdo->inTransaction();
@@ -708,27 +760,27 @@ function save_paiement(PDO $pdo, array $o): void
 
     try {
         upsert_row($pdo, 'paiements', [
-            'id'                => $id,
-            'numero_bordereau'  => $numeroBordereau,
-            'date_paiement'     => nullable_str(val($o, 'datePaiement')),
-            'date_soins'        => nullable_str(val($o, 'dateSoins')),
-            'date_saisie'       => nullable_str(val($o, 'dateSaisie')) ?: date('c'),
-            'societe_id'        => $societeId,
-            'societe_nom'       => nullable_str(val($o, 'societeNom')),
-            'sous_societe'      => nullable_str(val($o, 'sousSociete')),
-            'nom_agent'         => nullable_str(val($o, 'nomAgent')),
-            'matricule'         => nullable_str(val($o, 'matricule')),
-            'prestation_id'     => nullable_str(val($o, 'prestationId')),
-            'prestation_numero' => nullable_str(val($o, 'prestationNumero')),
-            'mode_paiement'     => nullable_str(val($o, 'modePaiement')),
+            'id'                 => $id,
+            'numero_bordereau'   => $numeroBordereau,
+            'date_paiement'      => nullable_str(val($o, 'datePaiement')) ?: date('Y-m-d'),
+            'date_soins'         => nullable_str(val($o, 'dateSoins')),
+            'date_saisie'        => nullable_str(val($o, 'dateSaisie')) ?: date('c'),
+            'societe_id'         => $societeId,
+            'societe_nom'        => nullable_str(val($o, 'societeNom')),
+            'sous_societe'       => nullable_str(val($o, 'sousSociete')),
+            'nom_agent'          => nullable_str(val($o, 'nomAgent')),
+            'matricule'          => nullable_str(val($o, 'matricule')),
+            'prestation_id'      => nullable_str(val($o, 'prestationId')),
+            'prestation_numero'  => nullable_str(val($o, 'prestationNumero')),
+            'mode_paiement'      => nullable_str(val($o, 'modePaiement')) ?: 'Virement bancaire',
             'reference_paiement' => nullable_str(val($o, 'referencePaiement')),
-            'total_reclame'     => num_or(val($o, 'totalReclame') ?? val($o, 'montantAPayer'), 0.0),
-            'total_paye'        => num_or(val($o, 'totalPaye') ?? val($o, 'sommePayee'), 0.0),
-            'total_moderateur'  => num_or(val($o, 'totalModerateur') ?? val($o, 'ticketModerateur'), 0.0),
-            'total_exclu'       => num_or(val($o, 'totalExclu') ?? val($o, 'montantExclu'), 0.0),
-            'remise'            => num_or(val($o, 'remise'), 0.0),
-            'statut'            => trim((string) val($o, 'statut', 'Validé')) ?: 'Validé',
-            'notes'             => nullable_str(val($o, 'notes')),
+            'total_reclame'      => num_or(val($o, 'totalReclame') ?? val($o, 'montantAPayer'), 0.0),
+            'total_paye'         => num_or(val($o, 'totalPaye') ?? val($o, 'sommePayee'), 0.0),
+            'total_moderateur'   => num_or(val($o, 'totalModerateur') ?? val($o, 'ticketModerateur'), 0.0),
+            'total_exclu'        => num_or(val($o, 'totalExclu') ?? val($o, 'montantExclu'), 0.0),
+            'remise'             => num_or(val($o, 'remise'), 0.0),
+            'statut'             => trim((string) val($o, 'statut', 'Validé')) ?: 'Validé',
+            'notes'              => nullable_str(val($o, 'notes')),
         ]);
 
         replace_child_rows(
@@ -829,12 +881,12 @@ function handle_check_db(): void
     }
 
     json_out([
-        'success'  => true,
-        'message'  => 'Connexion MySQL établie',
-        'database' => WAMP_DB_NAME,
-        'server'   => (string) $pdo->getAttribute(PDO::ATTR_SERVER_VERSION),
-        'php'      => PHP_VERSION,
-        'counts'   => $counts,
+        'success'   => true,
+        'message'   => 'Connexion MySQL établie',
+        'database'  => WAMP_DB_NAME,
+        'server'    => (string) $pdo->getAttribute(PDO::ATTR_SERVER_VERSION),
+        'php'       => PHP_VERSION,
+        'counts'    => $counts,
         'timestamp' => date('c'),
     ]);
 }
@@ -899,41 +951,48 @@ try {
             }
         }
 
-        // Transaction unique pour tout le lot (import groupé)
-        $pdo->beginTransaction();
         $saved = 0;
         $errors = [];
-        foreach ($items as $idx => $item) {
-            try {
-                switch ($action) {
-                    case 'societes':
-                        save_societe($pdo, $item);
-                        break;
-                    case 'personnes':
-                        save_personne($pdo, $item);
-                        break;
-                    case 'familles':
-                        save_famille($pdo, $item);
-                        break;
-                    case 'prestations':
-                        save_prestation($pdo, $item);
-                        break;
-                    case 'paiements':
-                        save_paiement($pdo, $item);
-                        break;
+
+        // Transaction groupée pour tout le lot
+        $pdo->beginTransaction();
+        try {
+            foreach ($items as $idx => $item) {
+                try {
+                    switch ($action) {
+                        case 'societes':
+                            save_societe($pdo, $item);
+                            break;
+                        case 'personnes':
+                            save_personne($pdo, $item);
+                            break;
+                        case 'familles':
+                            save_famille($pdo, $item);
+                            break;
+                        case 'prestations':
+                            save_prestation($pdo, $item);
+                            break;
+                        case 'paiements':
+                            save_paiement($pdo, $item);
+                            break;
+                    }
+                    $saved++;
+                } catch (Throwable $e) {
+                    $itemId = is_array($item) ? ($item['id'] ?? ('index-' . $idx)) : ('index-' . $idx);
+                    $errors[] = $itemId . ': ' . $e->getMessage();
                 }
-                $saved++;
-            } catch (InvalidArgumentException $e) {
-                // Validation error — skip this item, continue with the rest
-                $itemId = is_array($item) ? ($item['id'] ?? ('index-' . $idx)) : ('index-' . $idx);
-                $errors[] = $itemId . ': ' . $e->getMessage();
             }
+            $pdo->commit();
+        } catch (Throwable $txErr) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $txErr;
         }
-        $pdo->commit();
 
         json_out([
-            'success' => true,
-            'message' => $saved . ' enregistrement(s) enregistré(s) avec succès.' . (count($errors) > 0 ? ' ' . count($errors) . ' ignoré(s).' : ''),
+            'success' => $saved > 0 || count($items) === 0,
+            'message' => $saved . ' enregistrement(s) enregistré(s) avec succès.' . (count($errors) > 0 ? ' ' . count($errors) . ' erreur(s).' : ''),
             'count'   => $saved,
             'total'   => count($items),
             'errors'  => $errors,
