@@ -4,7 +4,6 @@ import multer from 'multer';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import { PDFParse } from 'pdf-parse';
-import { initialSocietes, initialPersonnes, initialFamilles, initialPrestations, initialPaiements } from './src/data/initialData';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1019,13 +1018,28 @@ Décompose rigoureusement chaque acte médical, les matricules, les montants ré
     }
   });
 
-  // In-memory mock store for dev preview mode (pre-loaded with database dump records)
+  // In-memory mock store for dev preview mode
   const devDb: Record<string, any[]> = {
-    societes: [...initialSocietes],
-    personnes: [...initialPersonnes],
-    familles: [...initialFamilles],
-    prestations: [...initialPrestations],
-    paiements: [...initialPaiements]
+    societes: [
+      { id: 'soc-mcicare', nom: 'MCI CARE', code: 'MCI CARE', contact: 'Direction Santé & Tiers-Payant', telephone: '+261 20 22 200 00', email: 'contact@mcicare.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-bsa', nom: 'BSA', code: 'BSA', contact: 'Direction Médicale & ASK GS', telephone: '+261 20 22 300 00', email: 'contact@bsa.mg', adresse: 'Andraharo, Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-ascoma', nom: 'ASCOMA', code: 'ASCOMA', contact: 'Direction Santé & Tiers-Payant', telephone: '+261 20 22 400 00', email: 'sante@ascoma.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-sanlam', nom: 'SANLAMALLIANZ', code: 'SANLAM', contact: 'Direction Santé & Sinistres', telephone: '+261 20 22 200 01', email: 'sante@sanlam.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-nyhavana', nom: 'NY HAVANA', code: 'NY HAVANA', contact: 'Direction Santé & Sinistres', telephone: '+261 20 22 211 44', email: 'sante@nyhavana.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 }
+    ],
+    personnes: [],
+    familles: [
+      { id: 'fam-cons', code: 'CONS', libelle: 'Consultations & Visites Médicales', tarifConventionne: 20000, ticketModerateurDefaut: 0, description: 'Consultations de médecine générale et spécialisée', aliases: ['CONS', 'CG', 'C', 'CS', 'CONSULTATION', 'CONSULT', 'VISITE', 'VISITE MEDICALE', 'MEDECIN', 'CONSULT. GENERALISTE', 'GENERALISTE'] },
+      { id: 'fam-medic', code: 'MEDIC', libelle: 'Pharmacie & Médicaments', tarifConventionne: 0, ticketModerateurDefaut: 0, description: 'Médicaments prescrits, spécialités pharmaceutiques et consommables', aliases: ['MEDIC', 'PH', 'PHSB', 'PHAR', 'PHARMACIE', 'STOCK', 'PRODUITS PHARMACEUTIQUES', 'DROGUERIE', 'MEDICAMENTS', 'AMLOZAAR', 'AMOXICILLINE', 'AMOXICLAV', 'DOLIPRANE', 'ZERODOL', 'MAXILASE', 'HERBOKOF', 'MAG 2', 'BACTOCLAV', 'DOLOWIN', 'VITAMINE C'] },
+      { id: 'fam-labo', code: 'LABO', libelle: 'Analyses & Biologie Médicale', tarifConventionne: 0, ticketModerateurDefaut: 0, description: 'Examens de laboratoire, hématologie, biochimie, sérologie', aliases: ['LABO', 'EB', 'ANALYSES', 'BIOLOGIE', 'EXAMENS', 'TDR', 'TDR PALU', 'NFS', 'BIO', 'ANALYSE DE LABORATOIRE', 'SERVICE BIOLOGIE', 'BIOLOGISTE'] },
+      { id: 'fam-soins', code: 'SOINS', libelle: 'Soins Infirmiers & Actes Externes', tarifConventionne: 0, ticketModerateurDefaut: 0, description: 'Injections, pansements, perfusions, aérosols et soins ambulatoires', aliases: ['SOINS', 'SI', 'PANSEMENT', 'INJECTION', 'PERFUSION', 'ACTES INFIRMIERS', 'SOIN', 'AMI'] },
+      { id: 'fam-dent', code: 'DENT', libelle: 'Soins & Prothèses Dentaires', tarifConventionne: 50000, ticketModerateurDefaut: 0, description: 'Soins conservateurs, extractions, détartrage et prothèses dentaires', aliases: ['DENT', 'DC', 'DK', 'CD', 'DETAR', 'DSC', 'SUP 90', 'DENTAIRE', 'EXTRACTION', 'DETARTRAGE', 'ODONTOLOGIE', 'RADICULAIRE', 'PROTHESE DENTAIRE'] },
+      { id: 'fam-hosp', code: 'HOSP', libelle: 'Hospitalisation & Séjour', tarifConventionne: 60000, ticketModerateurDefaut: 0, description: 'Séjours en clinique, frais de chambre, soins intensifs et chirurgie', aliases: ['HOSP', 'HOSPITALISATION', 'SEJOUR', 'CHIRURGIE', 'CHIRURG', 'ACCOUCHEMENT', 'BLOC'] },
+      { id: 'fam-echo', code: 'ECHO', libelle: 'Échographie & Imagerie Médicale', tarifConventionne: 30000, ticketModerateurDefaut: 0, description: 'Échographies abdominales, pelviennes, radiographies standard', aliases: ['ECHO', 'ECH', 'ECHOGRAPHIE', 'ECHOGRAPHIE PELVIENNE', 'RADI', 'RADIO', 'RADIOLOGIE', 'SCANNER', 'IRM', 'IMAGERIE'] },
+      { id: 'fam-opht', code: 'OPHT', libelle: 'Ophtalmologie & Optique', tarifConventionne: 25000, ticketModerateurDefaut: 0, description: 'Consultations ophtalmologiques, verres correcteurs et montures', aliases: ['OPHT', 'OPHTALMOLOGIE', 'OPHTA', 'LUNETTES', 'VERRES', 'OPTIQUE', 'MONTURE'] }
+    ],
+    prestations: [],
+    paiements: []
   };
 
   // Support for api.php in dev preview server

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
@@ -130,16 +130,8 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const [groupSortDirection, setGroupSortDirection] = useState<SortDirection>('desc');
 
   // Multi-criteria filters state
-  const [filterSocieteId, setFilterSocieteId] = useState<string>(selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
+  const [filterSocieteId, setFilterSocieteId] = useState<string>('ALL');
   const [filterMode, setFilterMode] = useState<string>('ALL');
-
-  useEffect(() => {
-    if (selectedSocieteId && selectedSocieteId !== 'ALL') {
-      setFilterSocieteId(selectedSocieteId);
-    } else {
-      setFilterSocieteId('ALL');
-    }
-  }, [selectedSocieteId]);
   const [filterStatut, setFilterStatut] = useState<string>('ALL');
   const [filterExclusion, setFilterExclusion] = useState<'ALL' | 'AVEC_EXCLUSION' | 'SANS_EXCLUSION'>('ALL');
   const [filterLiaison, setFilterLiaison] = useState<'ALL' | 'NON_RELIE' | 'RELIE'>('ALL');
@@ -322,29 +314,14 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const filteredAndSortedPaiements = useMemo(() => {
     return paiements
       .filter(p => {
-        // Society filter (matching by ID, Code or Name)
-        const targetSoc = filterSocieteId && filterSocieteId !== 'ALL' ? filterSocieteId : (selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
-        if (targetSoc !== 'ALL') {
-          const filterSocLower = targetSoc.toLowerCase().trim();
-          const pSocId = (p.societeId || '').toLowerCase().trim();
-          const pSocNom = (p.societeNom || '').toLowerCase().trim();
-          const matchedSoc = societes.find(s => 
-            (s.id && s.id.toLowerCase() === filterSocLower) || 
-            (s.nom && s.nom.toLowerCase() === filterSocLower) ||
-            (s.code && s.code.toLowerCase() === filterSocLower)
-          );
+        // Global toolbar society filter
+        if (selectedSocieteId && selectedSocieteId !== 'ALL' && p.societeId !== selectedSocieteId) {
+          return false;
+        }
 
-          const matches = pSocId === filterSocLower || 
-            pSocNom === filterSocLower || 
-            (matchedSoc && (
-              pSocId === matchedSoc.id.toLowerCase() || 
-              pSocNom === matchedSoc.nom.toLowerCase() || 
-              (p.sousSociete && p.sousSociete.toLowerCase().includes(matchedSoc.nom.toLowerCase()))
-            ));
-
-          if (!matches) {
-            return false;
-          }
+        // Advanced filter society
+        if (filterSocieteId && filterSocieteId !== 'ALL' && p.societeId !== filterSocieteId) {
+          return false;
         }
 
         // Mode filter

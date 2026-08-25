@@ -1074,17 +1074,83 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           };
         }
       } else {
-        // Règlement non lié à une prestation : Ne rien écrire dans la base prestation
-        targetPrestationId = undefined as any;
-        targetLigneId = undefined as any;
+        // Create new prestation on the fly if user chose not to link
+        targetPrestationId = generateId(`prest-autogen-${idx}`);
+        targetLigneId = generateId(`lig-autogen-${idx}`);
+
+        // Find or create patient and update their dossier if immatriculation is found
+        let targetPersonne = Array.from(finalPersonnesMap.values()).find(p => 
+          (hasRealMatricule && p.matricule.toLowerCase() === rowMatricule.toLowerCase()) ||
+          p.nomPrenom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === normRowNom
+        );
+
+        if (targetPersonne) {
+          if (hasRealMatricule && targetPersonne.matricule.trim() !== rowMatricule) {
+            targetPersonne = {
+              ...targetPersonne,
+              matricule: rowMatricule,
+              sousSociete: row.sousSociete || targetPersonne.sousSociete
+            };
+            finalPersonnesMap.set(targetPersonne.id, targetPersonne);
+          }
+        } else {
+          targetPersonne = {
+            id: generateId(`per-new-${idx}`),
+            matricule: hasRealMatricule ? rowMatricule : `MAT-${idx + 100}`,
+            nomPrenom: row.nomPrenom,
+            societeId: matchedSoc?.id || 'soc-1',
+            sousSociete: row.sousSociete || undefined,
+            qualite: 'Adhérent Principal'
+          };
+          finalPersonnesMap.set(targetPersonne.id, targetPersonne);
+        }
+
+        const isAutoRejet = row.netAPayer === 0 && row.montantExclu > 0;
+
+        const autoPrest: Prestation = {
+          id: targetPrestationId,
+          numeroFacture: `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
+          date: row.dateSoins || new Date().toISOString().split('T')[0],
+          societeId: matchedSoc?.id || 'soc-1',
+          societeNom: matchedSoc?.nom || socName,
+          sousSociete: row.sousSociete || 'Département',
+          personneId: targetPersonne.id,
+          nomAgent: row.nomPrenom,
+          matricule: hasRealMatricule ? rowMatricule : targetPersonne.matricule,
+          totalPrestation: row.montantBrut,
+          montantTotal: row.montantBrut,
+          participation: row.participation,
+          ticketModerateur: row.participation,
+          montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
+          totalPaye: row.netAPayer,
+          resteAPayer: 0,
+          statut: isAutoRejet ? 'Rejeté' : 'Payé',
+          dateCreation: new Date().toISOString().split('T')[0],
+          commentaires: `Prestation générée lors du règlement ${parsedDoc.numeroBordereau || ''}`,
+          lignes: [
+            {
+              id: targetLigneId,
+              prestationId: targetPrestationId,
+              code: row.actCode,
+              libelle: row.actLibelle,
+              totalPrestation: row.montantBrut,
+              ticketModerateur: row.participation,
+              montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
+              totalPaye: row.netAPayer,
+              statut: isAutoRejet ? ('Rejeté' as const) : ('Payé' as const)
+            }
+          ]
+        };
+
+        updatedPrestations.unshift(autoPrest);
       }
 
       newLignesPaiement.push({
         id: generateId(`lp-${idx}`),
         paiementId: paymentId,
-        lignePrestationId: targetLigneId || undefined,
-        prestationId: targetPrestationId || undefined,
-        prestationNumero: row.matchedCandidate?.prestationNum || '-',
+        lignePrestationId: targetLigneId,
+        prestationId: targetPrestationId,
+        prestationNumero: row.matchedCandidate?.prestationNum || `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
         dateSoins: row.dateSoins,
         immatriculation: rowMatricule || '-',
         nomBaseAssurance: row.nomPrenom,
@@ -1095,7 +1161,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         montantExclu: row.montantExclu,
         montantReclame: row.montantBrut,
         actesPayes: [{ code: row.actCode, libelle: row.actLibelle, montant: row.netAPayer }],
-        commentaire: row.observations || (row.matchedCandidate ? `Règlement ${parsedDoc.numeroBordereau || ''} - Acte ${row.actCode}` : 'Règlement non rattaché (sans prestation)')
+        commentaire: `Règlement ${parsedDoc.numeroBordereau || ''} - Acte ${row.actCode}`
       });
     });
 
@@ -1320,34 +1386,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   </div>
                 </div>
               )}
-
-              {/* WARNING BANNER IF IMPORTED SOCIETY IS NOT IN DATABASE */}
-              {(() => {
-                const checkSocName = (parsedDoc.clientDoit || parsedDoc.garant || getEffectiveInsurance() || '').trim();
-                const matched = findBestMatchingSociete(checkSocName, societes, getEffectiveInsurance());
-                if (checkSocName && !matched) {
-                  return (
-                    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 shadow-sm text-amber-900 animate-in fade-in">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white font-bold shadow-xs">
-                          <AlertCircle className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-black uppercase tracking-wider text-amber-800 bg-amber-200 px-2 py-0.5 rounded-md">
-                              Société Inconnue / Non Répertoriée
-                            </span>
-                          </div>
-                          <p className="text-xs text-amber-900 mt-1 font-medium leading-relaxed">
-                            La société payeuse identifiée dans le fichier <strong>« {checkSocName} »</strong> n'existe pas dans la base des sociétés. Lors de la validation, une confirmation vous sera demandée pour créer la société ou annuler l'importation.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
 
               {/* Document Overview Bar */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
@@ -2014,7 +2052,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   className="inline-flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-800 font-semibold cursor-pointer"
                 >
                   <Unlink className="h-3.5 w-3.5" />
-                  <span>Ne pas rattacher (Règlement non lié - sans création de prestation)</span>
+                  <span>Ne pas rattacher (Créer une nouvelle prestation au vol)</span>
                 </button>
                 <button
                   onClick={() => setSearchingRowId(null)}

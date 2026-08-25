@@ -176,7 +176,22 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const [lineExcludeForm, setLineExcludeForm] = useState({ montant: 0, motif: '' });
   const [factureExcludeForm, setFactureExcludeForm] = useState({ montant: 0, motif: '' });
   const [lineEditForm, setLineEditForm] = useState<{ code: string, libelle: string, totalPrestation: number, ticketModerateur: number }>({ code: '', libelle: '', totalPrestation: 0, ticketModerateur: 0 });
-  const [selectedPrestations, setSelectedPrestations] = useState<Set<string>>(new Set());
+  const [selectedPrestations, setSelectedPrestations] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('suivi_assurance_selected_prestations');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return new Set(parsed);
+      }
+    } catch {}
+    return new Set();
+  });
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('suivi_assurance_selected_prestations', JSON.stringify(Array.from(selectedPrestations)));
+    } catch {}
+  }, [selectedPrestations]);
 
   React.useEffect(() => {
     if (lineEditContext) {
@@ -526,17 +541,29 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
   // Status counters for quick badges
   const statusCounts = useMemo(() => {
-    let paye = 0, enCours = 0;
+    let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
     prestations.forEach(p => {
       const fin = getPrestationFinancials(p);
-      const isPaid = fin.statut === 'Payé';
-      if (isPaid) {
+      if (fin.statut === 'Payé') {
         paye++;
+      } else if (fin.statut === 'Partiellement payé') {
+        partiellementPaye++;
+        enCours++;
+      } else if (fin.statut === 'Rejeté') {
+        rejete++;
       } else {
+        enAttente++;
         enCours++;
       }
     });
-    return { all: prestations.length, enCours, paye };
+    return {
+      all: prestations.length,
+      enCours,
+      enAttente,
+      partiellementPaye,
+      paye,
+      rejete,
+    };
   }, [prestations, paymentsMap]);
 
   // Filtered and Sorted List
@@ -560,14 +587,19 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       // Sous-societe filter
       const matchesSousSoc = filterSousSociete === 'ALL' || (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
       
-      // Status filter - Tous, En cours, Totalement payé
+      // Status filter - Tous, En cours, En attente, Partiellement payé, Payé, Rejeté
       let matchesStatus = true;
       if (statusFilter !== 'ALL') {
-        const isPaid = fin.statut === 'Payé';
         if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
-          matchesStatus = isPaid;
+          matchesStatus = fin.statut === 'Payé';
         } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
-          matchesStatus = !isPaid;
+          matchesStatus = fin.statut === 'En attente' || fin.statut === 'Partiellement payé';
+        } else if (statusFilter === 'En attente') {
+          matchesStatus = fin.statut === 'En attente';
+        } else if (statusFilter === 'Partiellement payé') {
+          matchesStatus = fin.statut === 'Partiellement payé';
+        } else if (statusFilter === 'Rejeté') {
+          matchesStatus = fin.statut === 'Rejeté';
         } else {
           matchesStatus = fin.statut === statusFilter;
         }
@@ -1690,15 +1722,18 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Statut :</span>
             {[
               { key: 'ALL', label: 'Tous', count: statusCounts.all },
-              { key: 'EN_COURS', label: 'Encour', count: statusCounts.enCours },
-              { key: 'Payé', label: 'Payé', count: statusCounts.paye }
+              { key: 'En attente', label: 'En attente', count: statusCounts.enAttente },
+              { key: 'Partiellement payé', label: 'Partiellement payé', count: statusCounts.partiellementPaye },
+              { key: 'Payé', label: 'Payé', count: statusCounts.paye },
+              { key: 'Rejeté', label: 'Rejeté', count: statusCounts.rejete },
+              { key: 'EN_COURS', label: 'En cours', count: statusCounts.enCours },
             ].map(st => (
               <button
                 key={st.key}
                 onClick={() => setStatusFilter(st.key)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                   statusFilter === st.key
-                    ? 'bg-slate-900 text-white shadow-xs'
+                    ? 'bg-slate-900 text-white shadow-xs font-semibold'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
@@ -1882,13 +1917,15 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                   <input 
                     type="checkbox" 
                     className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                    checked={filteredAndSortedList.length > 0 && selectedPrestations.size === filteredAndSortedList.length}
+                    checked={filteredAndSortedList.length > 0 && filteredAndSortedList.every(p => selectedPrestations.has(p.id))}
                     onChange={(e) => {
+                      const newSet = new Set(selectedPrestations);
                       if (e.target.checked) {
-                        setSelectedPrestations(new Set(filteredAndSortedList.map(p => p.id)));
+                        filteredAndSortedList.forEach(p => newSet.add(p.id));
                       } else {
-                        setSelectedPrestations(new Set());
+                        filteredAndSortedList.forEach(p => newSet.delete(p.id));
                       }
+                      setSelectedPrestations(newSet);
                     }}
                   />
                 </th>
@@ -2371,6 +2408,16 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 ? `Total sélection (${selectedPrestations.size} / ${stats.count} dossiers)`
                 : `Total général (${stats.count} dossiers)`}
             </span>
+            {selectedPrestations.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedPrestations(new Set())}
+                className="ml-2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 hover:text-white transition cursor-pointer normal-case font-normal"
+                title="Désélectionner toutes les lignes"
+              >
+                Effacer la sélection
+              </button>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-4 sm:gap-6 font-mono font-bold">
