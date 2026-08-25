@@ -460,7 +460,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         id: prestId,
         numeroFacture: parsedInvoice.numeroFacture || `FA-SALFA-${idx + 1}`,
         date: ligne.dateSoins || parsedInvoice.dateEmission || new Date().toISOString().split('T')[0],
-        societeId: matchedSoc?.id || societes[0]?.id || 'soc-1',
+        societeId: matchedSoc?.id || societes[0]?.id || 'soc-mcicare',
         societeNom: matchedSoc?.nom || mainSocName,
         sousSociete: sousSoc,
         personneId: matchedPer?.id || personnes[0]?.id || 'per-1',
