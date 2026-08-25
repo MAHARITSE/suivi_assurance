@@ -115,3 +115,40 @@ export async function deleteWampData(action: string, id: string): Promise<{ succ
     return null;
   }
 }
+
+/* ===================================================================== */
+/*  Paramètres applicatifs — stockés STRICTEMENT dans MySQL (WAMP)       */
+/*  (table `parametres`, clé/valeur JSON). Aucun localStorage n'est      */
+/*  utilisé : toute la configuration et les réglages proviennent de la   */
+/*  base de données MySQL de WAMP.                                       */
+/* ===================================================================== */
+
+/** Récupère la valeur d'un paramètre (ou null si absent / indisponible). */
+export async function fetchWampParametre<T = any>(cle: string): Promise<T | null> {
+  try {
+    const res = await fetch(`api.php?action=parametres&cle=${encodeURIComponent(cle)}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json && json.success ? (json.data as T) : null;
+  } catch (err) {
+    console.error(`[fetchWampParametre] Exception pour cle=${cle}:`, err);
+    return null;
+  }
+}
+
+/** Enregistre un paramètre dans MySQL (upsert clé/valeur JSON). */
+export async function saveWampParametre(cle: string, valeur: any): Promise<boolean> {
+  try {
+    const res = await fetch('api.php?action=parametres', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cle, valeur })
+    });
+    if (!res.ok) return false;
+    const json = await res.json().catch(() => null);
+    return !!(json && json.success);
+  } catch (err) {
+    console.error(`[saveWampParametre] Exception pour cle=${cle}:`, err);
+    return false;
+  }
+}

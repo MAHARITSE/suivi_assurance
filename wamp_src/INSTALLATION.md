@@ -72,7 +72,7 @@ Aucun autre logiciel n'est nécessaire : l'application web est déjà compilée.
    - *Fichier à importer* : choisissez le fichier **`schema.sql`** (à la racine du dossier déployé),
    - *Méthode d'envoi* : **standard**,
    - cliquez sur **Exécuter**.
-3. Le script crée la base **`suivi_assurance_salfa`** avec ses 7 tables :
+3. Le script crée la base **`suivi_assurance_salfa`** avec ses 8 tables :
 
    | Table | Rôle |
    |---|---|
@@ -83,6 +83,7 @@ Aucun autre logiciel n'est nécessaire : l'application web est déjà compilée.
    | `lignes_prestation` | Actes médicaux détaillés de chaque prestation |
    | `paiements` | Bordereaux de règlement / paiements |
    | `lignes_paiement` | Lignes de chaque bordereau |
+   | `parametres` | Réglages applicatifs (en-tête, états des rejets…) clé/valeur JSON |
 
 > ⚠️ `schema.sql` **récrée** les tables (`DROP TABLE IF EXISTS`) : les
 > données existantes de ces tables seraient effacées. Exportez d'abord une
@@ -117,8 +118,11 @@ define('WAMP_DB_PASS', '');          // WAMP par défaut : mot de passe vide
    (ou `http://localhost/<nom-de-votre-dossier>/` si vous avez choisi un autre nom).
 2. L'application vérifie automatiquement la connexion MySQL au démarrage :
    - ✅ **Connexion OK** → l'application se charge et toutes les données
-     (sociétés, personnes, familles, prestations, paiements) sont lues **et
-     écrites dans MySQL** à chaque modification.
+     (sociétés, personnes, familles, prestations, paiements, réglages) sont
+     lues **et écrites dans MySQL** à chaque modification.
+     **Mode strictement MySQL** : aucune donnée codée en dur dans le code,
+     aucun `localStorage`, aucun cache navigateur — la base MySQL de WAMP
+     est l'unique source de vérité.
    - ❌ **Échec de connexion** → écran de blocage plein écran
      (« *Application Bloquée : Base de données déconnectée* ») avec le bouton
      *Réessayer la connexion à la base de données MySQL*. **L'application ne
@@ -160,12 +164,16 @@ Tous les appels sont faits par l'application via `api.php` :
 | `GET` | `api.php?action=familles` | Liste des familles de prestations |
 | `GET` | `api.php?action=prestations` | Liste des prestations + lignes (actes) |
 | `GET` | `api.php?action=paiements` | Liste des paiements + lignes (bordereaux) |
+| `GET` | `api.php?action=parametres` | Réglages applicatifs (toutes les clés, JSON) |
+| `GET` | `api.php?action=parametres&cle=<cle>` | Valeur d'un réglage précis (JSON) |
 | `POST` | `api.php?action=societes` | Crée ou met à jour une société (JSON) |
 | `POST` | `api.php?action=personnes` | Crée ou met à jour une personne (JSON) |
 | `POST` | `api.php?action=familles` | Crée ou met à jour une famille (JSON) |
 | `POST` | `api.php?action=prestations` | Crée ou met à jour une prestation + ses lignes (JSON) |
 | `POST` | `api.php?action=paiements` | Crée ou met à jour un paiement + ses lignes (JSON) |
+| `POST` | `api.php?action=parametres` | Enregistre un réglage (`{"cle":"...","valeur":...}`) |
 | `DELETE` | `api.php?action=<entite>&id=<id>` | Supprime une entité (lignes enfants incluses) |
+| `DELETE` | `api.php?action=parametres&cle=<cle>` | Supprime un réglage |
 
 Format de réponse standard :
 
@@ -204,7 +212,7 @@ Format de réponse standard :
 | Erreur `Access denied for user 'root'` | Mot de passe root défini | Renseignez `WAMP_DB_PASS` dans `api/config.php`. |
 | Accents / caractères bizarres | Encodage | Ne modifiez pas les fichiers (UTF-8 sans BOM). Le schéma et l'API utilisent `utf8mb4`. |
 | L'application se bloque alors que `test_api.php` est OK | Cache du navigateur | Actualisez en forçant : `Ctrl + F5`. |
-| Modification perdus ? | L'écriture a échoué silencieusement | Toutes les sauvegardes passent par MySQL : vérifiez `phpMyAdmin → suivi_assurance_salfa`, puis rechargez l'app. Un `localStorage` de secours existe mais n'est jamais servi si le serveur est coupé. |
+| Modification perdue ? | L'écriture a échoué silencieusement | Toutes les sauvegardes passent par MySQL : vérifiez `phpMyAdmin → suivi_assurance_salfa`, puis rechargez l'app. **Mode strictement MySQL** : l'application ne charge ni ne stocke AUCUNE donnée en dehors de la base MySQL de WAMP (`localStorage` totalement inutilisé). Si une écriture échoue, la modification est perdue — corrigez la connexion puis réessayez. |
 
 **Commandes de diagnostic utiles** (invite de commandes Windows) :
 

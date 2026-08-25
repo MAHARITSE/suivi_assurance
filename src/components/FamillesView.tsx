@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
-import { 
-  Layers, 
-  Plus, 
-  Search, 
-  Edit3, 
-  Trash2, 
-  X, 
-  Tag, 
-  Sparkles, 
-  Check, 
+import {
+  Layers,
+  Plus,
+  Search,
+  Edit3,
+  Trash2,
+  X,
+  Tag,
+  Sparkles,
+  Check,
   Info,
   HelpCircle,
   ArrowRight,
@@ -16,8 +16,9 @@ import {
   Database
 } from 'lucide-react';
 import { Famille } from '../types';
-import { initialFamilles } from '../data/initialData';
 import { generateId } from '../utils/formatters';
+import { IS_WAMP_BUILD } from '../utils/buildTarget';
+import { initialFamilles } from '../data/initialData';
 
 interface FamillesViewProps {
   familles: Famille[];
@@ -30,15 +31,20 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
   onSaveFamille,
   onDeleteFamille,
 }) => {
+  // VERSION WAMP (STRICTEMENT MYSQL) : les familles affichées proviennent
+  // exclusivement de la base MySQL WAMP ; aucune donnée codée en dur n'est
+  // injectée (les alias de référence sont insérés EN BASE par schema.sql).
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingFamille, setEditingFamille] = useState<Famille | null>(null);
   const [familleToDelete, setFamilleToDelete] = useState<Famille | null>(null);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
-  
+
   // Quick inline alias input state on cards: { [familleId]: currentText }
   const [quickAliasInputs, setQuickAliasInputs] = useState<Record<string, string>>({});
 
+  // Synchronisation des alias de référence — disponible hors version WAMP
+  // (en version WAMP, les alias de référence viennent de schema.sql en base).
   const handleSyncAllAliases = () => {
     let count = 0;
     initialFamilles.forEach(initF => {
@@ -186,14 +192,16 @@ export const FamillesView: React.FC<FamillesViewProps> = ({
           </div>
 
           <div className="flex items-center space-x-2 shrink-0">
-            <button
-              onClick={handleSyncAllAliases}
-              title="Copier et synchroniser l'ensemble des alias d'actes locaux vers la base de données MySQL WAMP"
-              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition"
-            >
-              <Database className="w-4 h-4" />
-              <span>Copier les Alias vers MySQL</span>
-            </button>
+            {!IS_WAMP_BUILD && (
+              <button
+                onClick={handleSyncAllAliases}
+                title="Copier et synchroniser l'ensemble des alias d'actes locaux vers la base de données"
+                className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition"
+              >
+                <Database className="w-4 h-4" />
+                <span>Copier les Alias vers MySQL</span>
+              </button>
+            )}
             <button
               onClick={handleOpenCreate}
               className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition"

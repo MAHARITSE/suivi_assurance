@@ -206,7 +206,7 @@
             <li>cliquez sur <strong>Exécuter</strong>.</li>
           </ul></li>
     </ol>
-    <p>Le script crée la base <strong><code>suivi_assurance_salfa</code></strong> avec ses 7 tables :</p>
+    <p>Le script crée la base <strong><code>suivi_assurance_salfa</code></strong> avec ses 8 tables :</p>
     <table>
       <tr><th>Table</th><th>Rôle</th></tr>
       <tr><td><code>societes</code></td><td>Sociétés / organismes d'assurance</td></tr>
@@ -216,6 +216,7 @@
       <tr><td><code>lignes_prestation</code></td><td>Actes médicaux détaillés de chaque prestation</td></tr>
       <tr><td><code>paiements</code></td><td>Bordereaux de règlement / paiements</td></tr>
       <tr><td><code>lignes_paiement</code></td><td>Lignes de chaque bordereau</td></tr>
+      <tr><td><code>parametres</code></td><td>Réglages applicatifs (en-tête, états des rejets…) clé/valeur JSON</td></tr>
     </table>
     <div class="callout warn">
       <span class="ic">⚠️</span>
@@ -255,7 +256,9 @@ define('WAMP_DB_PASS', '');          // WAMP par défaut : mot de passe vide</co
       <tr>
         <td>✅ <strong>Connexion OK</strong></td>
         <td>L'application se charge ; toutes les données (sociétés, personnes, familles,
-            prestations, paiements) sont <strong>lues et écrites dans MySQL</strong> à chaque modification.</td>
+            prestations, paiements, réglages) sont <strong>lues et écrites dans MySQL</strong> à chaque modification.
+            <strong>Mode strictement MySQL</strong> : aucune donnée codée en dur, aucun
+            <code>localStorage</code> — la base MySQL WAMP est l'unique source de vérité.</td>
       </tr>
       <tr>
         <td>❌ <strong>Échec de connexion</strong></td>

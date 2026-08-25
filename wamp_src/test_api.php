@@ -123,7 +123,7 @@ header('Content-Type: text/html; charset=utf-8');
       }
 
       // 2) Test de lecture de chaque entité
-      var actions = ['societes', 'personnes', 'familles', 'prestations', 'paiements'];
+      var actions = ['societes', 'personnes', 'familles', 'prestations', 'paiements', 'parametres'];
       var pending = actions.length;
       var tableHtml = '<table><thead><tr><th>Endpoint GET</th><th>État</th><th>Enregistrements</th></tr></thead><tbody>';
       actions.forEach(function (a) {
