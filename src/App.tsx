@@ -12,25 +12,23 @@ import { PersonnesView } from './components/PersonnesView';
 import { FamillesView } from './components/FamillesView';
 import { EtatsView } from './components/EtatsView';
 import { EnteteView } from './components/EnteteView';
+import { SqlImportModal } from './components/SqlImportModal';
 import { generateMySQLDump } from './utils/sqlExporter';
 import { checkWampDbConnection, fetchWampData, saveWampData, saveWampDataBulk, deleteWampData } from './utils/wampApi';
 import {
-  StorageMode,
-  getStoredStorageMode,
-  setStoredStorageMode,
   loadLocalDataset,
   saveLocalTable,
   backupServerDataToLocalStorage,
 } from './utils/localPersistence';
-import { ServerOff, RefreshCw, AlertTriangle, Database, HardDrive, ArrowLeftRight } from 'lucide-react';
+import { ServerOff, RefreshCw, AlertTriangle, Database } from 'lucide-react';
 
 export function App() {
   // Navigation & selection states
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
 
-  // Storage Mode State: 'server' (MySQL WAMP) vs 'local' (LocalStorage)
-  const [storageMode, setStorageMode] = useState<StorageMode>(() => getStoredStorageMode());
+  // Storage Mode strictly Server MySQL WAMP
+  const storageMode = 'server';
 
   // Entête personnalisée
   const [enteteConfig, setEnteteConfig] = useState<EnteteConfig>(() => {
@@ -79,29 +77,13 @@ export function App() {
   // Modals quick trigger
   const [isPrestationModalOpen, setIsPrestationModalOpen] = useState(false);
   const [isPaiementModalOpen, setIsPaiementModalOpen] = useState(false);
+  const [isSqlImportModalOpen, setIsSqlImportModalOpen] = useState(false);
 
   // Tracking if initial load completed
   const initialLoadRef = useRef(false);
 
-  // Load from LocalStorage
-  const loadFromLocalStorage = useCallback(() => {
-    const local = loadLocalDataset();
-    setSocietes(local.societes);
-    setPersonnes(local.personnes);
-    setFamilles(local.familles);
-    setPrestations(local.prestations);
-    setPaiements(local.paiements);
-    setDbStatus('connected');
-    setLastSyncTime(new Date());
-  }, []);
-
   // Check database connection and load WAMP data directly from MySQL
   const checkAndLoadWampData = useCallback(async (silent: boolean = false) => {
-    if (storageMode === 'local') {
-      loadFromLocalStorage();
-      return;
-    }
-
     if (!silent) {
       setDbStatus('checking');
       setIsRetryingDb(true);
@@ -131,11 +113,23 @@ export function App() {
         fetchWampData<Paiement>('paiements')
       ]);
 
-      const sArr = Array.isArray(sData) ? sData : [];
-      const pArr = Array.isArray(pData) ? pData : [];
-      const fArr = Array.isArray(fData) ? fData : [];
-      const prArr = Array.isArray(prData) ? prData : [];
-      const paArr = Array.isArray(paData) ? paData : [];
+      let sArr = Array.isArray(sData) ? sData : [];
+      let pArr = Array.isArray(pData) ? pData : [];
+      let fArr = Array.isArray(fData) ? fData : [];
+      let prArr = Array.isArray(prData) ? prData : [];
+      let paArr = Array.isArray(paData) ? paData : [];
+
+      // If database is currently empty (e.g. fresh installation), fallback to local default dataset
+      if (sArr.length === 0 && prArr.length === 0 && paArr.length === 0) {
+        const local = loadLocalDataset();
+        if (local.prestations.length > 0 || local.societes.length > 0) {
+          sArr = local.societes;
+          pArr = local.personnes;
+          fArr = local.familles;
+          prArr = local.prestations;
+          paArr = local.paiements;
+        }
+      }
 
       setSocietes(sArr);
       setPersonnes(pArr);
@@ -163,24 +157,18 @@ export function App() {
       if (!silent) setIsRetryingDb(false);
       setIsRefreshing(false);
     }
-  }, [storageMode, loadFromLocalStorage]);
+  }, []);
 
   // Initial connection on mount
   useEffect(() => {
     if (!initialLoadRef.current) {
       initialLoadRef.current = true;
-      if (storageMode === 'local') {
-        loadFromLocalStorage();
-      } else {
-        checkAndLoadWampData(false);
-      }
+      checkAndLoadWampData(false);
     }
-  }, [storageMode, checkAndLoadWampData, loadFromLocalStorage]);
+  }, [checkAndLoadWampData]);
 
   // Real-time Multi-Poste Background Polling (every 6 seconds) + Re-sync on Window Focus (Server mode only)
   useEffect(() => {
-    if (storageMode !== 'server') return;
-
     const interval = setInterval(() => {
       if (dbStatus === 'connected') {
         checkAndLoadWampData(true);
@@ -199,65 +187,67 @@ export function App() {
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [storageMode, dbStatus, checkAndLoadWampData]);
+  }, [dbStatus, checkAndLoadWampData]);
 
-  // Mode Switcher Handler
-  const handleToggleStorageMode = (newMode: StorageMode) => {
-    setStorageMode(newMode);
-    setStoredStorageMode(newMode);
-    if (newMode === 'local') {
-      loadFromLocalStorage();
-    } else {
-      checkAndLoadWampData(false);
+  // Handler for SQL Dump Restoration
+  const handleApplySqlData = async (
+    data: {
+      societes: Societe[];
+      personnes: Personne[];
+      familles: Famille[];
+      prestations: Prestation[];
+      paiements: Paiement[];
+    },
+    mode: 'merge' | 'replace'
+  ) => {
+    let finalSocietes = data.societes;
+    let finalPersonnes = data.personnes;
+    let finalFamilles = data.familles;
+    let finalPrestations = data.prestations;
+    let finalPaiements = data.paiements;
+
+    if (mode === 'merge') {
+      const mergeArrays = <T extends { id: string }>(current: T[], incoming: T[]): T[] => {
+        const map = new Map<string, T>();
+        current.forEach(item => map.set(item.id, item));
+        incoming.forEach(item => map.set(item.id, item));
+        return Array.from(map.values());
+      };
+
+      finalSocietes = mergeArrays(societes, data.societes);
+      finalPersonnes = mergeArrays(personnes, data.personnes);
+      finalFamilles = mergeArrays(familles, data.familles);
+      finalPrestations = mergeArrays(prestations, data.prestations);
+      finalPaiements = mergeArrays(paiements, data.paiements);
     }
-  };
 
-  // Sync Local data to Server (MySQL)
-  const handleSyncLocalToServer = async () => {
-    const local = loadLocalDataset();
-    const count = local.prestations.length + local.societes.length + local.personnes.length + local.paiements.length;
-    if (count === 0) {
-      alert('Aucune donnée locale à transférer vers MySQL.');
-      return;
-    }
+    setSocietes(finalSocietes);
+    setPersonnes(finalPersonnes);
+    setFamilles(finalFamilles);
+    setPrestations(finalPrestations);
+    setPaiements(finalPaiements);
 
-    const confirmTransfer = window.confirm(
-      `Voulez-vous transférer toutes les données locales vers le serveur MySQL ?\n` +
-      `- ${local.societes.length} société(s)\n` +
-      `- ${local.personnes.length} adhérent(s)\n` +
-      `- ${local.prestations.length} prestation(s)\n` +
-      `- ${local.paiements.length} règlement(s)`
-    );
-
-    if (!confirmTransfer) return;
-
-    try {
-      setIsRefreshing(true);
-      if (local.societes.length > 0) await saveWampDataBulk('societes', local.societes);
-      if (local.familles.length > 0) await saveWampDataBulk('familles', local.familles);
-      if (local.personnes.length > 0) await saveWampDataBulk('personnes', local.personnes);
-      if (local.prestations.length > 0) await saveWampDataBulk('prestations', local.prestations);
-      if (local.paiements.length > 0) await saveWampDataBulk('paiements', local.paiements);
-
-      alert('Synchronisation vers le serveur MySQL WAMP réussie !');
-      handleToggleStorageMode('server');
-    } catch (err: any) {
-      alert(`Erreur lors du transfert vers MySQL : ${err.message || err}`);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Copy Server (MySQL) data to LocalStorage
-  const handleSyncServerToLocal = () => {
     backupServerDataToLocalStorage({
-      societes,
-      personnes,
-      familles,
-      prestations,
-      paiements,
+      societes: finalSocietes,
+      personnes: finalPersonnes,
+      familles: finalFamilles,
+      prestations: finalPrestations,
+      paiements: finalPaiements,
     });
-    alert(`Copie locale mise à jour avec succès (${prestations.length} prestations, ${paiements.length} paiements).`);
+
+    if (storageMode === 'server') {
+      try {
+        if (finalSocietes.length > 0) await saveWampDataBulk('societes', finalSocietes);
+        if (finalFamilles.length > 0) await saveWampDataBulk('familles', finalFamilles);
+        if (finalPersonnes.length > 0) await saveWampDataBulk('personnes', finalPersonnes);
+        if (finalPrestations.length > 0) await saveWampDataBulk('prestations', finalPrestations);
+        if (finalPaiements.length > 0) await saveWampDataBulk('paiements', finalPaiements);
+      } catch (e) {
+        console.warn('Erreur synchronisation bulk vers MySQL:', e);
+      }
+    }
+
+    setLastSyncTime(new Date());
   };
 
   // Handlers for Prestations
@@ -732,10 +722,12 @@ export function App() {
             </div>
 
             <div className="space-y-2 text-xs text-slate-700">
-              <h4 className="font-bold text-slate-900">Options disponibles :</h4>
-              <p className="text-slate-600 leading-relaxed">
-                Vous pouvez réessayer la connexion à MySQL WAMP si votre serveur est en cours de démarrage, ou basculer immédiatement en <strong>Mode Local (LocalStorage)</strong> pour continuer à travailler sans blocage.
-              </p>
+              <h4 className="font-bold text-slate-900">Vérifications recommandées :</h4>
+              <ul className="text-slate-600 leading-relaxed list-disc list-inside space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <li>Vérifiez que l'icône de WAMP Server est bien <strong className="text-emerald-700">verte</strong> dans la barre des tâches.</li>
+                <li>Assurez-vous que les services <strong>Apache</strong> et <strong>MySQL</strong> sont lancés.</li>
+                <li>Vérifiez que le fichier <code className="font-mono bg-white px-1 py-0.5 rounded border border-slate-200">api.php</code> et <code className="font-mono bg-white px-1 py-0.5 rounded border border-slate-200">config.php</code> sont bien présents dans le dossier WAMP.</li>
+              </ul>
             </div>
 
             <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
@@ -743,19 +735,10 @@ export function App() {
                 type="button"
                 onClick={() => checkAndLoadWampData(false)}
                 disabled={isRetryingDb}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${isRetryingDb ? 'animate-spin' : ''}`} />
-                <span>{isRetryingDb ? 'Vérification...' : 'Réessayer connexion MySQL'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleToggleStorageMode('local')}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition cursor-pointer"
-              >
-                <HardDrive className="h-4 w-4 text-blue-200" />
-                <span>Basculer en Mode Local</span>
+                <span>{isRetryingDb ? 'Vérification en cours...' : 'Réessayer la connexion MySQL'}</span>
               </button>
             </div>
           </div>
@@ -784,15 +767,12 @@ export function App() {
         selectedSocieteId={selectedSocieteId}
         onSelectSociete={setSelectedSocieteId}
         onExportBackup={handleExportBackup}
+        onImportSQL={() => setIsSqlImportModalOpen(true)}
         onRefreshData={() => checkAndLoadWampData(true)}
         isRefreshing={isRefreshing}
         lastSyncTime={lastSyncTime}
         dbConnected={dbStatus === 'connected'}
         logoUrl={enteteConfig.logoUrl}
-        storageMode={storageMode}
-        onToggleStorageMode={handleToggleStorageMode}
-        onSyncLocalToServer={handleSyncLocalToServer}
-        onSyncServerToLocal={handleSyncServerToLocal}
       />
 
       {/* Navigation Tab Bar */}
@@ -915,6 +895,13 @@ export function App() {
           <EnteteView onConfigChange={setEnteteConfig} />
         )}
       </main>
+
+      {/* SQL Dump Import / Restore Modal */}
+      <SqlImportModal
+        isOpen={isSqlImportModalOpen}
+        onClose={() => setIsSqlImportModalOpen(false)}
+        onApplyData={handleApplySqlData}
+      />
     </div>
   );
 }

@@ -38,7 +38,7 @@ export interface Famille {
 
 export interface LignePrestation {
   id: string;
-  prestationId: string;
+  prestationId?: string;
   code: string; // Famille code, e.g. CONS, PHAR, LABO, DENT, HOSP
   libelle?: string;
   totalPrestation: number; // Montant brut de l'acte
@@ -81,10 +81,10 @@ export interface Prestation {
 export interface LignePaiement {
   id: string;
   paiementId: string;
-  lignePrestationId: string;
-  prestationId: string;
-  immatriculation: string;
-  nomBaseAssurance: string;
+  lignePrestationId?: string;
+  prestationId?: string;
+  immatriculation?: string;
+  nomBaseAssurance?: string;
   nomAgent?: string; // Nom de l'agent rattaché
   // rattachement à la prescription (base 1)
   prestationNumero?: string;
