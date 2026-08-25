@@ -60,11 +60,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenNewPaiement,
 }) => {
   // Filter by selected society if active
-  const filteredPrestations = selectedSocieteId === 'ALL'
+  const isAllSoc = !selectedSocieteId || selectedSocieteId === 'ALL';
+  const filteredPrestations = isAllSoc
     ? prestations
-    : prestations.filter(p => p.societeId === selectedSocieteId);
+    : prestations.filter(p => p.societeId === selectedSocieteId || p.societeNom === selectedSocieteId);
 
-  const filteredPaiements = selectedSocieteId === 'ALL'
+  const filteredPaiements = isAllSoc
     ? paiements
     : paiements.filter(p => p.societeId === selectedSocieteId);
 

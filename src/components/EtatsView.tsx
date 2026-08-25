@@ -44,22 +44,20 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
   selectedSocieteId,
 }) => {
   const [activeReport, setActiveReport] = useState<ReportType>('recap_societes');
-  const [filterSocId, setFilterSocId] = useState<string>(selectedSocieteId);
+  const [filterSocId, setFilterSocId] = useState<string>(selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   // Sync with prop when selectedSocieteId changes
   React.useEffect(() => {
-    if (selectedSocieteId !== 'ALL') {
-      setFilterSocId(selectedSocieteId);
-    }
+    setFilterSocId(selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
   }, [selectedSocieteId]);
 
   // Filtered datasets based on active filters
   const filteredPrestations = useMemo(() => {
     return prestations.filter(p => {
-      const matchSoc = filterSocId === 'ALL' || p.societeId === filterSocId;
+      const matchSoc = !filterSocId || filterSocId === 'ALL' || p.societeId === filterSocId;
       const matchDebut = !dateDebut || p.date >= dateDebut;
       const matchFin = !dateFin || p.date <= dateFin;
       const pers = personnes.find(pe => pe.id === p.personneId);
@@ -77,7 +75,7 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
 
   const filteredPaiements = useMemo(() => {
     return paiements.filter(p => {
-      const matchSoc = filterSocId === 'ALL' || p.societeId === filterSocId;
+      const matchSoc = !filterSocId || filterSocId === 'ALL' || p.societeId === filterSocId;
       const matchDebut = !dateDebut || p.datePaiement >= dateDebut;
       const matchFin = !dateFin || p.datePaiement <= dateFin;
       const searchLow = searchTerm.toLowerCase();

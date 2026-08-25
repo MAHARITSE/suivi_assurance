@@ -315,12 +315,12 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     return paiements
       .filter(p => {
         // Global toolbar society filter
-        if (selectedSocieteId !== 'ALL' && p.societeId !== selectedSocieteId) {
+        if (selectedSocieteId && selectedSocieteId !== 'ALL' && p.societeId !== selectedSocieteId) {
           return false;
         }
 
         // Advanced filter society
-        if (filterSocieteId !== 'ALL' && p.societeId !== filterSocieteId) {
+        if (filterSocieteId && filterSocieteId !== 'ALL' && p.societeId !== filterSocieteId) {
           return false;
         }
 
@@ -371,18 +371,18 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           const q = searchTerm.toLowerCase();
           const socNom = getSocieteNom(p.societeId).toLowerCase();
           const matchHeader = 
-            p.numeroBordereau.toLowerCase().includes(q) ||
-            p.referencePaiement.toLowerCase().includes(q) ||
-            (p.notes && p.notes.toLowerCase().includes(q)) ||
-            (p.modePaiement && p.modePaiement.toLowerCase().includes(q)) ||
+            (p.numeroBordereau || '').toLowerCase().includes(q) ||
+            (p.referencePaiement || '').toLowerCase().includes(q) ||
+            (p.notes || '').toLowerCase().includes(q) ||
+            (p.modePaiement || '').toLowerCase().includes(q) ||
             socNom.includes(q);
 
           const matchLines = p.lignes?.some(l => 
-            (l.nomAgent && l.nomAgent.toLowerCase().includes(q)) ||
-            (l.nomBaseAssurance && l.nomBaseAssurance.toLowerCase().includes(q)) ||
-            (l.immatriculation && l.immatriculation.toLowerCase().includes(q)) ||
-            (l.prestationNumero && l.prestationNumero.toLowerCase().includes(q)) ||
-            (l.commentaire && l.commentaire.toLowerCase().includes(q))
+            (l.nomAgent || '').toLowerCase().includes(q) ||
+            (l.nomBaseAssurance || '').toLowerCase().includes(q) ||
+            (l.immatriculation || '').toLowerCase().includes(q) ||
+            (l.prestationNumero || '').toLowerCase().includes(q) ||
+            (l.commentaire || '').toLowerCase().includes(q)
           );
 
           if (!matchHeader && !matchLines) {
@@ -768,7 +768,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
     targetPrestations.forEach(p => {
       const personne = personnes.find(pers => pers.id === p.personneId);
-      p.lignes.forEach(l => {
+      (p.lignes || []).forEach(l => {
         const reste = Math.max(0, l.totalPrestation - (l.totalPaye || 0));
         if (reste > 0) {
           const defaultPaye = Math.round(reste * (taux / 100));
@@ -909,7 +909,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
       const relatedPaidLines = newLignesPaiement.filter(lp => lp.prestationId === p.id);
       if (relatedPaidLines.length === 0) return p;
 
-      const updatedLignes = p.lignes.map(l => {
+      const updatedLignes = (p.lignes || []).map(l => {
         const foundPaid = relatedPaidLines.find(lp => lp.lignePrestationId === l.id);
         if (foundPaid) {
           const newActTotalPaye = (l.totalPaye || 0) + foundPaid.totalPaye;
@@ -1589,7 +1589,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                   <div className="flex items-center gap-2">
                                     <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                                       <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span>Lignes Règlement du Bordereau ({p.lignes.length} soins)</span>
+                                      <span>Lignes Règlement du Bordereau ({p?.lignes?.length || 0} soins)</span>
                                     </span>
                                     <span className="text-xs text-slate-400 font-mono">| {formatDate(p.datePaiement)}</span>
                                   </div>
@@ -1683,7 +1683,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                      {p.lignes.map((l) => {
+                                      {(p.lignes || []).map((l) => {
                                         const lMatch = getLignePaiementMatchInfo(l, p);
                                         const lMatchTooltip = lMatch.hasMatch 
                                           ? `Concordance Prescription : Facture ${lMatch.matchedPrescription?.numeroFacture} (Date: ${formatDate(lMatch.matchedPrescription?.date || '')}, Montant: ${formatMoney(lMatch.matchedPrescription?.montantBrut || 0)})`
@@ -2032,7 +2032,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                 <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between border-b border-slate-100 pb-2">
                                   <span className="flex items-center gap-1.5 text-emerald-700">
                                     <Boxes className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>Détail des {grp.lignes.length} règlements cumulés pour {grp.nomAgent} - Acte {grp.codeActe}</span>
+                                    <span>Détail des {grp?.lignes?.length || 0} règlements cumulés pour {grp.nomAgent} - Acte {grp.codeActe}</span>
                                   </span>
                                   <span className="text-slate-400 font-mono text-[11px]">Soins du {formatDate(grp.dateSoins)}</span>
                                 </div>
@@ -2051,7 +2051,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
-                                    {grp.lignes.map((sub, sIdx) => (
+                                    {(grp.lignes || []).map((sub, sIdx) => (
                                       <tr key={`${sub.ligneId}_${sIdx}`} className="hover:bg-slate-50">
                                         <td className="py-2 px-2 font-bold font-mono text-emerald-700">
                                           {sub.numeroBordereau}
@@ -2208,7 +2208,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">Lignes & Prestations Réglées ({viewingPaiement.lignes.length} actes)</h4>
+                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">Lignes & Prestations Réglées ({viewingPaiement?.lignes?.length || 0} actes)</h4>
                 <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
                   <Layers className="w-3 h-3 text-emerald-600" />
                   <label className="text-slate-700 font-medium flex items-center gap-1 cursor-pointer">
@@ -2275,7 +2275,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {viewingPaiement.lignes.map(l => (
+                      {(viewingPaiement.lignes || []).map(l => (
                         <tr key={l.id}>
                           <td className="p-2 text-slate-600 font-medium text-center">{l.dateSoins ? formatDate(l.dateSoins) : '-'}</td>
                           <td className="p-2 font-mono font-medium text-indigo-700">{l.immatriculation || '-'}</td>
@@ -2686,7 +2686,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-100">
                   <span className="text-slate-500 font-medium">Lignes / Actes réglés :</span>
-                  <span className="font-semibold text-slate-900">{paiementToDelete.lignes.length} acte(s)</span>
+                  <span className="font-semibold text-slate-900">{paiementToDelete?.lignes?.length || 0} acte(s)</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-100">
                   <span className="text-slate-500 font-medium">Total Réclamé :</span>

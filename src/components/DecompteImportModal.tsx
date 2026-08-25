@@ -1107,11 +1107,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
         const isAutoRejet = row.netAPayer === 0 && row.montantExclu > 0;
 
-          const autoPrest: Prestation = {
+        const autoPrest: Prestation = {
           id: targetPrestationId,
           numeroFacture: `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
           date: row.dateSoins || new Date().toISOString().split('T')[0],
-          societeId: matchedSoc?.id || societes[0]?.id || 'soc-mcicare',
+          societeId: matchedSoc?.id || 'soc-1',
           societeNom: matchedSoc?.nom || socName,
           sousSociete: row.sousSociete || 'Département',
           personneId: targetPersonne.id,
@@ -1131,8 +1131,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             {
               id: targetLigneId,
               prestationId: targetPrestationId,
-              code: row.actCode || 'CONS',
-              libelle: row.actLibelle || row.actCode || 'Acte de soins',
+              code: row.actCode,
+              libelle: row.actLibelle,
               totalPrestation: row.montantBrut,
               ticketModerateur: row.participation,
               montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
@@ -1160,10 +1160,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         ticketModerateur: row.participation,
         montantExclu: row.montantExclu,
         montantReclame: row.montantBrut,
-        codeActe: row.actCode || 'CONS',
-        libelleActe: row.actLibelle || row.actCode || 'Acte de soins',
-        actesPayes: [{ code: row.actCode || 'CONS', libelle: row.actLibelle || row.actCode || 'Acte de soins', montant: row.netAPayer }],
-        commentaire: `Règlement ${parsedDoc.numeroBordereau || ''} - Acte ${row.actCode || 'CONS'}`
+        actesPayes: [{ code: row.actCode, libelle: row.actLibelle, montant: row.netAPayer }],
+        commentaire: `Règlement ${parsedDoc.numeroBordereau || ''} - Acte ${row.actCode}`
       });
     });
 
@@ -1177,7 +1175,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       numeroBordereau: parsedDoc.numeroBordereau || parsedDoc.numeroFacture || `BORD-${Date.now().toString().substring(6)}`,
       datePaiement: parsedDoc.dateEmission || new Date().toISOString().split('T')[0],
       dateSaisie: new Date().toISOString().split('T')[0],
-      societeId: matchedSoc?.id || societes[0]?.id || 'soc-mcicare',
+      societeId: matchedSoc?.id || 'soc-1',
       modePaiement: 'Virement bancaire',
       referencePaiement: `VIR-${parsedDoc.numeroBordereau || Date.now().toString().substring(6)}`,
       totalReclame,

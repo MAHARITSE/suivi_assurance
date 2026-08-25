@@ -7,6 +7,3 @@ dist/
 wamp/index.html
 wamp/assets/
 wamp/schema_wamp.sql
-
-# Dossier de déploiement WAMP généré par `npm run build:wamp` (sources dans wamp_src/)
-wamp-deploy/

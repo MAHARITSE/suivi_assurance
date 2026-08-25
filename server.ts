@@ -1018,87 +1018,67 @@ Décompose rigoureusement chaque acte médical, les matricules, les montants ré
     }
   });
 
-  // Support for api.php in dev preview server (in-memory mock store)
-  const defaultSocietes = [
-    { id: 'soc-mcicare', nom: 'MCI CARE', code: 'MCI CARE', contact: 'Direction Santé & Tiers-Payant', telephone: '+261 20 22 200 00', email: 'contact@mcicare.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
-    { id: 'soc-bsa', nom: 'BSA', code: 'BSA', contact: 'Direction Médicale & ASK GS', telephone: '+261 20 22 300 00', email: 'contact@bsa.mg', adresse: 'Andraharo, Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
-    { id: 'soc-ascoma', nom: 'ASCOMA', code: 'ASCOMA', contact: 'Direction Santé & Tiers-Payant', telephone: '+261 20 22 400 00', email: 'sante@ascoma.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
-    { id: 'soc-sanlam', nom: 'SANLAMALLIANZ', code: 'SANLAM', contact: 'Direction Santé & Sinistres', telephone: '+261 20 22 200 01', email: 'sante@sanlam.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
-    { id: 'soc-nyhavana', nom: 'NY HAVANA', code: 'NY HAVANA', contact: 'Direction Santé & Sinistres', telephone: '+261 20 22 211 44', email: 'sante@nyhavana.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 }
-  ];
-
-  const defaultFamilles = [
-    { id: 'fam-cons', code: 'CONS', libelle: 'Consultations & Visites Médicales', tarifConventionne: 20000, ticketModerateurDefaut: 0, aliases: ['CONS', 'CG', 'C', 'CS', 'CONSULTATION', 'CONSULT', 'VISITE', 'VISITE MEDICALE', 'MEDECIN', 'CONSULT. GENERALISTE', 'GENERALISTE'] },
-    { id: 'fam-medic', code: 'MEDIC', libelle: 'Pharmacie & Médicaments', tarifConventionne: 0, ticketModerateurDefaut: 0, aliases: ['MEDIC', 'PH', 'PHSB', 'PHAR', 'PHARMACIE', 'STOCK', 'PRODUITS PHARMACEUTIQUES', 'DROGUERIE', 'MEDICAMENTS'] },
-    { id: 'fam-labo', code: 'LABO', libelle: 'Analyses & Biologie Médicale', tarifConventionne: 0, ticketModerateurDefaut: 0, aliases: ['LABO', 'EB', 'ANALYSES', 'BIOLOGIE', 'EXAMENS', 'TDR', 'TDR PALU', 'NFS', 'BIO', 'ANALYSE DE LABORATOIRE'] },
-    { id: 'fam-soins', code: 'SOINS', libelle: 'Soins Infirmiers & Actes Externes', tarifConventionne: 0, ticketModerateurDefaut: 0, aliases: ['SOINS', 'SI', 'PANSEMENT', 'INJECTION', 'PERFUSION', 'ACTES INFIRMIERS', 'SOIN', 'AMI'] },
-    { id: 'fam-dent', code: 'DENT', libelle: 'Soins & Prothèses Dentaires', tarifConventionne: 50000, ticketModerateurDefaut: 0, aliases: ['DENT', 'DC', 'DK', 'CD', 'DETAR', 'DSC', 'SUP 90', 'DENTAIRE', 'EXTRACTION', 'DETARTRAGE'] },
-    { id: 'fam-hosp', code: 'HOSP', libelle: 'Hospitalisation & Séjour', tarifConventionne: 60000, ticketModerateurDefaut: 0, aliases: ['HOSP', 'HOSPITALISATION', 'SEJOUR', 'CHIRURGIE', 'CHIRURG', 'ACCOUCHEMENT', 'BLOC'] },
-    { id: 'fam-echo', code: 'ECHO', libelle: 'Échographie & Imagerie Médicale', tarifConventionne: 30000, ticketModerateurDefaut: 0, aliases: ['ECHO', 'ECH', 'ECHOGRAPHIE', 'RADI', 'RADIO', 'RADIOLOGIE', 'SCANNER', 'IRM', 'IMAGERIE'] },
-    { id: 'fam-opht', code: 'OPHT', libelle: 'Ophtalmologie & Optique', tarifConventionne: 25000, ticketModerateurDefaut: 0, aliases: ['OPHT', 'OPHTALMOLOGIE', 'OPHTA', 'LUNETTES', 'VERRES', 'OPTIQUE', 'MONTURE'] }
-  ];
-
+  // In-memory mock store for dev preview mode
   const devDb: Record<string, any[]> = {
-    societes: [...defaultSocietes],
+    societes: [
+      { id: 'soc-mcicare', nom: 'MCI CARE', code: 'MCI CARE', contact: 'Direction Santé & Tiers-Payant', telephone: '+261 20 22 200 00', email: 'contact@mcicare.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-bsa', nom: 'BSA', code: 'BSA', contact: 'Direction Médicale & ASK GS', telephone: '+261 20 22 300 00', email: 'contact@bsa.mg', adresse: 'Andraharo, Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-ascoma', nom: 'ASCOMA', code: 'ASCOMA', contact: 'Direction Santé & Tiers-Payant', telephone: '+261 20 22 400 00', email: 'sante@ascoma.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-sanlam', nom: 'SANLAMALLIANZ', code: 'SANLAM', contact: 'Direction Santé & Sinistres', telephone: '+261 20 22 200 01', email: 'sante@sanlam.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 },
+      { id: 'soc-nyhavana', nom: 'NY HAVANA', code: 'NY HAVANA', contact: 'Direction Santé & Sinistres', telephone: '+261 20 22 211 44', email: 'sante@nyhavana.mg', adresse: 'Antananarivo, Madagascar', tauxCouvertureDefaut: 100 }
+    ],
     personnes: [],
-    familles: [...defaultFamilles],
+    familles: [
+      { id: 'fam-cons', code: 'CONS', libelle: 'Consultations & Visites Médicales', tarifConventionne: 20000, ticketModerateurDefaut: 0, description: 'Consultations de médecine générale et spécialisée', aliases: ['CONS', 'CG', 'C', 'CS', 'CONSULTATION', 'CONSULT', 'VISITE', 'VISITE MEDICALE', 'MEDECIN', 'CONSULT. GENERALISTE', 'GENERALISTE'] },
+      { id: 'fam-medic', code: 'MEDIC', libelle: 'Pharmacie & Médicaments', tarifConventionne: 0, ticketModerateurDefaut: 0, description: 'Médicaments prescrits, spécialités pharmaceutiques et consommables', aliases: ['MEDIC', 'PH', 'PHSB', 'PHAR', 'PHARMACIE', 'STOCK', 'PRODUITS PHARMACEUTIQUES', 'DROGUERIE', 'MEDICAMENTS', 'AMLOZAAR', 'AMOXICILLINE', 'AMOXICLAV', 'DOLIPRANE', 'ZERODOL', 'MAXILASE', 'HERBOKOF', 'MAG 2', 'BACTOCLAV', 'DOLOWIN', 'VITAMINE C'] },
+      { id: 'fam-labo', code: 'LABO', libelle: 'Analyses & Biologie Médicale', tarifConventionne: 0, ticketModerateurDefaut: 0, description: 'Examens de laboratoire, hématologie, biochimie, sérologie', aliases: ['LABO', 'EB', 'ANALYSES', 'BIOLOGIE', 'EXAMENS', 'TDR', 'TDR PALU', 'NFS', 'BIO', 'ANALYSE DE LABORATOIRE', 'SERVICE BIOLOGIE', 'BIOLOGISTE'] },
+      { id: 'fam-soins', code: 'SOINS', libelle: 'Soins Infirmiers & Actes Externes', tarifConventionne: 0, ticketModerateurDefaut: 0, description: 'Injections, pansements, perfusions, aérosols et soins ambulatoires', aliases: ['SOINS', 'SI', 'PANSEMENT', 'INJECTION', 'PERFUSION', 'ACTES INFIRMIERS', 'SOIN', 'AMI'] },
+      { id: 'fam-dent', code: 'DENT', libelle: 'Soins & Prothèses Dentaires', tarifConventionne: 50000, ticketModerateurDefaut: 0, description: 'Soins conservateurs, extractions, détartrage et prothèses dentaires', aliases: ['DENT', 'DC', 'DK', 'CD', 'DETAR', 'DSC', 'SUP 90', 'DENTAIRE', 'EXTRACTION', 'DETARTRAGE', 'ODONTOLOGIE', 'RADICULAIRE', 'PROTHESE DENTAIRE'] },
+      { id: 'fam-hosp', code: 'HOSP', libelle: 'Hospitalisation & Séjour', tarifConventionne: 60000, ticketModerateurDefaut: 0, description: 'Séjours en clinique, frais de chambre, soins intensifs et chirurgie', aliases: ['HOSP', 'HOSPITALISATION', 'SEJOUR', 'CHIRURGIE', 'CHIRURG', 'ACCOUCHEMENT', 'BLOC'] },
+      { id: 'fam-echo', code: 'ECHO', libelle: 'Échographie & Imagerie Médicale', tarifConventionne: 30000, ticketModerateurDefaut: 0, description: 'Échographies abdominales, pelviennes, radiographies standard', aliases: ['ECHO', 'ECH', 'ECHOGRAPHIE', 'ECHOGRAPHIE PELVIENNE', 'RADI', 'RADIO', 'RADIOLOGIE', 'SCANNER', 'IRM', 'IMAGERIE'] },
+      { id: 'fam-opht', code: 'OPHT', libelle: 'Ophtalmologie & Optique', tarifConventionne: 25000, ticketModerateurDefaut: 0, description: 'Consultations ophtalmologiques, verres correcteurs et montures', aliases: ['OPHT', 'OPHTALMOLOGIE', 'OPHTA', 'LUNETTES', 'VERRES', 'OPTIQUE', 'MONTURE'] }
+    ],
     prestations: [],
-    paiements: [],
-    parametres: []
+    paiements: []
   };
 
-  app.all('/api.php', (req, res) => {
-    const action = String(req.query.action || '').toLowerCase();
-    const method = req.method.toUpperCase();
-
+  // Support for api.php in dev preview server
+  app.all('/api.php', express.json(), (req, res) => {
+    const action = String(req.query.action || '');
     if (action === 'check_db' || action === 'health') {
-      const totalLignesPrestation = devDb.prestations.reduce((acc, p) => acc + (p.lignes?.length || (p.totalPrestation ? 1 : 0)), 0);
-      const totalLignesPaiement = devDb.paiements.reduce((acc, p) => acc + (p.lignes?.length || (p.totalPaye ? 1 : 0)), 0);
-
       return res.json({
         success: true,
-        database: 'suivi_assurance_salfa',
-        server: 'NodeJS Dev Preview / MySQL Simulation',
-        counts: {
-          societes: devDb.societes.length,
-          personnes: devDb.personnes.length,
-          familles: devDb.familles.length,
-          prestations: devDb.prestations.length,
-          lignes_prestation: totalLignesPrestation,
-          paiements: devDb.paiements.length,
-          lignes_paiement: totalLignesPaiement,
-          parametres: devDb.parametres.length
-        },
-        timestamp: new Date().toISOString()
+        data: {
+          connected: true,
+          database: 'suivi_assurance_salfa (Dev Sandbox)',
+          message: 'Mode Développement Connecté',
+          timestamp: new Date().toISOString()
+        }
       });
     }
 
-    if (!devDb[action]) {
-      devDb[action] = [];
-    }
-
-    if (method === 'GET') {
-      return res.json({ success: true, count: devDb[action].length, data: devDb[action] });
-    }
-
-    if (method === 'POST') {
-      const body = req.body;
-      const items = Array.isArray(body) ? body : (body ? [body] : []);
-      items.forEach(item => {
-        if (!item || !item.id) return;
-        const idx = devDb[action].findIndex(x => x.id === item.id);
-        if (idx >= 0) devDb[action][idx] = item;
-        else devDb[action].push(item);
-      });
-      return res.json({ success: true, count: items.length, message: `${items.length} enregistré(s) dans MySQL` });
-    }
-
-    if (method === 'DELETE') {
-      const id = String(req.query.id || '');
-      if (id) {
-        devDb[action] = devDb[action].filter(x => x.id !== id);
+    if (devDb[action] !== undefined) {
+      if (req.method === 'GET') {
+        return res.json({ success: true, data: devDb[action] });
       }
-      return res.json({ success: true, message: 'Supprimé' });
+      if (req.method === 'POST') {
+        const item = req.body;
+        if (!item || !item.id) {
+          return res.status(400).json({ success: false, error: 'Données manquantes ou id non fourni' });
+        }
+        const idx = devDb[action].findIndex(x => x.id === item.id);
+        if (idx >= 0) {
+          devDb[action][idx] = item;
+        } else {
+          devDb[action].unshift(item);
+        }
+        return res.json({ success: true, data: item });
+      }
+      if (req.method === 'DELETE') {
+        const id = String(req.query.id || '');
+        devDb[action] = devDb[action].filter(x => x.id !== id);
+        return res.json({ success: true, data: { id, deleted: true } });
+      }
     }
 
     return res.json({ success: true, data: [] });

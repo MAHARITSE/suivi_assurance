@@ -36,7 +36,7 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
   });
 
   const filtered = personnes.filter(p => {
-    const matchesSoc = selectedSocieteId === 'ALL' || p.societeId === selectedSocieteId;
+    const matchesSoc = !selectedSocieteId || selectedSocieteId === 'ALL' || p.societeId === selectedSocieteId;
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch = 
       p.nomPrenom.toLowerCase().includes(searchLower) ||
@@ -52,7 +52,7 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
     setFormData({
       nomPrenom: '',
       matricule: `MAT-${Math.floor(1000 + Math.random() * 9000)}`,
-      societeId: selectedSocieteId !== 'ALL' ? selectedSocieteId : (societes[0]?.id || ''),
+      societeId: (selectedSocieteId && selectedSocieteId !== 'ALL') ? selectedSocieteId : (societes[0]?.id || ''),
       qualite: 'Adhérent Principal',
       familleCode: 'CONS',
       dateNaissance: '1990-01-01',

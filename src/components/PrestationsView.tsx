@@ -145,7 +145,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   // Multi-criteria filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [filterSocieteId, setFilterSocieteId] = useState<string>(selectedSocieteId);
+  const [filterSocieteId, setFilterSocieteId] = useState<string>(selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
   const [filterSousSociete, setFilterSousSociete] = useState<string>('ALL');
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
@@ -209,9 +209,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
   // Sync prop selectedSocieteId
   React.useEffect(() => {
-    if (selectedSocieteId !== 'ALL') {
-      setFilterSocieteId(selectedSocieteId);
-    }
+    setFilterSocieteId(selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
   }, [selectedSocieteId]);
 
   const handleExportRecouvrementPdfSelected = () => {
@@ -239,7 +237,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     let count = 0;
     if (searchTerm.trim()) count++;
     if (statusFilter !== 'ALL') count++;
-    if (filterSocieteId !== 'ALL') count++;
+    if (filterSocieteId && filterSocieteId !== 'ALL') count++;
     if (filterSousSociete !== 'ALL') count++;
     if (dateDebut) count++;
     if (dateFin) count++;
@@ -252,7 +250,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   const handleResetFilters = () => {
     setSearchTerm('');
     setStatusFilter('ALL');
-    setFilterSocieteId(selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
+    setFilterSocieteId('ALL');
     setFilterSousSociete('ALL');
     setDateDebut('');
     setDateFin('');
@@ -548,7 +546,17 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       const fin = getPrestationFinancials(p);
 
       // Societe filter
-      const matchesSociete = filterSocieteId === 'ALL' || p.societeId === filterSocieteId;
+      const isSocAll = !filterSocieteId || filterSocieteId === 'ALL';
+      const filterSocLower = (filterSocieteId || '').toLowerCase().trim();
+      const socNameInList = (p.societeNom || '').toLowerCase().trim();
+      const socIdInList = (p.societeId || '').toLowerCase().trim();
+      const matchedSocObj = societes.find(s => (s.id && s.id.toLowerCase() === filterSocLower) || (s.nom && s.nom.toLowerCase() === filterSocLower));
+      
+      const matchesSociete = isSocAll || 
+        socIdInList === filterSocLower || 
+        socNameInList === filterSocLower ||
+        (matchedSocObj && (socIdInList === matchedSocObj.id.toLowerCase() || socNameInList === matchedSocObj.nom.toLowerCase()));
+
       // Sous-societe filter
       const matchesSousSoc = filterSousSociete === 'ALL' || (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
       
@@ -602,18 +610,18 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
       // Search term filter
       const personne = getPersonne(p.personneId);
-      const searchLower = searchTerm.toLowerCase().trim();
+      const searchLower = (searchTerm || '').toLowerCase().trim();
       const matchesSearch = 
         !searchLower ||
-        p.numeroFacture.toLowerCase().includes(searchLower) ||
+        (p.numeroFacture || '').toLowerCase().includes(searchLower) ||
         (p.nomAgent && p.nomAgent.toLowerCase().includes(searchLower)) ||
-        (personne && personne.nomPrenom.toLowerCase().includes(searchLower)) ||
-        (personne && personne.matricule.toLowerCase().includes(searchLower)) ||
+        (personne && (personne.nomPrenom || '').toLowerCase().includes(searchLower)) ||
+        (personne && (personne.matricule || '').toLowerCase().includes(searchLower)) ||
         (p.matricule && p.matricule.toLowerCase().includes(searchLower)) ||
         (p.sousSociete && p.sousSociete.toLowerCase().includes(searchLower)) ||
         (p.societeNom && p.societeNom.toLowerCase().includes(searchLower)) ||
         (p.commentaires && p.commentaires.toLowerCase().includes(searchLower)) ||
-        p.lignes.some(l => l.libelle.toLowerCase().includes(searchLower) || l.code.toLowerCase().includes(searchLower));
+        (p.lignes || []).some(l => (l.libelle || '').toLowerCase().includes(searchLower) || (l.code || '').toLowerCase().includes(searchLower));
 
       return matchesSociete && matchesSousSoc && matchesStatus && matchesDateDebut && matchesDateFin && matchesSolde && matchesReconciliation && matchesRetard3Mois && matchesSearch;
     });
@@ -1083,7 +1091,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const { prestation, ligne } = lineEditContext;
     
     // Update the line
-    const updatedLignes = prestation.lignes.map(l => {
+    const updatedLignes = (prestation.lignes || []).map(l => {
       if (l.id === ligne.id) {
         return {
           ...l,
@@ -1510,7 +1518,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         'Total Payé': fin.totalPaye,
         'Reste à Payer': fin.resteAPayer,
         'Statut': fin.statut,
-        'Nombre d\'actes': p.lignes.length,
+        'Nombre d\'actes': p?.lignes?.length,
         'Observations': p.commentaires || '',
       };
     });
@@ -2002,16 +2010,23 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredAndSortedList.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="py-10 text-center text-slate-400 space-y-2">
-                    <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
-                    <div>Aucun dossier de prestation ne correspond aux filtres sélectionnés.</div>
-                    {activeFiltersCount > 0 && (
-                      <button
-                        onClick={handleResetFilters}
-                        className="text-xs text-indigo-600 hover:underline font-medium"
-                      >
-                        Réinitialiser tous les filtres
-                      </button>
+                  <td colSpan={13} className="py-12 text-center text-slate-500 space-y-3">
+                    <AlertCircle className="w-10 h-10 text-slate-300 mx-auto" />
+                    <div className="font-semibold text-slate-700 text-sm">
+                      {prestations.length > 0
+                        ? `${prestations.length} dossier(s) de prestation enregistré(s) dans la base, mais masqué(s) par les filtres actifs.`
+                        : 'Aucun dossier de prestation enregistré pour le moment.'}
+                    </div>
+                    {prestations.length > 0 && (
+                      <div className="flex items-center justify-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleResetFilters}
+                          className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          Réinitialiser tous les filtres & Afficher les {prestations.length} dossiers
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -2192,7 +2207,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                 <span className="flex items-center gap-1.5 text-indigo-700">
                                   <span>Lignes de Prestation (Actes Médicaux & Montants)</span>
                                 </span>
-                                <span className="text-slate-400 lowercase font-normal">{prestation.lignes.length} actes dans cette prescription</span>
+                                <span className="text-slate-400 lowercase font-normal">{prestation?.lignes?.length || 0} actes dans cette prescription</span>
                               </div>
                               <table className="w-full text-xs">
                                 <thead className="text-[10px] text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
@@ -2210,7 +2225,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                  {prestation.lignes.map(ligne => {
+                                  {(prestation.lignes || []).map(ligne => {
                                     const lFin = getLineFinancials(ligne, prestation);
                                     const actMatchTooltip = lFin.matchingSettlementLine 
                                       ? `Concordance trouvée : Règlement bordereau ${lFin.matchingSettlementLine.numeroBordereau} (${formatMoney(lFin.matchingSettlementLine.montantPaye)})`
@@ -2451,7 +2466,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 <span className="flex items-center gap-1.5 text-indigo-700">
                   <span>Lignes de Prestation (Actes Médicaux & Montants)</span>
                 </span>
-                <span className="text-slate-400 lowercase font-normal">{viewingPrestation.lignes.length} actes dans cette prescription</span>
+                <span className="text-slate-400 lowercase font-normal">{viewingPrestation?.lignes?.length || 0} actes dans cette prescription</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -2469,7 +2484,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {viewingPrestation.lignes.map(ligne => {
+                    {(viewingPrestation.lignes || []).map(ligne => {
                       const lFin = getLineFinancials(ligne, viewingPrestation);
                       return (
                         <tr key={ligne.id} className="hover:bg-slate-50 transition">
@@ -2528,7 +2543,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
               <div className="bg-emerald-50 p-2.5 rounded-lg">
                 <span className="text-[10px] text-emerald-700 block">Total Remboursé</span>
                 <span className="font-bold text-emerald-800">
-                  {formatMoney(viewingPrestation.lignes.reduce((s, l) => s + (l.totalPaye || 0), 0))}
+                  {formatMoney((viewingPrestation.lignes || []).reduce((s, l) => s + (l.totalPaye || 0), 0))}
                 </span>
               </div>
             </div>
@@ -2688,7 +2703,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                         />
                       </div>
 
-                      {formData.lignes && formData.lignes.length > 1 && (
+                      {formData.lignes && formData?.lignes?.length > 1 && (
                         <button
                           type="button"
                           onClick={() => handleRemoveLine(idx)}

@@ -21,7 +21,7 @@ export const HistoriqueView: React.FC<HistoriqueViewProps> = ({
   const [selectedMode, setSelectedMode] = useState('ALL');
 
   const filteredPaiements = paiements.filter(p => {
-    const matchesSoc = selectedSocieteId === 'ALL' || p.societeId === selectedSocieteId;
+    const matchesSoc = !selectedSocieteId || selectedSocieteId === 'ALL' || p.societeId === selectedSocieteId;
     const matchesMode = selectedMode === 'ALL' || p.modePaiement === selectedMode;
     const matchesDateStart = !dateStart || p.datePaiement >= dateStart;
     const matchesDateEnd = !dateEnd || p.datePaiement <= dateEnd;

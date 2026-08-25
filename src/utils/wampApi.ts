@@ -1,23 +1,48 @@
 /**
  * Service de synchronisation API Backend WAMP (PHP / MySQL)
+ * Assure une communication 100% directe et atomique avec la base de données MySQL
  */
 
-export async function checkWampDbConnection(): Promise<{ connected: boolean; error?: string }> {
+export interface DbConnectionResult {
+  connected: boolean;
+  database?: string;
+  message?: string;
+  error?: string;
+  stats?: {
+    societes: number;
+    personnes?: number;
+    prestations: number;
+    paiements: number;
+  };
+  server_time?: string;
+}
+
+export async function checkWampDbConnection(): Promise<DbConnectionResult> {
   try {
-    const res = await fetch('api.php?action=check_db', { cache: 'no-store' });
+    const res = await fetch('api.php?action=check_db', {
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     let json: any = null;
     try {
       json = await res.json();
     } catch {
-      // Body not JSON
+      // Body is not JSON (e.g. Apache error page or PHP fatal error)
     }
 
     if (!res.ok || !json || json.success === false) {
-      const errMsg = json?.error || (res.status !== 200 ? `Erreur HTTP ${res.status}: Base de données WAMP / MySQL non accessible.` : 'La connexion à la base de données MySQL a échoué.');
+      const errMsg = json?.error || (res.status !== 200 
+        ? `Erreur HTTP ${res.status}: Le serveur WAMP n'a pas pu exécuter la requête MySQL.` 
+        : 'La connexion à la base de données MySQL a échoué.');
       return { connected: false, error: errMsg };
     }
 
-    return { connected: true };
+    return { 
+      connected: true, 
+      database: json.data?.database || 'suivi_assurance_salfa',
+      message: json.data?.message,
+      stats: json.data?.stats,
+      server_time: json.data?.server_time
+    };
   } catch (err: any) {
     return {
       connected: false,
@@ -26,135 +51,122 @@ export async function checkWampDbConnection(): Promise<{ connected: boolean; err
   }
 }
 
-export async function fetchWampData(action: string): Promise<any[] | null> {
+export async function fetchWampData<T = any>(action: string): Promise<T[] | null> {
   try {
-    const res = await fetch(`api.php?action=${action}`, { cache: 'no-store' });
+    const res = await fetch(`api.php?action=${action}&_t=${Date.now()}`, {
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     if (!res.ok) {
-      console.error(`[fetchWampData] HTTP ${res.status} pour action=${action}`);
-      return null;
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || `Erreur HTTP ${res.status}`);
     }
     const json = await res.json();
-    return json && json.success && Array.isArray(json.data) ? json.data : null;
-  } catch (err) {
-    console.error(`[fetchWampData] Exception pour action=${action}:`, err);
-    return null;
+    if (json && json.success && Array.isArray(json.data)) {
+      return json.data;
+    }
+    return [];
+  } catch (err: any) {
+    console.error(`[fetchWampData] Erreur sur ${action}:`, err?.message || err);
+    throw err;
+  }
+}
+
+export async function saveWampData<T = any>(action: string, data: T): Promise<any> {
+  try {
+    const res = await fetch(`api.php?action=${action}`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache'
+      },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || `Erreur enregistrement MySQL (${res.status})`);
+    }
+    return await res.json();
+  } catch (err: any) {
+    console.error(`[saveWampData] Erreur sur ${action}:`, err?.message || err);
+    throw err;
   }
 }
 
 /**
- * Enregistre un objet ou un lot d'objets dans MySQL via l'API PHP.
- * Si le lot est volumineux (> 50 éléments), le découpe automatiquement en sous-lots
- * pour éviter d'excéder les limites post_max_size / memory_limit de PHP.
+ * Enregistrement en lot (Bulk Import) sécurisé avec découpage en lots (chunks) et tolérance aux pannes/deadlocks
  */
-export async function saveWampData(action: string, data: any): Promise<{ success: boolean; message?: string; count?: number; errors?: string[] } | null> {
-  try {
-    if (!data) return { success: true, count: 0 };
+export async function saveWampDataBulk<T = any>(action: string, items: T[], chunkSize: number = 50): Promise<any> {
+  if (!items || items.length === 0) return { success: true, count: 0 };
+  
+  // Découpage en sous-lots pour éviter les verrous de table massifs et les deadlocks InnoDB
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
 
-    // Si c'est un tableau de plus de 50 éléments, envoyer par blocs de 50
-    if (Array.isArray(data) && data.length > 50) {
-      let totalSaved = 0;
-      const allErrors: string[] = [];
-      const chunkSize = 50;
-      for (let i = 0; i < data.length; i += chunkSize) {
-        const chunk = data.slice(i, i + chunkSize);
-        const res = await fetch(`api.php?action=${action}`, {
+  let totalSaved = 0;
+
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c];
+    let retries = 3;
+    let success = false;
+    let lastError: any = null;
+
+    while (retries > 0 && !success) {
+      try {
+        const res = await fetch(`api.php?action=${action}&bulk=1`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache'
+          },
           body: JSON.stringify(chunk)
         });
-        if (res.ok) {
-          const json = await res.json().catch(() => null);
-          if (json && json.success) {
-            totalSaved += json.count ?? chunk.length;
-            if (json.errors && json.errors.length > 0) {
-              allErrors.push(...json.errors);
-            }
-          } else if (json && !json.success) {
-            allErrors.push(json.error || `Erreur lors de l'enregistrement du lot ${i / chunkSize + 1}`);
-          }
-        } else {
-          allErrors.push(`Erreur HTTP ${res.status} sur le lot ${i / chunkSize + 1}`);
+
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(errJson?.error || `Erreur enregistrement en lot MySQL (${res.status})`);
+        }
+
+        const resData = await res.json();
+        totalSaved += (resData?.data?.count || chunk.length);
+        success = true;
+      } catch (err: any) {
+        lastError = err;
+        retries--;
+        const msg = String(err?.message || '');
+        const isDeadlock = msg.includes('1213') || msg.includes('40001') || msg.toLowerCase().includes('deadlock') || msg.toLowerCase().includes('lock');
+        
+        if (isDeadlock && retries > 0) {
+          // Attente progressive (100ms, 250ms) avant nouvelle tentative
+          await new Promise(r => setTimeout(r, (4 - retries) * 120));
+          continue;
+        }
+
+        if (retries === 0) {
+          console.error(`[saveWampDataBulk] Erreur critique sur le lot ${c + 1}/${chunks.length} pour ${action}:`, err?.message || err);
+          throw lastError;
         }
       }
-      return {
-        success: totalSaved > 0 || data.length === 0,
-        count: totalSaved,
-        errors: allErrors,
-        message: `${totalSaved}/${data.length} enregistrements sauvegardés dans MySQL`
-      };
     }
-
-    const res = await fetch(`api.php?action=${action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-
-    if (!res.ok) {
-      console.error(`[saveWampData] HTTP ${res.status} pour action=${action}`);
-      return { success: false, message: `Erreur HTTP ${res.status}` };
-    }
-
-    const json = await res.json().catch(() => null);
-    if (!json) {
-      return { success: false, message: 'Réponse API non-JSON reçue du serveur' };
-    }
-    if (!json.success) {
-      console.error(`[saveWampData] Échec API action=${action}:`, json.error || json.message);
-    }
-    if (json.errors && json.errors.length > 0) {
-      console.warn(`[saveWampData] ${json.errors.length} avertissement(s) pour action=${action}:`, json.errors);
-    }
-    return json;
-  } catch (err: any) {
-    console.error(`[saveWampData] Exception pour action=${action}:`, err);
-    return { success: false, message: err?.message || 'Exception réseau ou serveur WAMP' };
   }
+
+  return { success: true, count: totalSaved };
 }
 
-export async function deleteWampData(action: string, id: string): Promise<{ success: boolean; message?: string } | null> {
+export async function deleteWampData(action: string, id: string): Promise<any> {
   try {
     const res = await fetch(`api.php?action=${action}&id=${encodeURIComponent(id)}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { 'Cache-Control': 'no-cache' }
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || `Erreur suppression MySQL (${res.status})`);
+    }
     return await res.json();
-  } catch (err) {
-    console.error(`[deleteWampData] Exception pour action=${action}&id=${id}:`, err);
-    return null;
-  }
-}
-
-/* ===================================================================== */
-/*  Paramètres applicatifs — stockés STRICTEMENT dans MySQL (WAMP)       */
-/* ===================================================================== */
-
-/** Récupère la valeur d'un paramètre (ou null si absent / indisponible). */
-export async function fetchWampParametre<T = any>(cle: string): Promise<T | null> {
-  try {
-    const res = await fetch(`api.php?action=parametres&cle=${encodeURIComponent(cle)}`, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json && json.success ? (json.data as T) : null;
-  } catch (err) {
-    console.error(`[fetchWampParametre] Exception pour cle=${cle}:`, err);
-    return null;
-  }
-}
-
-/** Enregistre un paramètre dans MySQL (upsert clé/valeur JSON). */
-export async function saveWampParametre(cle: string, valeur: any): Promise<boolean> {
-  try {
-    const res = await fetch('api.php?action=parametres', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cle, valeur })
-    });
-    if (!res.ok) return false;
-    const json = await res.json().catch(() => null);
-    return !!(json && json.success);
-  } catch (err) {
-    console.error(`[saveWampParametre] Exception pour cle=${cle}:`, err);
-    return false;
+  } catch (err: any) {
+    console.error(`[deleteWampData] Erreur sur ${action} (ID: ${id}):`, err?.message || err);
+    throw err;
   }
 }

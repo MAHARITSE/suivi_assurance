@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   AlertTriangle,
   Search,
@@ -24,8 +24,6 @@ import {
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
-import { fetchWampParametre, saveWampParametre } from '../utils/wampApi';
-import { IS_WAMP_BUILD } from '../utils/buildTarget';
 import { FacturesRejetsGroupedTable, GroupedRejetFacture, RejetFactureSortField } from './FacturesRejetsGroupedTable';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -105,18 +103,11 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
     }
   };
 
-  // État des contestations.
-  // - VERSION WAMP : STRICTEMENT MYSQL — persisté dans la table `parametres`
-  //   de la base MySQL WAMP (aucun localStorage).
-  // - AUTRES VERSIONS : comportement d'origine (localStorage).
-  const CONTEST_KEY = 'rejets_contestations_map';
-  const DISMISSED_KEY = 'rejets_dismissed_ids';
-
+  // Local state for tracking contestation status/notes overrides with LocalStorage persistence
   const [contestationsMap, setContestationsMap] = useState<Record<string, {
     statut: 'À traiter' | 'En contestation' | 'Régularisé' | 'Rejet définitif';
     note?: string;
   }>>(() => {
-    if (IS_WAMP_BUILD) return {};
     try {
       const saved = localStorage.getItem('suivi_rejets_contestations_map');
       if (saved) return JSON.parse(saved);
@@ -126,7 +117,6 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
 
   // Dismissed/hidden rejets set
   const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
-    if (IS_WAMP_BUILD) return [];
     try {
       const saved = localStorage.getItem('suivi_rejets_dismissed_ids');
       if (saved) return JSON.parse(saved);
@@ -135,51 +125,12 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
   });
   const [showDismissed, setShowDismissed] = useState<boolean>(false);
 
-  // VERSION WAMP : chargement initial STRICTEMENT depuis MySQL
-  // (clé/valeur JSON dans la table `parametres`)
-  useEffect(() => {
-    if (!IS_WAMP_BUILD) return;
-    let cancelled = false;
-    (async () => {
-      const [savedContestations, savedDismissed] = await Promise.all([
-        fetchWampParametre<Record<string, { statut: any; note?: string }>>(CONTEST_KEY),
-        fetchWampParametre<string[]>(DISMISSED_KEY),
-      ]);
-      if (cancelled) return;
-      if (savedContestations && typeof savedContestations === 'object') {
-        setContestationsMap(savedContestations);
-      }
-      if (Array.isArray(savedDismissed)) {
-        setDismissedIds(savedDismissed.filter((x) => typeof x === 'string'));
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const persistContestations = (updated: typeof contestationsMap) => {
-    if (IS_WAMP_BUILD) {
-      void saveWampParametre(CONTEST_KEY, updated);
-    } else {
-      try {
-        localStorage.setItem('suivi_rejets_contestations_map', JSON.stringify(updated));
-      } catch {}
-    }
-  };
-
-  const persistDismissed = (updated: string[]) => {
-    if (IS_WAMP_BUILD) {
-      void saveWampParametre(DISMISSED_KEY, updated);
-    } else {
-      try {
-        localStorage.setItem('suivi_rejets_dismissed_ids', JSON.stringify(updated));
-      } catch {}
-    }
-  };
-
   const handleDismissRejet = (id: string, numFacture: string) => {
     setDismissedIds(prev => {
       const updated = Array.from(new Set([...prev, id, numFacture]));
-      persistDismissed(updated);
+      try {
+        localStorage.setItem('suivi_rejets_dismissed_ids', JSON.stringify(updated));
+      } catch {}
       return updated;
     });
   };
@@ -187,7 +138,9 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
   const handleRestoreRejet = (id: string, numFacture: string) => {
     setDismissedIds(prev => {
       const updated = prev.filter(item => item !== id && item !== numFacture);
-      persistDismissed(updated);
+      try {
+        localStorage.setItem('suivi_rejets_dismissed_ids', JSON.stringify(updated));
+      } catch {}
       return updated;
     });
   };
@@ -407,8 +360,8 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
       }
 
       // Filtre Tiers-Payeur Global
-      const effectiveSocFilter = selectedSocieteId !== 'ALL' ? selectedSocieteId : filterSociete;
-      const matchesSoc = effectiveSocFilter === 'ALL' || item.societeId === effectiveSocFilter;
+      const effectiveSocFilter = (selectedSocieteId && selectedSocieteId !== 'ALL') ? selectedSocieteId : filterSociete;
+      const matchesSoc = !effectiveSocFilter || effectiveSocFilter === 'ALL' || item.societeId === effectiveSocFilter;
 
       // Type de rejet
       const matchesType = filterType === 'ALL' || item.type === filterType;
@@ -592,7 +545,9 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
           note: modalNote,
         },
       };
-      persistContestations(updated);
+      try {
+        localStorage.setItem('suivi_rejets_contestations_map', JSON.stringify(updated));
+      } catch {}
       return updated;
     });
     setSelectedRejetModal(null);
