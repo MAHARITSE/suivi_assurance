@@ -12,8 +12,12 @@
  *    GET    api.php?action=familles            → liste des familles
  *    GET    api.php?action=prestations         → prestations (+ lignes)
  *    GET    api.php?action=paiements           → paiements (+ lignes)
+ *    GET    api.php?action=parametres          → réglages applicatifs (clé/valeur, stockés en MySQL)
  *    POST   api.php?action=<entite>            → création / mise à jour (upsert unitaire ou lot)
  *    DELETE api.php?action=<entite>&id=<id>    → suppression (lignes enfants incluses)
+ *
+ *  NOTE STRICTE : l'application ne charge AUCUNE donnée en dehors de cette
+ *  base MySQL WAMP — ni localStorage, ni données codées en dur dans le code.
  *
  *  Exigences : WAMP Server (Apache 2.4, PHP >= 8.0 avec l'extension
  *  pdo_mysql activée), MySQL 5.7+ / 8.x ou MariaDB 10.4+.
@@ -388,6 +392,22 @@ function list_paiements(PDO $pdo): array
             'lignes'            => $lignesByPaiement[$r['id']] ?? [],
             'notes'             => nullable_str($r['notes']),
         ];
+    }
+    return $data;
+}
+
+/** Paramètres applicatifs (clé/valeur JSON stockée en MySQL). */
+function list_parametres(PDO $pdo): array
+{
+    try {
+        $rows = fetch_all($pdo, 'SELECT `cle`, `valeur` FROM `parametres` ORDER BY `cle` ASC');
+    } catch (Throwable $e) {
+        return [];
+    }
+    $data = [];
+    foreach ($rows as $r) {
+        $decoded = json_decode((string) $r['valeur'], true);
+        $data[$r['cle']] = $decoded !== null ? $decoded : $r['valeur'];
     }
     return $data;
 }
@@ -803,6 +823,27 @@ function save_paiement(PDO $pdo, array $o): void
     }
 }
 
+/** Enregistre (upsert) un paramètre applicatif clé/valeur en MySQL. */
+function save_parametre(PDO $pdo, array $o): void
+{
+    $cle = trim((string) ($o['cle'] ?? $o['key'] ?? ''));
+    if ($cle === '') {
+        throw new InvalidArgumentException('Paramètre sans clé (« cle » obligatoire).');
+    }
+    $valeur = array_key_exists('valeur', $o) ? $o['valeur'] : (array_key_exists('value', $o) ? $o['value'] : null);
+    $json = json_encode($valeur, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    $st = $pdo->prepare('SELECT COUNT(*) FROM `parametres` WHERE `cle` = ?');
+    $st->execute([$cle]);
+    if ((int) $st->fetchColumn() > 0) {
+        $st = $pdo->prepare('UPDATE `parametres` SET `valeur` = ?, `date_modification` = ? WHERE `cle` = ?');
+        $st->execute([$json, date('c'), $cle]);
+    } else {
+        $st = $pdo->prepare('INSERT INTO `parametres` (`cle`, `valeur`, `date_modification`) VALUES (?, ?, ?)');
+        $st->execute([$cle, $json, date('c')]);
+    }
+}
+
 /** Supprime une entité (et ses lignes enfants le cas échéant). */
 function handle_delete(PDO $pdo, string $action, string $label): void
 {
@@ -850,9 +891,22 @@ function handle_delete(PDO $pdo, string $action, string $label): void
 /*  Test de connexion (check_db) — BLOCANT pour l'application            */
 /* ===================================================================== */
 
+/** Crée la table `parametres` si elle n'existe pas encore (migration douce, sans perte de données). */
+function ensure_parametres_table(PDO $pdo): void
+{
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS `parametres` (
+            `cle`               VARCHAR(100) NOT NULL,
+            `valeur`            LONGTEXT     DEFAULT NULL,
+            `date_modification` VARCHAR(30)  DEFAULT NULL,
+            PRIMARY KEY (`cle`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+}
+
 function handle_check_db(): void
 {
-    $tables = ['societes', 'personnes', 'familles', 'prestations', 'lignes_prestation', 'paiements', 'lignes_paiement'];
+    $tables = ['societes', 'personnes', 'familles', 'prestations', 'lignes_prestation', 'paiements', 'lignes_paiement', 'parametres'];
 
     try {
         $pdo = get_pdo();
@@ -860,6 +914,13 @@ function handle_check_db(): void
         // Le serveur MySQL est injoignable / identifiants invalides :
         // l'application web affichera son écran de blocage.
         fail('Connexion MySQL impossible : ' . $e->getMessage());
+    }
+
+    // Migration douce : créer `parametres` si la base date d'une version précédente
+    try {
+        ensure_parametres_table($pdo);
+    } catch (Throwable $e) {
+        // La table sera signalée manquante ci-dessous si la création échoue.
     }
 
     $counts = [];
@@ -904,7 +965,7 @@ try {
         handle_check_db();
     }
 
-    $knownActions = ['societes', 'personnes', 'familles', 'prestations', 'paiements'];
+    $knownActions = ['societes', 'personnes', 'familles', 'prestations', 'paiements', 'parametres'];
     if (!in_array($action, $knownActions, true)) {
         fail(
             'Action inconnue : « ' . $action . ' ». Actions disponibles : check_db, ' . implode(', ', $knownActions) . '.',
@@ -916,6 +977,20 @@ try {
 
     /* ------------------------------ GET ------------------------------ */
     if ($method === 'GET') {
+        // Paramètres applicatifs : lecture d'une clé précise ou de toutes les clés
+        if ($action === 'parametres') {
+            try {
+                ensure_parametres_table($pdo);
+            } catch (Throwable $e) {
+                // ignore — list_parametres renverra un tableau vide
+            }
+            $cle = trim((string) ($_GET['cle'] ?? ''));
+            $all = list_parametres($pdo);
+            if ($cle !== '') {
+                json_out(['success' => true, 'data' => array_key_exists($cle, $all) ? $all[$cle] : null]);
+            }
+            json_out(['success' => true, 'count' => count($all), 'data' => $all]);
+        }
         switch ($action) {
             case 'societes':
                 $data = list_societes($pdo);
@@ -951,6 +1026,14 @@ try {
             }
         }
 
+        if ($action === 'parametres') {
+            try {
+                ensure_parametres_table($pdo);
+            } catch (Throwable $e) {
+                fail('Table « parametres » indisponible : ' . $e->getMessage());
+            }
+        }
+
         $saved = 0;
         $errors = [];
 
@@ -962,6 +1045,9 @@ try {
                     switch ($action) {
                         case 'societes':
                             save_societe($pdo, $item);
+                            break;
+                        case 'parametres':
+                            save_parametre($pdo, $item);
                             break;
                         case 'personnes':
                             save_personne($pdo, $item);
@@ -1001,6 +1087,25 @@ try {
 
     /* ---------------------------- DELETE ----------------------------- */
     if ($method === 'DELETE') {
+        // Suppression d'un paramètre applicatif par sa clé
+        if ($action === 'parametres') {
+            $cle = trim((string) ($_GET['cle'] ?? $_GET['id'] ?? ''));
+            if ($cle === '') {
+                fail('Paramètre « cle » manquant dans l\'URL (DELETE api.php?action=parametres&cle=...).');
+            }
+            try {
+                ensure_parametres_table($pdo);
+            } catch (Throwable $e) {
+                // ignore
+            }
+            $st = $pdo->prepare('DELETE FROM `parametres` WHERE `cle` = ?');
+            $st->execute([$cle]);
+            json_out([
+                'success' => true,
+                'message' => 'Supprimé — paramètre « ' . $cle . ' »',
+                'deleted' => $st->rowCount(),
+            ]);
+        }
         $labels = [
             'societes'    => 'société',
             'personnes'   => 'personne',

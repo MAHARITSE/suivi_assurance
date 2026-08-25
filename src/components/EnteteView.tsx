@@ -25,7 +25,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { EnteteConfig, defaultEnteteConfig } from '../types';
-import { getStoredEnteteConfig, saveStoredEnteteConfig, resetStoredEnteteConfig } from '../utils/enteteStorage';
+import { getStoredEnteteConfig, loadEnteteConfigFromDb, saveStoredEnteteConfig, resetStoredEnteteConfig } from '../utils/enteteStorage';
 import jsPDF from 'jspdf';
 
 interface EnteteViewProps {
@@ -33,11 +33,16 @@ interface EnteteViewProps {
 }
 
 export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
+  // STRICTEMENT MYSQL : la configuration est chargée depuis la base MySQL
+  // WAMP (table `parametres`) et n'existe plus dans aucun stockage local.
   const [config, setConfig] = useState<EnteteConfig>(getStoredEnteteConfig());
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    setConfig(getStoredEnteteConfig());
+    // Recharge la configuration depuis MySQL à chaque ouverture de l'onglet
+    loadEnteteConfigFromDb().then((cfg) => setConfig(cfg));
   }, []);
 
   const handleChange = <K extends keyof EnteteConfig>(key: K, value: EnteteConfig[K]) => {
@@ -69,14 +74,23 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
     handleChange('logoUrl', undefined);
   };
 
-  const handleSave = () => {
-    saveStoredEnteteConfig(config);
-    setSavedSuccess(true);
-    if (onConfigChange) onConfigChange(config);
-    setTimeout(() => setSavedSuccess(false), 3000);
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveError(false);
+    // Écriture STRICTEMENT dans MySQL WAMP (table parametres)
+    const ok = await saveStoredEnteteConfig(config);
+    setIsSaving(false);
+    if (ok) {
+      setSavedSuccess(true);
+      if (onConfigChange) onConfigChange(config);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } else {
+      setSaveError(true);
+      setTimeout(() => setSaveError(false), 6000);
+    }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (window.confirm('Voulez-vous réinitialiser l’en-tête avec les valeurs par défaut de SALFA ?')) {
       const def = resetStoredEnteteConfig();
       setConfig(def);
@@ -220,10 +234,11 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
           <button
             id="save-entete-btn"
             onClick={handleSave}
-            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-sm cursor-pointer"
+            disabled={isSaving}
+            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-sm cursor-pointer disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
-            <span>Enregistrer l'En-tête</span>
+            <span>{isSaving ? 'Enregistrement dans MySQL…' : "Enregistrer l'En-tête"}</span>
           </button>
         </div>
       </div>
@@ -231,7 +246,14 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
       {savedSuccess && (
         <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center space-x-2 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>L'en-tête a été enregistré avec succès et sera appliqué automatiquement à l'ensemble des exports et états PDF !</span>
+          <span>L'en-tête a été enregistré avec succès dans la base MySQL WAMP et sera appliqué automatiquement à l'ensemble des exports et états PDF !</span>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium flex items-center space-x-2 shadow-xs">
+          <CheckCircle2 className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>Échec de l'enregistrement dans MySQL. Vérifiez que WAMP est démarré et que la table « parametres » existe (importez schema.sql via phpMyAdmin).</span>
         </div>
       )}
 

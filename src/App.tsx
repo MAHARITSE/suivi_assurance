@@ -13,16 +13,17 @@ import { FamillesView } from './components/FamillesView';
 import { EtatsView } from './components/EtatsView';
 import { EnteteView } from './components/EnteteView';
 
-import { 
-  initialSocietes, 
-  initialPersonnes, 
-  initialFamilles, 
-  initialPaiements 
+import {
+  initialSocietes,
+  initialPersonnes,
+  initialFamilles,
+  initialPaiements
 } from './data/initialData';
 import { Prestation, Paiement, Societe, Personne, Famille, ActiveTab, EnteteConfig } from './types';
 import { generateMySQLDump } from './utils/sqlExporter';
 import { checkWampDbConnection, fetchWampData, saveWampData, deleteWampData } from './utils/wampApi';
-import { getStoredEnteteConfig } from './utils/enteteStorage';
+import { getStoredEnteteConfig, loadEnteteConfigFromDb } from './utils/enteteStorage';
+import { IS_WAMP_BUILD } from './utils/buildTarget';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -47,18 +48,26 @@ export function App() {
   const [dbError, setDbError] = useState<string | null>(null);
   const [isRetryingDb, setIsRetryingDb] = useState(false);
 
-  // Data states — MySQL is the single source of truth
-  const [societes, setSocietes] = useState<Societe[]>(initialSocietes);
-  const [personnes, setPersonnes] = useState<Personne[]>(initialPersonnes);
-  const [familles, setFamilles] = useState<Famille[]>(initialFamilles);
+  // Data states
+  // - VERSION WAMP (build:wamp) : STRICTEMENT MYSQL — aucune donnée codée en
+  //   dur, aucun localStorage. Tous les états démarrent VIDES et sont remplis
+  //   exclusivement depuis la base MySQL WAMP.
+  // - AUTRES VERSIONS (dev/preview/hébergé) : comportement d'origine avec
+  //   données initiales locales et sauvegarde localStorage.
+  const [societes, setSocietes] = useState<Societe[]>(IS_WAMP_BUILD ? [] : initialSocietes);
+  const [personnes, setPersonnes] = useState<Personne[]>(IS_WAMP_BUILD ? [] : initialPersonnes);
+  const [familles, setFamilles] = useState<Famille[]>(IS_WAMP_BUILD ? [] : initialFamilles);
   const [prestations, setPrestations] = useState<Prestation[]>([]);
-  const [paiements, setPaiements] = useState<Paiement[]>(initialPaiements);
+  const [paiements, setPaiements] = useState<Paiement[]>(IS_WAMP_BUILD ? [] : initialPaiements);
 
   // Modals quick trigger
   const [isPrestationModalOpen, setIsPrestationModalOpen] = useState(false);
   const [isPaiementModalOpen, setIsPaiementModalOpen] = useState(false);
 
-  // Check database connection and load WAMP data directly from MySQL
+  // VERSION WAMP : chargement STRICTEMENT depuis MySQL — aucune donnée codée
+  // en dur, aucun amorçage local, aucun localStorage. Ce qui est affiché =
+  // exactement ce que contient la base MySQL WAMP.
+  // AUTRES VERSIONS : comportement d'origine (données initiales si base vide).
   const checkAndLoadWampData = async () => {
     setDbStatus('checking');
     setIsRetryingDb(true);
@@ -82,68 +91,94 @@ export function App() {
         fetchWampData('paiements')
       ]);
 
-      // Sociétés
-      if (Array.isArray(sData)) {
-        if (sData.length > 0) {
+      if (IS_WAMP_BUILD) {
+        // ===== VERSION WAMP : STRICTEMENT MYSQL =====
+        // Les listes reflètent exactement le contenu des tables. Si une table
+        // est vide, l'application affiche une liste vide (les données de
+        // référence sont insérées EN BASE par schema.sql, jamais par le code).
+        if (Array.isArray(sData)) {
           setSocietes(sData);
-        } else {
-          // Si la base MySQL vient d'être créée et est vide, initialiser avec les sociétés standards
-          setSocietes(initialSocietes);
-          await saveWampData('societes', initialSocietes);
         }
-      }
+        if (Array.isArray(pData)) {
+          setPersonnes(pData);
+        }
+        if (Array.isArray(fData)) {
+          setFamilles(fData);
+        }
+        if (Array.isArray(prData)) {
+          setPrestations(prData);
+        }
+        if (Array.isArray(paData)) {
+          setPaiements(paData);
+        }
 
-      // Personnes
-      if (Array.isArray(pData)) {
-        setPersonnes(pData);
-      }
-
-      // Familles
-      if (Array.isArray(fData)) {
-        if (fData.length > 0) {
-          const mergedMap = new Map<string, Famille>();
-          fData.forEach((f: Famille) => {
-            mergedMap.set(f.id, f);
-          });
-
-          const toUpdateList: Famille[] = [];
-          initialFamilles.forEach((initF: Famille) => {
-            const existing = Array.from(mergedMap.values()).find(
-              f => f.id === initF.id || f.code.toUpperCase() === initF.code.toUpperCase()
-            );
-
-            if (existing) {
-              const combinedAliases = Array.from(new Set([...(initF.aliases || []), ...(existing.aliases || [])]));
-              if (!existing.aliases || existing.aliases.length < combinedAliases.length) {
-                const updatedF = { ...existing, aliases: combinedAliases };
-                mergedMap.set(existing.id, updatedF);
-                toUpdateList.push(updatedF);
-              }
-            } else {
-              mergedMap.set(initF.id, initF);
-              toUpdateList.push(initF);
-            }
-          });
-
-          if (toUpdateList.length > 0) {
-            await saveWampData('familles', toUpdateList);
+        // Configuration de l'en-tête : chargée depuis MySQL (table parametres)
+        const enteteFromDb = await loadEnteteConfigFromDb();
+        setEnteteConfig(enteteFromDb);
+      } else {
+        // ===== AUTRES VERSIONS : comportement d'origine, inchangé =====
+        // Sociétés
+        if (Array.isArray(sData)) {
+          if (sData.length > 0) {
+            setSocietes(sData);
+          } else {
+            setSocietes(initialSocietes);
+            await saveWampData('societes', initialSocietes);
           }
-
-          setFamilles(Array.from(mergedMap.values()));
-        } else {
-          setFamilles(initialFamilles);
-          await saveWampData('familles', initialFamilles);
         }
-      }
 
-      // Prestations
-      if (Array.isArray(prData)) {
-        setPrestations(prData);
-      }
+        // Personnes
+        if (Array.isArray(pData)) {
+          setPersonnes(pData);
+        }
 
-      // Paiements
-      if (Array.isArray(paData)) {
-        setPaiements(paData);
+        // Familles
+        if (Array.isArray(fData)) {
+          if (fData.length > 0) {
+            const mergedMap = new Map<string, Famille>();
+            fData.forEach((f: Famille) => {
+              mergedMap.set(f.id, f);
+            });
+
+            const toUpdateList: Famille[] = [];
+            initialFamilles.forEach((initF: Famille) => {
+              const existing = Array.from(mergedMap.values()).find(
+                f => f.id === initF.id || f.code.toUpperCase() === initF.code.toUpperCase()
+              );
+
+              if (existing) {
+                const combinedAliases = Array.from(new Set([...(initF.aliases || []), ...(existing.aliases || [])]));
+                if (!existing.aliases || existing.aliases.length < combinedAliases.length) {
+                  const updatedF = { ...existing, aliases: combinedAliases };
+                  mergedMap.set(existing.id, updatedF);
+                  toUpdateList.push(updatedF);
+                }
+              } else {
+                mergedMap.set(initF.id, initF);
+                toUpdateList.push(initF);
+              }
+            });
+
+            if (toUpdateList.length > 0) {
+              await saveWampData('familles', toUpdateList);
+            }
+
+            setFamilles(Array.from(mergedMap.values()));
+          } else {
+            setFamilles(initialFamilles);
+            await saveWampData('familles', initialFamilles);
+          }
+        }
+
+        // Prestations
+        if (Array.isArray(prData)) {
+          setPrestations(prData);
+        }
+
+        // Paiements
+        if (Array.isArray(paData)) {
+          setPaiements(paData);
+        }
       }
     } catch (err: any) {
       console.error('Erreur chargement WAMP:', err);
@@ -158,8 +193,10 @@ export function App() {
     checkAndLoadWampData();
   }, []);
 
-  // Sync to localStorage as passive backup
+  // Sauvegarde passive localStorage — DÉSACTIVÉE en version WAMP
+  // (mode strictement MySQL : rien n'est persisté dans le navigateur).
   useEffect(() => {
+    if (IS_WAMP_BUILD) return;
     if (dbStatus === 'connected') {
       try {
         localStorage.setItem('suivi_assurance_mcicare_societes', JSON.stringify(societes));
@@ -168,6 +205,7 @@ export function App() {
   }, [societes, dbStatus]);
 
   useEffect(() => {
+    if (IS_WAMP_BUILD) return;
     if (dbStatus === 'connected') {
       try {
         localStorage.setItem('suivi_assurance_mcicare_personnes', JSON.stringify(personnes));
@@ -176,6 +214,7 @@ export function App() {
   }, [personnes, dbStatus]);
 
   useEffect(() => {
+    if (IS_WAMP_BUILD) return;
     if (dbStatus === 'connected') {
       try {
         localStorage.setItem('suivi_assurance_mcicare_familles', JSON.stringify(familles));
@@ -184,6 +223,7 @@ export function App() {
   }, [familles, dbStatus]);
 
   useEffect(() => {
+    if (IS_WAMP_BUILD) return;
     if (dbStatus === 'connected') {
       try {
         localStorage.setItem('suivi_assurance_mcicare_prestations', JSON.stringify(prestations));
@@ -192,6 +232,7 @@ export function App() {
   }, [prestations, dbStatus]);
 
   useEffect(() => {
+    if (IS_WAMP_BUILD) return;
     if (dbStatus === 'connected') {
       try {
         localStorage.setItem('suivi_assurance_mcicare_paiements', JSON.stringify(paiements));

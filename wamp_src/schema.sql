@@ -194,6 +194,19 @@ CREATE TABLE `familles` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
+-- Table `parametres` (réglages applicatifs : en-tête, états des rejets…)
+--  Stockage clé/valeur JSON — TOUT est persisté dans MySQL,
+--  l'application n'utilise AUCUN stockage local navigateur.
+-- --------------------------------------------------------
+DROP TABLE IF EXISTS `parametres`;
+CREATE TABLE `parametres` (
+  `cle`               VARCHAR(100) NOT NULL,
+  `valeur`            LONGTEXT     DEFAULT NULL,
+  `date_modification` VARCHAR(30)  DEFAULT NULL,
+  PRIMARY KEY (`cle`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
 -- Données initiales : Sociétés d'assurance principales
 -- --------------------------------------------------------
 INSERT INTO `societes` (`id`, `nom`, `code`, `contact`, `telephone`, `email`, `adresse`, `taux_couverture_defaut`) VALUES

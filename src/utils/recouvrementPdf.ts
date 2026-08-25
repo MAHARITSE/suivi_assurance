@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { Prestation, Paiement, Societe, Personne, EnteteConfig, Famille } from '../types';
 import { formatMoney, formatDate } from './formatters';
 import { getStoredEnteteConfig } from './enteteStorage';
+import { IS_WAMP_BUILD } from './buildTarget';
 import { initialFamilles } from '../data/initialData';
 
 export interface RecouvrementItem {
@@ -734,14 +735,19 @@ function getFullActeLabel(code?: string, libelle?: string, familles?: Famille[])
   const cleanCode = (code || '').toUpperCase().trim();
   const cleanLib = (libelle || '').trim();
 
-  // Recherche dans les familles définies ou initiales
-  const matchedFam = familles?.find(f => 
-    f.code.toUpperCase() === cleanCode || 
-    (f.aliases && f.aliases.some(a => a.toUpperCase() === cleanCode))
-  ) || initialFamilles.find(f =>
+  // Recherche dans les familles définies. En version WAMP : STRICTEMENT celles
+  // chargées depuis MySQL (aucun secours codé en dur). Hors WAMP : comportement
+  // d'origine avec secours sur les familles initiales.
+  let matchedFam = familles?.find(f =>
     f.code.toUpperCase() === cleanCode ||
     (f.aliases && f.aliases.some(a => a.toUpperCase() === cleanCode))
   );
+  if (!matchedFam && !IS_WAMP_BUILD) {
+    matchedFam = initialFamilles.find(f =>
+      f.code.toUpperCase() === cleanCode ||
+      (f.aliases && f.aliases.some(a => a.toUpperCase() === cleanCode))
+    );
+  }
 
   if (matchedFam) {
     return matchedFam.libelle;

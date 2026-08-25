@@ -11,10 +11,13 @@ const wampSrcDirectory = path.join(projectRoot, 'wamp_src');
 await rm(wampDirectory, { recursive: true, force: true });
 await mkdir(wampDirectory, { recursive: true });
 
-// Compiler le frontend React avec Vite
+// Compiler le frontend React avec Vite en mode « wamp »
+// (IS_WAMP_BUILD = true dans le code : version STRICTEMENT MYSQL,
+//  aucune donnée chargée en dehors de la base MySQL de WAMP)
 await build({
   configFile: path.join(projectRoot, 'vite.config.ts'),
   root: projectRoot,
+  mode: 'wamp',
   build: {
     outDir: wampDirectory,
     emptyOutDir: false,
