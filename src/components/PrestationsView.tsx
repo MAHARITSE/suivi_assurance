@@ -539,10 +539,20 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     return { lBrut, lPart, lARemb, lTotalPaye, lExclu, lReste, statut, matchingSettlementLine };
   };
 
+  const isReglementPrestation = (p: Prestation) => {
+    return (
+      p.id?.startsWith('prest-autogen') ||
+      Boolean(p.commentaires && (p.commentaires.includes('Prestation générée lors du règlement') || p.commentaires.includes('générée lors du règlement'))) ||
+      Boolean(p.numeroFacture && (p.numeroFacture.startsWith('FACT-FA-') || p.numeroFacture.startsWith('FACT-REG-') || p.numeroFacture.startsWith('FACT-BORD-')))
+    );
+  };
+
   // Status counters for quick badges
   const statusCounts = useMemo(() => {
     let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
-    prestations.forEach(p => {
+    const realPrestations = prestations.filter(p => !isReglementPrestation(p));
+
+    realPrestations.forEach(p => {
       const fin = getPrestationFinancials(p);
       if (fin.statut === 'Payé') {
         paye++;
@@ -557,7 +567,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       }
     });
     return {
-      all: prestations.length,
+      all: realPrestations.length,
       enCours,
       enAttente,
       partiellementPaye,
@@ -569,6 +579,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   // Filtered and Sorted List
   const filteredAndSortedList = useMemo(() => {
     const list = prestations.filter(p => {
+      // Exclude pure settlement imports
+      if (isReglementPrestation(p)) return false;
+
       // Financials
       const fin = getPrestationFinancials(p);
 

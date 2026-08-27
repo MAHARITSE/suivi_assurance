@@ -21,9 +21,15 @@ export function findBestMatchingSociete(
 
   const clean = (rawName || '').toLowerCase().trim();
   if (!clean || clean === 'organisme' || clean === 'assurance' || clean === 'client' || clean.includes('ascoma / mci / bsa')) {
-    // Default to MCI CARE or first available society
-    const mci = societes.find(s => s.code.toUpperCase().includes('MCI') || s.nom.toUpperCase().includes('MCI'));
-    return mci || societes[0];
+    if (preferredNameOrId && preferredNameOrId !== 'AUTO' && preferredNameOrId !== 'ALL' && preferredNameOrId !== 'CUSTOM') {
+      const preferred = societes.find(s => 
+        s.id === preferredNameOrId || 
+        s.nom.toLowerCase().trim() === preferredNameOrId.toLowerCase().trim() ||
+        s.code.toLowerCase().trim() === preferredNameOrId.toLowerCase().trim()
+      );
+      if (preferred) return preferred;
+    }
+    return undefined;
   }
 
   // 2. Strict Exact match (Name or Code)
@@ -33,7 +39,61 @@ export function findBestMatchingSociete(
   );
   if (exact) return exact;
 
-  // 3. Known Insurance Keywords Priority (prevents false matches between MCI CARE, BSA, ASCOMA, SANLAM, NY HAVANA)
+  // 3. Known Insurance Keywords Priority (prevents false matches between BSA, MCI CARE, ASCOMA, SANLAM, NY HAVANA)
+
+  // 3.A. BSA / ASK GRAS SAVOYE Priority (Must check before MCI to avoid accidental false positives)
+  if (
+    clean.includes('bsa') || 
+    clean.includes('ask gs') ||
+    clean.includes('ask-gs') ||
+    clean.includes('bsa / ask gs') ||
+    clean.includes('gras savoye') || 
+    clean.includes('gras-savoye') || 
+    clean.includes('grassavoye') || 
+    clean.includes('ask gras') ||
+    clean.includes('ask gras savoye') ||
+    clean.includes('releve de remboursements') ||
+    clean.includes('relevé de remboursements') ||
+    clean.includes('frais de sante') ||
+    clean.includes('frais de santé') ||
+    clean.includes('bfv') ||
+    clean.includes('bred madagasikara') ||
+    clean.includes('bred')
+  ) {
+    const bsa = societes.find(s => 
+      s.code.toUpperCase() === 'BSA' || 
+      s.nom.toUpperCase().includes('BSA') || 
+      s.nom.toUpperCase().includes('GRAS SAVOYE') ||
+      s.nom.toUpperCase().includes('ASK')
+    );
+    if (bsa) return bsa;
+  }
+
+  // 3.B. ASCOMA Priority
+  if (
+    clean.includes('ascoma') ||
+    clean.includes('decompte de reglement tiers payant') ||
+    clean.includes('décompte de règlement tiers payant') ||
+    clean.includes('dispensaire lutherien') ||
+    clean.includes('code : 599') ||
+    clean.includes('code 599')
+  ) {
+    const ascoma = societes.find(s => s.nom.toUpperCase().includes('ASCOMA') || s.code.toUpperCase().includes('ASCOMA'));
+    if (ascoma) return ascoma;
+  }
+
+  // 3.C. NY HAVANA Priority
+  if (
+    clean.includes('havana') || 
+    clean.includes('ny havana') || 
+    clean.includes('ny-havana') ||
+    clean.includes('nyhavana')
+  ) {
+    const havana = societes.find(s => s.nom.toUpperCase().includes('HAVANA') || s.code.toUpperCase().includes('HAVANA'));
+    if (havana) return havana;
+  }
+
+  // 3.D. SANLAM & MCI CARE Priority
   if (
     clean.includes('mci') || 
     clean.includes('mcicare') || 
@@ -51,43 +111,6 @@ export function findBestMatchingSociete(
 
     const mci = societes.find(s => s.code.toUpperCase().includes('MCI') || s.nom.toUpperCase().includes('MCI'));
     if (mci) return mci;
-  }
-
-  if (
-    clean.includes('havana') || 
-    clean.includes('ny havana') || 
-    clean.includes('ny-havana') ||
-    clean.includes('nyhavana')
-  ) {
-    const havana = societes.find(s => s.nom.toUpperCase().includes('HAVANA') || s.code.toUpperCase().includes('HAVANA'));
-    if (havana) return havana;
-  }
-
-  if (
-    clean.includes('ascoma') ||
-    clean.includes('decompte de reglement tiers payant') ||
-    clean.includes('décompte de règlement tiers payant') ||
-    clean.includes('centre : dispensaire lutherien toliara code : 599') ||
-    clean.includes('code : 599')
-  ) {
-    const ascoma = societes.find(s => s.nom.toUpperCase().includes('ASCOMA') || s.code.toUpperCase().includes('ASCOMA'));
-    if (ascoma) return ascoma;
-  }
-
-  if (
-    clean.includes('bsa') || 
-    clean.includes('ask gs') ||
-    clean.includes('bsa / ask gs') ||
-    clean.includes('gras savoye') || 
-    clean.includes('ask gras') ||
-    clean.includes('ask gras savoye') ||
-    clean.includes('releve de remboursements des frais de sante') ||
-    clean.includes('relevé de remboursements des frais de santé') ||
-    clean.includes('bfv') ||
-    clean.includes('bred madagasikara')
-  ) {
-    const bsa = societes.find(s => s.code.toUpperCase() === 'BSA' || s.nom.toUpperCase().includes('BSA') || s.nom.toUpperCase().includes('GRAS SAVOYE'));
-    if (bsa) return bsa;
   }
 
   // 4. Substring / Word inclusion match (excluding generic terms)

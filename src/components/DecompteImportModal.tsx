@@ -67,6 +67,7 @@ export interface MatchCandidate {
   lignePrestationId: string;
   codeActe: string;
   libelleActe: string;
+  societeId?: string;
   societeNom?: string;
   sousSociete?: string;
   personneId: string;
@@ -306,6 +307,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   // Compute ALL eligible unpaid / partially paid acts across database
+  // Compute ALL eligible unpaid / partially paid acts across database
   // EXCLUDING all acts where resteAPayer <= 0 or prestation is already fully paid!
   const allEligibleActs: MatchCandidate[] = useMemo(() => {
     const list: MatchCandidate[] = [];
@@ -338,6 +340,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               lignePrestationId: ligne.id || `${prest.id}-lig-${lIdx}`,
               codeActe: ligne.code || 'CONS',
               libelleActe: ligne.libelle || fam?.libelle || ligne.code || 'Acte de soins',
+              societeId: prest.societeId,
               societeNom: socNom,
               sousSociete: sousSoc,
               personneId: prest.personneId,
@@ -367,6 +370,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             lignePrestationId: `${prest.id}-main`,
             codeActe: 'ACTE',
             libelleActe: prest.commentaires || 'Prestation globale',
+            societeId: prest.societeId,
             societeNom: socNom,
             sousSociete: sousSoc,
             personneId: prest.personneId,
@@ -386,14 +390,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   }, [prestations, personnes, societes, familles]);
 
   // Intelligent Automatic Matcher for a settlement line
-  // Confronts date of care against prescription act date, and gross amount without ticket moderator against prescription act gross amount
+  // Confronts date of care against prescription act date, gross amount without ticket moderator against prescription act gross amount, and society
   const autoMatchSettlementLine = (
     matricule: string, 
     nomPrenom: string, 
     actCode: string,
     dateSoins: string,
     montantBrut: number,
-    netMontant: number
+    netMontant: number,
+    targetSocId?: string
   ): MatchCandidate | null => {
     if (allEligibleActs.length === 0) return null;
 
@@ -429,13 +434,18 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         return;
       }
 
-      // 2. Date de soins vs Date de l'acte dans la prescription
+      // 2. Society bonus: strongly favor claims belonging to the selected / detected insurance
+      if (targetSocId && cand.societeId && cand.societeId === targetSocId) {
+        score += 80;
+      }
+
+      // 3. Date de soins vs Date de l'acte dans la prescription
       const isSameDate = Boolean(cleanDateSoins && candDate && cleanDateSoins === candDate);
       if (isSameDate) {
         score += 70;
       }
 
-      // 3. Montant sans ticket modérateur (Montant brut initial)
+      // 4. Montant sans ticket modérateur (Montant brut initial)
       const isSameGrossAmount = Math.abs(brutMontant - candBrut) < 2;
       const isSameNetAmount = Math.abs(netMontant - candRemb) < 2 || Math.abs(netMontant - candReste) < 2;
 
@@ -447,7 +457,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         score += 20;
       }
 
-      // 4. Code / Famille Acte matching
+      // 5. Code / Famille Acte matching
       const exactCode = cleanCode && candCode && (cleanCode === candCode);
       if (exactCode) {
         score += 45;
@@ -467,8 +477,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     return bestCandidate;
   };
 
-  const processLoadedDocument = (doc: ParsedFactureAssurance, groupEnabled: boolean = groupOnImport) => {
+  const processLoadedDocument = (
+    doc: ParsedFactureAssurance, 
+    groupEnabled: boolean = groupOnImport,
+    overrideSocId?: string
+  ) => {
     setParsedDoc(doc);
+    const targetSocId = overrideSocId || selectedInsurance || (activeSocietesList.find(s => s.nom.toLowerCase() === (doc.clientDoit || '').toLowerCase())?.id);
 
     // 1. Expand raw settlement lines
     const rawItems: Array<{
@@ -608,7 +623,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         item.actCode,
         item.dateSoins,
         item.montantBrut,
-        item.netAPayer
+        item.netAPayer,
+        targetSocId
       );
 
       return {
@@ -647,6 +663,28 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     }
   };
 
+  const handleSocietyChange = (newSocId: string) => {
+    setSelectedInsurance(newSocId);
+    const matched = activeSocietesList.find(s => s.id === newSocId);
+    const socName = matched ? matched.nom : newSocId;
+    if (parsedDoc) {
+      const updatedDoc: ParsedFactureAssurance = {
+        ...parsedDoc,
+        clientDoit: socName,
+        garant: socName,
+        lignes: parsedDoc.lignes.map(l => ({
+          ...l,
+          societeAffiliee: socName
+        }))
+      };
+      setParsedDoc(updatedDoc);
+      setIsProcessing(true);
+      setTimeout(() => {
+        processLoadedDocument(updatedDoc, groupOnImport, newSocId);
+      }, 50);
+    }
+  };
+
   const processFile = async (file: File) => {
     const chosenOrg = getEffectiveInsurance();
 
@@ -667,8 +705,32 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
             if (jsonRows.length === 0) throw new Error('Le fichier Excel est vide ou ne contient aucune ligne de données.');
 
+            // Detect company from file name, sheet names, and raw contents
+            const fileNameLower = file.name.toLowerCase();
+            const sheetNamesLower = workbook.SheetNames.join(' ').toLowerCase();
+            const sampleText = JSON.stringify(jsonRows.slice(0, 10)).toLowerCase();
+            const fullContextText = `${fileNameLower} ${sheetNamesLower} ${sampleText}`;
+
+            let detectedCompanyKey = '';
+            if (fullContextText.includes('bsa') || fullContextText.includes('gras savoye') || fullContextText.includes('ask gs') || fullContextText.includes('grassavoye') || fullContextText.includes('releve de remboursements des frais de sante')) {
+              detectedCompanyKey = 'BSA';
+            } else if (fullContextText.includes('ascoma') || fullContextText.includes('joubert') || fullContextText.includes('dispensaire lutherien')) {
+              detectedCompanyKey = 'ASCOMA';
+            } else if (fullContextText.includes('mci') || fullContextText.includes('mcicare') || fullContextText.includes('conservation international')) {
+              detectedCompanyKey = 'MCI CARE';
+            } else if (fullContextText.includes('havana') || fullContextText.includes('ny havana')) {
+              detectedCompanyKey = 'NY HAVANA';
+            } else if (fullContextText.includes('sanlam') || fullContextText.includes('allianz')) {
+              detectedCompanyKey = 'SANLAM';
+            }
+
+            const matchedDetectedSoc = detectedCompanyKey ? findBestMatchingSociete(detectedCompanyKey, societes, selectedInsurance) : null;
+            if (matchedDetectedSoc && !selectedInsurance) {
+              setSelectedInsurance(matchedDetectedSoc.id);
+            }
+
             let inferredBordereau = '';
-            let inferredOrganisme = chosenOrg || '';
+            let inferredOrganisme = chosenOrg || matchedDetectedSoc?.nom || detectedCompanyKey || '';
             let inferredDateReglement = new Date().toISOString().split('T')[0];
 
             const lignes: FactureLigneParsed[] = jsonRows.map((row, idx) => {
@@ -688,9 +750,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               if (rawBord && !inferredBordereau) inferredBordereau = rawBord;
 
               const rawOrg = String(getVal(['Organisme', 'Assurance', 'Societe', 'Société', 'Client', 'Garant', 'Assureur', 'Payeur', 'Organisme_Payeur']) || '').trim() || chosenOrg;
-              let lineSoc = chosenOrg || '';
+              let lineSoc = chosenOrg || inferredOrganisme || '';
               if (rawOrg && rawOrg !== 'Organisme') {
-                const matched = findBestMatchingSociete(rawOrg, societes, chosenOrg);
+                const matched = findBestMatchingSociete(rawOrg, societes, chosenOrg || inferredOrganisme);
                 lineSoc = matched ? matched.nom : rawOrg;
                 if (!inferredOrganisme) inferredOrganisme = lineSoc;
               }
@@ -802,7 +864,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               lignes
             };
 
-            processLoadedDocument(doc);
+            processLoadedDocument(doc, groupOnImport, matchedDetectedSoc?.id);
           } catch (err: any) {
             setErrorMessage(err.message || 'Erreur lors de la lecture du fichier Excel.');
             setIsProcessing(false);
@@ -960,8 +1022,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       return;
     }
 
-    const socName = (parsedDoc.clientDoit || parsedDoc.garant || getEffectiveInsurance() || 'MCI CARE').trim();
-    let matchedSoc = findBestMatchingSociete(socName, societes, getEffectiveInsurance());
+    const effectiveSocId = selectedInsurance || (activeSocietesList.find(s => s.nom.toLowerCase() === (parsedDoc.clientDoit || '').toLowerCase())?.id);
+    const socName = (parsedDoc.clientDoit || parsedDoc.garant || getEffectiveInsurance() || 'BSA / ASK GS').trim();
+    let matchedSoc = (effectiveSocId ? societes.find(s => s.id === effectiveSocId) : null) || findBestMatchingSociete(socName, societes, getEffectiveInsurance());
 
     const createdSocietes: Societe[] = [];
     const finalPersonnesMap = new Map<string, Personne>();
@@ -1074,9 +1137,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           };
         }
       } else {
-        // Create new prestation on the fly if user chose not to link
-        targetPrestationId = generateId(`prest-autogen-${idx}`);
-        targetLigneId = generateId(`lig-autogen-${idx}`);
+        // Unlinked settlement line: do NOT create a fake Prestation in the medical invoices database.
+        // It is safely registered as a LignePaiement in the Paiement object,
+        // ready to be linked anytime from the Paiements view.
+        targetPrestationId = '';
+        targetLigneId = '';
 
         // Find or create patient and update their dossier if immatriculation is found
         let targetPersonne = Array.from(finalPersonnesMap.values()).find(p => 
@@ -1093,7 +1158,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             };
             finalPersonnesMap.set(targetPersonne.id, targetPersonne);
           }
-        } else {
+        } else if (hasRealMatricule || row.nomPrenom) {
           targetPersonne = {
             id: generateId(`per-new-${idx}`),
             matricule: hasRealMatricule ? rowMatricule : `MAT-${idx + 100}`,
@@ -1104,53 +1169,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           };
           finalPersonnesMap.set(targetPersonne.id, targetPersonne);
         }
-
-        const isAutoRejet = row.netAPayer === 0 && row.montantExclu > 0;
-
-        const autoPrest: Prestation = {
-          id: targetPrestationId,
-          numeroFacture: `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
-          date: row.dateSoins || new Date().toISOString().split('T')[0],
-          societeId: matchedSoc?.id || 'soc-1',
-          societeNom: matchedSoc?.nom || socName,
-          sousSociete: row.sousSociete || 'Département',
-          personneId: targetPersonne.id,
-          nomAgent: row.nomPrenom,
-          matricule: hasRealMatricule ? rowMatricule : targetPersonne.matricule,
-          totalPrestation: row.montantBrut,
-          montantTotal: row.montantBrut,
-          participation: row.participation,
-          ticketModerateur: row.participation,
-          montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
-          totalPaye: row.netAPayer,
-          resteAPayer: 0,
-          statut: isAutoRejet ? 'Rejeté' : 'Payé',
-          dateCreation: new Date().toISOString().split('T')[0],
-          commentaires: `Prestation générée lors du règlement ${parsedDoc.numeroBordereau || ''}`,
-          lignes: [
-            {
-              id: targetLigneId,
-              prestationId: targetPrestationId,
-              code: row.actCode,
-              libelle: row.actLibelle,
-              totalPrestation: row.montantBrut,
-              ticketModerateur: row.participation,
-              montantARembourser: row.netAPayer || (row.montantBrut - row.participation),
-              totalPaye: row.netAPayer,
-              statut: isAutoRejet ? ('Rejeté' as const) : ('Payé' as const)
-            }
-          ]
-        };
-
-        updatedPrestations.unshift(autoPrest);
       }
 
       newLignesPaiement.push({
         id: generateId(`lp-${idx}`),
         paiementId: paymentId,
-        lignePrestationId: targetLigneId,
-        prestationId: targetPrestationId,
-        prestationNumero: row.matchedCandidate?.prestationNum || `FACT-${parsedDoc.numeroFacture || 'REG'}-${idx + 1}`,
+        lignePrestationId: targetLigneId || undefined,
+        prestationId: targetPrestationId || undefined,
+        prestationNumero: row.matchedCandidate?.prestationNum || '-',
         dateSoins: row.dateSoins,
         immatriculation: rowMatricule || '-',
         nomBaseAssurance: row.nomPrenom,
@@ -1184,7 +1210,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       totalExclu,
       remise: parsedDoc.remise || 0,
       statut: 'Validé',
-      notes: `Importation Décompte ${parsedDoc.clientDoit} - ${selectedRows.length} actes rattachés`,
+      notes: `Importation Décompte ${matchedSoc?.nom || parsedDoc.clientDoit} - ${selectedRows.length} actes rattachés`,
       lignes: newLignesPaiement
     };
 
