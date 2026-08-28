@@ -350,12 +350,26 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
         // Liaison filter
         if (filterLiaison === 'NON_RELIE') {
-          const hasUnlinked = (p.lignes || []).some(l => !l.prestationId && (!l.prestationNumero || l.prestationNumero === '-'));
-          if (!hasUnlinked && p.prestationId) return false;
+          const hasUnlinkedLine = (p.lignes || []).some(l => {
+            const hasPrest = Boolean(l.prestationId && l.prestationId.trim() !== '');
+            const hasNum = Boolean(l.prestationNumero && l.prestationNumero.trim() !== '' && l.prestationNumero !== '-');
+            return !hasPrest && !hasNum;
+          });
+          const isBordereauUnlinked = !p.prestationId && (!p.lignes || p.lignes.length === 0);
+          if (!hasUnlinkedLine && !isBordereauUnlinked) {
+            return false;
+          }
         }
         if (filterLiaison === 'RELIE') {
-          const hasLinked = (p.lignes || []).some(l => Boolean(l.prestationId || (l.prestationNumero && l.prestationNumero !== '-')));
-          if (!hasLinked && !p.prestationId) return false;
+          const hasLinkedLine = (p.lignes || []).some(l => {
+            const hasPrest = Boolean(l.prestationId && l.prestationId.trim() !== '');
+            const hasNum = Boolean(l.prestationNumero && l.prestationNumero.trim() !== '' && l.prestationNumero !== '-');
+            return hasPrest || hasNum;
+          });
+          const isBordereauLinked = Boolean(p.prestationId);
+          if (!hasLinkedLine && !isBordereauLinked) {
+            return false;
+          }
         }
 
         // Date range
@@ -1618,6 +1632,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                         <th className="py-2 px-2 text-left">Patient / Assuré</th>
                                         <th className="py-2 px-2 text-left">Matricule</th>
                                         <th className="py-2 px-2 text-left">Acte Regroupé</th>
+                                        <th className="py-2 px-2 text-left">Réf Prescription / Liaison</th>
                                         <th className="py-2 px-2 text-center">Nb Actes</th>
                                         <th className="py-2 px-2 text-right">Total Réclamé</th>
                                         <th className="py-2 px-2 text-right">Ticket Modérateur</th>
@@ -1643,6 +1658,38 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                                 {grp.codeActe}
                                               </span>
                                               <span className="text-slate-700 font-medium">{grp.libelleActe}</span>
+                                            </div>
+                                          </td>
+                                          <td className="py-2 px-2">
+                                            <div className="flex items-center gap-1.5">
+                                              {grp.prestationNumero && grp.prestationNumero !== '-' ? (
+                                                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs inline-flex items-center gap-1">
+                                                  <FileText className="w-3 h-3 text-indigo-600" />
+                                                  <span>{grp.prestationNumero}</span>
+                                                </span>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold shrink-0">
+                                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                                  <span>Non relié</span>
+                                                </span>
+                                              )}
+                                              {grp.subLines && grp.subLines.length > 0 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const targetLigne = grp.subLines[0];
+                                                    if (targetLigne) {
+                                                      setRelierModalContext({ paiement: p, lignePaiement: targetLigne });
+                                                    }
+                                                  }}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer shrink-0"
+                                                  title={grp.prestationNumero && grp.prestationNumero !== '-' ? "Changer la prestation reliée" : "Relier à une prestation"}
+                                                >
+                                                  <Link2 className="w-3 h-3 text-indigo-600" />
+                                                  <span>{grp.prestationNumero && grp.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
+                                                </button>
+                                              )}
                                             </div>
                                           </td>
                                           <td className="py-2 px-2 text-center">
@@ -2082,10 +2129,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                                 }
                                               }}
                                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold border border-indigo-200 transition-colors cursor-pointer"
-                                              title="Relier à une prestation"
+                                              title={sub.prestationNumero && sub.prestationNumero !== '-' ? "Changer la prestation reliée" : "Relier à une prestation"}
                                             >
                                               <Link2 className="w-3 h-3 text-indigo-600" />
-                                              <span>{sub.prestationNumero && sub.prestationNumero !== '-' ? "Relier" : "Relier à une prestation"}</span>
+                                              <span>{sub.prestationNumero && sub.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
                                             </button>
                                           </div>
                                         </td>
@@ -2232,6 +2279,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                         <th className="p-2 text-left">Patient / Assuré</th>
                         <th className="p-2 text-left">Matricule</th>
                         <th className="p-2 text-left">Acte Regroupé</th>
+                        <th className="p-2 text-left">Réf Prescription / Liaison</th>
                         <th className="p-2 text-center">Nb Actes</th>
                         <th className="p-2 text-right">Total Réclamé</th>
                         <th className="p-2 text-right">Ticket Modérateur</th>
@@ -2251,6 +2299,35 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                             </span>
                             <span className="text-slate-700">{grp.libelleActe}</span>
                           </td>
+                          <td className="p-2">
+                            <div className="flex items-center gap-1.5">
+                              {grp.prestationNumero && grp.prestationNumero !== '-' ? (
+                                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs inline-flex items-center gap-1">
+                                  <FileText className="w-3 h-3 text-indigo-600" />
+                                  <span>{grp.prestationNumero}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold shrink-0">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  <span>Non relié</span>
+                                </span>
+                              )}
+                              {grp.subLines && grp.subLines.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRelierModalContext({ paiement: viewingPaiement, lignePaiement: grp.subLines[0] });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer shrink-0"
+                                  title={grp.prestationNumero && grp.prestationNumero !== '-' ? "Changer la prestation reliée" : "Relier ce règlement à une facture de soins"}
+                                >
+                                  <Link2 className="w-3 h-3 text-indigo-600" />
+                                  <span>{grp.prestationNumero && grp.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
                           <td className="p-2 text-center font-bold text-slate-700">{grp.nombreActes}</td>
                           <td className="p-2 text-right text-slate-700 font-medium">{formatMoney(grp.totalReclame)}</td>
                           <td className="p-2 text-right text-amber-700 font-medium">{formatMoney(grp.ticketModerateur)}</td>
@@ -2267,6 +2344,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                         <th className="p-2 text-center">Date Soins</th>
                         <th className="p-2 text-left">Matricule</th>
                         <th className="p-2 text-left">Assuré</th>
+                        <th className="p-2 text-left">Réf Prescription / Liaison</th>
                         <th className="p-2 text-left">Acte / Commentaire</th>
                         <th className="p-2 text-right">Montant Réglé</th>
                         <th className="p-2 text-right">Ticket Modérateur</th>
@@ -2280,6 +2358,33 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                           <td className="p-2 text-slate-600 font-medium text-center">{l.dateSoins ? formatDate(l.dateSoins) : '-'}</td>
                           <td className="p-2 font-mono font-medium text-indigo-700">{l.immatriculation || '-'}</td>
                           <td className="p-2 font-semibold text-slate-800">{l.nomAgent || l.nomBaseAssurance}</td>
+                          <td className="p-2">
+                            <div className="flex items-center gap-1.5">
+                              {l.prestationNumero && l.prestationNumero !== '-' ? (
+                                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs inline-flex items-center gap-1">
+                                  <FileText className="w-3 h-3 text-indigo-600" />
+                                  <span>{l.prestationNumero}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold shrink-0">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  <span>Non relié</span>
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRelierModalContext({ paiement: viewingPaiement, lignePaiement: l });
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 transition-colors cursor-pointer shrink-0"
+                                title={l.prestationNumero && l.prestationNumero !== '-' ? "Changer la prestation reliée" : "Relier ce règlement à une facture de soins"}
+                              >
+                                <Link2 className="w-3 h-3 text-indigo-600" />
+                                <span>{l.prestationNumero && l.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
+                              </button>
+                            </div>
+                          </td>
                           <td className="p-2">
                             {l.codeActe ? (
                               <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold text-[10px] mr-1">
@@ -2742,7 +2847,12 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           paiement={relierModalContext.paiement}
           lignePaiement={relierModalContext.lignePaiement}
           prestations={prestations || []}
-          onSavePaiement={onSavePaiement}
+          onSavePaiement={(updatedPaiement, updatedPrestations) => {
+            onSavePaiement(updatedPaiement, updatedPrestations);
+            if (viewingPaiement && viewingPaiement.id === updatedPaiement.id) {
+              setViewingPaiement(updatedPaiement);
+            }
+          }}
         />
       )}
     </div>

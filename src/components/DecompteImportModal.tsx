@@ -31,7 +31,8 @@ import {
   ShieldCheck,
   ShieldAlert,
   Ban,
-  User
+  User,
+  Edit3
 } from 'lucide-react';
 import { 
   Paiement, 
@@ -271,10 +272,17 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const [confrontFilter, setConfrontFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED'>('ALL');
   const [groupOnImport, setGroupOnImport] = useState<boolean>(true);
   const [missingSocPrompt, setMissingSocPrompt] = useState<{ socName: string } | null>(null);
+  const [selectedOverrideSocId, setSelectedOverrideSocId] = useState<string>('');
+  const [showUnlinkedConfirmModal, setShowUnlinkedConfirmModal] = useState<boolean>(false);
   
   // Search / Change Link modal state
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
   const [actSearchQuery, setActSearchQuery] = useState<string>('');
+
+  // Main Table search & sorting state
+  const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'DEFAULT' | 'STATUS' | 'DATE' | 'PATIENT' | 'AMOUNT'>('DEFAULT');
+  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('ASC');
 
   const excelInputRef = useRef<HTMLInputElement>(null);
 
@@ -296,6 +304,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setSearchingRowId(null);
     setIsProcessing(false);
     setConfrontFilter('ALL');
+    setTableSearchQuery('');
+    setSortBy('DEFAULT');
+    setSortOrder('ASC');
     if (excelInputRef.current) {
       excelInputRef.current.value = '';
     }
@@ -434,8 +445,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         return;
       }
 
-      // 2. Society bonus: strongly favor claims belonging to the selected / detected insurance
-      if (targetSocId && cand.societeId && cand.societeId === targetSocId) {
+      // 2. STRICT INTER-SOCIETY RULE: Disallow inter-company/inter-society matching
+      if (targetSocId) {
+        const targetSoc = societes.find(s => s.id === targetSocId || s.nom.toLowerCase() === targetSocId.toLowerCase());
+        const expectedSocId = targetSoc?.id || targetSocId;
+        const candSocId = cand.societeId;
+        
+        if (candSocId && candSocId !== expectedSocId) {
+          // Reject candidate if it belongs to a different society/garant
+          return;
+        }
         score += 80;
       }
 
@@ -958,6 +977,61 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     });
   }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
 
+  // Helper to find top candidate suggestions for a settlement row
+  const getRowSuggestions = (row: SettlementRowItem): MatchCandidate[] => {
+    const normNom = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const cleanMat = (row.matricule || '').replace(/\s+/g, '').toLowerCase();
+
+    if (!normNom && (!cleanMat || cleanMat === '-')) return [];
+
+    return allEligibleActs.filter(cand => {
+      // Avoid candidates already assigned to another row in this settlement
+      const isAlreadyAssigned = rows.some(r => r.rowId !== row.rowId && r.matchedCandidate?.lignePrestationId === cand.lignePrestationId);
+      if (isAlreadyAssigned) return false;
+
+      const candMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+      const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+      const matMatch = Boolean(cleanMat && cleanMat !== '-' && candMat && candMat !== '-' && (cleanMat === candMat || candMat.includes(cleanMat) || cleanMat.includes(candMat)));
+      const nameMatch = Boolean(normNom && candNom && (candNom.includes(normNom) || normNom.includes(candNom)));
+
+      return matMatch || nameMatch;
+    }).slice(0, 3);
+  };
+
+  // Automatically link all unlinked rows that have high-confidence suggestions
+  const handleAutoLinkAllSuggestions = () => {
+    let linkedCount = 0;
+    setRows(prev => prev.map(r => {
+      if (r.matchedCandidate) return r; // Already matched
+
+      const suggestions = getRowSuggestions(r);
+      if (suggestions.length > 0) {
+        linkedCount++;
+        return {
+          ...r,
+          matchedCandidate: suggestions[0],
+          createNewPrestation: false,
+        };
+      }
+      return r;
+    }));
+  };
+
+  // Select rows by specific status category
+  const handleSelectByStatus = (statusType: 'PERFECT' | 'LINKED' | 'UNLINKED' | 'VERIFY' | 'ALL') => {
+    setRows(prev => prev.map(r => {
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      let selectIt = false;
+      if (statusType === 'ALL') selectIt = true;
+      else if (statusType === 'PERFECT') selectIt = details.type === 'PERFECT';
+      else if (statusType === 'LINKED') selectIt = Boolean(r.matchedCandidate);
+      else if (statusType === 'UNLINKED') selectIt = !r.matchedCandidate;
+      else if (statusType === 'VERIFY') selectIt = details.type === 'VERIFY';
+      return { ...r, selected: selectIt };
+    }));
+  };
+
   // Statistics for confrontation categories
   const confrontStats = useMemo(() => {
     let perfect = 0;
@@ -975,7 +1049,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       else if (details.type === 'UNLINKED') unlinked++;
     });
 
-    return { perfect, sameDate, sameAmount, verify, unlinked, total: rows.length };
+    const linkedCount = perfect + sameDate + sameAmount + verify;
+    const matchPercentage = rows.length > 0 ? Math.round((linkedCount / rows.length) * 100) : 0;
+
+    return { perfect, sameDate, sameAmount, verify, unlinked, total: rows.length, linkedCount, matchPercentage };
   }, [rows]);
 
   // Statistics for insured matricule updates
@@ -1004,17 +1081,79 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     return { withMatricule, willUpdateExisting, willCreateNew };
   }, [rows, personnes]);
 
-  // Filtered rows for display in table
+  // Filtered and sorted rows for display in table
   const displayedRows = useMemo(() => {
-    if (confrontFilter === 'ALL') return rows;
-    return rows.filter(r => {
-      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
-      return details.type === confrontFilter;
-    });
-  }, [rows, confrontFilter]);
+    let list = rows;
+
+    // 1. Filter by confrontation category chip
+    if (confrontFilter !== 'ALL') {
+      list = list.filter(r => {
+        const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+        return details.type === confrontFilter;
+      });
+    }
+
+    // 2. Filter by search query
+    if (tableSearchQuery.trim()) {
+      const q = tableSearchQuery.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      list = list.filter(r => {
+        const normNom = (r.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        const mat = (r.matricule || '').toLowerCase();
+        const code = (r.actCode || '').toLowerCase();
+        const lib = (r.actLibelle || '').toLowerCase();
+        const candNom = (r.matchedCandidate?.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        const candCode = (r.matchedCandidate?.codeActe || '').toLowerCase();
+        const candNum = (r.matchedCandidate?.prestationNum || '').toLowerCase();
+        const dateStr = formatDate(r.dateSoins).toLowerCase();
+        const netStr = r.netAPayer.toString();
+        const brutStr = r.montantBrut.toString();
+
+        return normNom.includes(q) || mat.includes(q) || code.includes(q) || lib.includes(q) ||
+          candNom.includes(q) || candCode.includes(q) || candNum.includes(q) || dateStr.includes(q) ||
+          netStr.includes(q) || brutStr.includes(q);
+      });
+    }
+
+    // 3. Sorting
+    if (sortBy !== 'DEFAULT') {
+      list = [...list].sort((a, b) => {
+        let valA: any = 0;
+        let valB: any = 0;
+
+        if (sortBy === 'DATE') {
+          valA = a.dateSoins || '';
+          valB = b.dateSoins || '';
+        } else if (sortBy === 'PATIENT') {
+          valA = (a.nomPrenom || '').toLowerCase();
+          valB = (b.nomPrenom || '').toLowerCase();
+        } else if (sortBy === 'AMOUNT') {
+          valA = a.netAPayer;
+          valB = b.netAPayer;
+        } else if (sortBy === 'STATUS') {
+          const scoreMap: Record<ConfrontationType, number> = {
+            UNLINKED: 1,
+            VERIFY: 2,
+            SAME_AMOUNT: 3,
+            SAME_DATE: 4,
+            PERFECT: 5,
+          };
+          const detA = getConfrontationDetails(a.dateSoins, a.montantBrut, a.netAPayer, a.matchedCandidate);
+          const detB = getConfrontationDetails(b.dateSoins, b.montantBrut, b.netAPayer, b.matchedCandidate);
+          valA = scoreMap[detA.type] || 0;
+          valB = scoreMap[detB.type] || 0;
+        }
+
+        if (valA < valB) return sortOrder === 'ASC' ? -1 : 1;
+        if (valA > valB) return sortOrder === 'ASC' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return list;
+  }, [rows, confrontFilter, tableSearchQuery, sortBy, sortOrder]);
 
   // Final Validation
-  const executeValidateAndSave = (approvedSocName?: string) => {
+  const executeValidateAndSave = (overrideExistingSocId?: string) => {
     if (!parsedDoc) return;
     const selectedRows = rows.filter(r => r.selected);
     if (selectedRows.length === 0) {
@@ -1022,7 +1161,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       return;
     }
 
-    const effectiveSocId = selectedInsurance || (activeSocietesList.find(s => s.nom.toLowerCase() === (parsedDoc.clientDoit || '').toLowerCase())?.id);
+    const effectiveSocId = overrideExistingSocId || selectedInsurance || (activeSocietesList.find(s => s.nom.toLowerCase() === (parsedDoc.clientDoit || '').toLowerCase())?.id);
     const socName = (parsedDoc.clientDoit || parsedDoc.garant || getEffectiveInsurance() || 'BSA / ASK GS').trim();
     let matchedSoc = (effectiveSocId ? societes.find(s => s.id === effectiveSocId) : null) || findBestMatchingSociete(socName, societes, getEffectiveInsurance());
 
@@ -1031,18 +1170,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     personnes.forEach(p => finalPersonnesMap.set(p.id, { ...p }));
 
     if (!matchedSoc) {
-      if (approvedSocName) {
-        matchedSoc = {
-          id: generateId('soc-new'),
-          nom: approvedSocName,
-          code: approvedSocName.substring(0, 4).toUpperCase(),
-          tauxCouvertureDefaut: 100
-        };
-        createdSocietes.push(matchedSoc);
-      } else {
-        setMissingSocPrompt({ socName });
-        return;
-      }
+      setMissingSocPrompt({ socName });
+      return;
     }
 
     const paymentId = generateId('pai');
@@ -1221,10 +1350,18 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   const handleValidateAndSave = () => {
-    if (parsedDoc && isDuplicateBordereau) {
-      alert(`Attention : Le bordereau de règlement N° "${bordereauRefDoc}" existe déjà dans la base de données (${duplicatePaiementsCount} paiement(s) enregistré(s)). Veuillez vérifier pour éviter les doublons.`);
+    if (parsedDoc && isExactDuplicate) {
+      alert(`Attention : Le bordereau de règlement N° "${bordereauRefDoc}" existe déjà avec un montant identique (${formatMoney(exactAmountDuplicates[0]?.totalPaye || 0)}). La validation est bloquée pour éviter un double encaissement.`);
       return;
     }
+    
+    // Check if there are unlinked rows selected
+    const unlinkedCount = selectedRows.filter(r => !r.matchedCandidate).length;
+    if (unlinkedCount > 0) {
+      setShowUnlinkedConfirmModal(true);
+      return;
+    }
+
     executeValidateAndSave();
   };
 
@@ -1232,15 +1369,30 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const bordereauRefDoc = parsedDoc?.numeroBordereau || parsedDoc?.numeroFacture || '';
   const bordereauClean = cleanNum(bordereauRefDoc);
   
-  // Check if bordereau reference already exists in paiements OR in paid lines
-  const duplicatePaiements = bordereauClean
-    ? paiements.filter(p => cleanNum(p.numeroBordereau) === bordereauClean || cleanNum(p.referencePaiement) === bordereauClean)
-    : [];
-  const isDuplicateBordereau = duplicatePaiements.length > 0;
-  const duplicatePaiementsCount = duplicatePaiements.length;
-
   const selectedRows = rows.filter(r => r.selected);
   const totalSelectedPaye = selectedRows.reduce((s, r) => s + r.netAPayer, 0);
+  const docNetTotal = parsedDoc ? (parsedDoc.totalNetAPayer || totalSelectedPaye) : totalSelectedPaye;
+
+  // Check if bordereau reference already exists in paiements
+  const matchingRefPaiements = bordereauClean
+    ? paiements.filter(p => cleanNum(p.numeroBordereau) === bordereauClean || cleanNum(p.referencePaiement) === bordereauClean)
+    : [];
+
+  // Exact duplicate: SAME reference AND SAME total amount (tolerance < 2 Ar)
+  const exactAmountDuplicates = matchingRefPaiements.filter(p => {
+    const pTotal = Number(p.totalPaye || 0);
+    return Math.abs(pTotal - docNetTotal) < 2 || Math.abs(pTotal - totalSelectedPaye) < 2;
+  });
+
+  // Reference match with a different amount (e.g. tranche, installment, partial payment)
+  const differentAmountPaiements = matchingRefPaiements.filter(p => 
+    !exactAmountDuplicates.some(ed => ed.id === p.id)
+  );
+
+  // ONLY strictly block if both reference AND amount are identical
+  const isExactDuplicate = exactAmountDuplicates.length > 0;
+  const isDuplicateBordereau = isExactDuplicate;
+  const hasRefMatchWithDifferentAmount = differentAmountPaiements.length > 0 && !isExactDuplicate;
 
   if (!isOpen) return null;
 
@@ -1388,25 +1540,50 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
           {parsedDoc && (
             <div className="space-y-4">
-              {/* DUPLICATE WARNING BANNER IF BORDEREAU ALREADY EXISTS */}
-              {isDuplicateBordereau && (
-                <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 shadow-sm text-amber-900 animate-in fade-in">
+              {/* DUPLICATE BLOCKING BANNER IF BORDEREAU ALREADY EXISTS WITH IDENTICAL AMOUNT */}
+              {isExactDuplicate && (
+                <div className="rounded-2xl border-2 border-rose-300 bg-rose-50 p-4 shadow-sm text-rose-900 animate-in fade-in">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white font-bold shadow-xs">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white font-bold shadow-xs">
                       <ShieldAlert className="h-5 w-5" />
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-black uppercase tracking-wider text-amber-800 bg-amber-200 px-2 py-0.5 rounded-md">
-                          Doublon Bordereau Détecté
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-rose-800 bg-rose-200 px-2 py-0.5 rounded-md">
+                          Doublon Strict Détecté (Même Référence & Même Montant)
                         </span>
-                        <span className="text-xs font-bold text-amber-700">
-                          {duplicatePaiementsCount} paiement(s) déjà enregistré(s) avec cette référence
+                        <span className="text-xs font-bold text-rose-700">
+                          {exactAmountDuplicates.length} paiement(s) déjà enregistré(s) avec cette référence et ce même montant ({formatMoney(exactAmountDuplicates[0]?.totalPaye || 0)})
                         </span>
                       </div>
-                      <p className="text-xs text-amber-800 mt-1 font-medium leading-relaxed">
-                        Le numéro de bordereau / référence <strong>« {bordereauRefDoc} »</strong> existe déjà dans la base des règlements / paiements. 
-                        Pour éviter les doubles encaissements et les erreurs comptables, la validation de ce bordereau est bloquée. Si nécessaire, modifiez la référence ou supprimez l'ancien paiement.
+                      <p className="text-xs text-rose-800 mt-1 font-medium leading-relaxed">
+                        Le numéro de bordereau / référence <strong>« {bordereauRefDoc} »</strong> existe déjà dans la base des règlements avec un montant identique de <strong>{formatMoney(exactAmountDuplicates[0]?.totalPaye || 0)}</strong> (enregistré le {formatDate(exactAmountDuplicates[0]?.datePaiement)}). 
+                        Pour éviter les doubles encaissements et les erreurs comptables, la validation de ce bordereau est <strong>bloquée</strong>. Si ce décompte constitue un nouveau paiement distinct, vous pouvez modifier sa référence ci-dessous ou supprimer l'ancien paiement.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INFORMATIVE BANNER IF BORDEREAU EXISTS WITH DIFFERENT AMOUNT (NON-BLOCKING) */}
+              {hasRefMatchWithDifferentAmount && (
+                <div className="rounded-2xl border-2 border-sky-300 bg-sky-50 p-4 shadow-sm text-sky-950 animate-in fade-in">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white font-bold shadow-xs">
+                      <Info className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-sky-800 bg-sky-200 px-2 py-0.5 rounded-md">
+                          Information Référence (Montants Différents)
+                        </span>
+                        <span className="text-xs font-semibold text-sky-800">
+                          {differentAmountPaiements.length} paiement(s) antérieur(s) trouvé(s)
+                        </span>
+                      </div>
+                      <p className="text-xs text-sky-800 mt-1 font-medium leading-relaxed">
+                        La référence <strong>« {bordereauRefDoc} »</strong> a déjà été enregistrée pour un montant de <strong>{differentAmountPaiements.map(p => formatMoney(p.totalPaye)).join(', ')}</strong>, alors que ce bordereau totalise <strong>{formatMoney(totalSelectedPaye)}</strong>. 
+                        Les montants étant différents (ex: tranche, acompte, complément), <strong>l'enregistrement est autorisé</strong>.
                       </p>
                     </div>
                   </div>
@@ -1421,19 +1598,42 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-500 block">Réf Bordereau</span>
-                  <strong className="text-emerald-700 font-bold text-sm">{parsedDoc.numeroBordereau || parsedDoc.numeroFacture}</strong>
+                  <div className="flex items-center gap-1 mt-1">
+                    <strong className="text-sm font-bold text-emerald-800 font-mono bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 shadow-2xs">
+                      {parsedDoc.numeroBordereau || parsedDoc.numeroFacture || 'BORDEREAU'}
+                    </strong>
+                  </div>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Lignes à Régler</span>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="font-bold text-emerald-700">{confrontStats.perfect + confrontStats.sameDate + confrontStats.sameAmount} rattachées</span>
+                    <span className="font-bold text-emerald-700">{confrontStats.linkedCount} rattachées</span>
                     <span className="text-slate-400">•</span>
-                    <span className="font-semibold text-amber-700">{confrontStats.verify + confrontStats.unlinked} à vérifier</span>
+                    <span className="font-semibold text-amber-700">{confrontStats.unlinked} non rattachées</span>
                   </div>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Net Réglé par l'Assurance</span>
                   <strong className="text-emerald-700 font-bold text-sm">{formatMoney(parsedDoc.totalNetAPayer)}</strong>
+                </div>
+
+                {/* Progress bar for reconciliation score */}
+                <div className="col-span-2 sm:col-span-4 rounded-xl border border-slate-200 bg-white p-3 space-y-1.5 mt-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      Taux de Rapprochement Automatique des Actes :
+                    </span>
+                    <span className="font-extrabold text-emerald-800 font-mono text-xs">
+                      {confrontStats.matchPercentage}% ({confrontStats.linkedCount} / {confrontStats.total} actes rattachés)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden flex shadow-inner">
+                    <div className="bg-emerald-500 h-full transition-all duration-300" style={{ width: `${(confrontStats.perfect / (confrontStats.total || 1)) * 100}%` }} title="Même Date & Même Montant" />
+                    <div className="bg-sky-500 h-full transition-all duration-300" style={{ width: `${(confrontStats.sameDate / (confrontStats.total || 1)) * 100}%` }} title="Même Date" />
+                    <div className="bg-purple-500 h-full transition-all duration-300" style={{ width: `${(confrontStats.sameAmount / (confrontStats.total || 1)) * 100}%` }} title="Même Montant" />
+                    <div className="bg-amber-400 h-full transition-all duration-300" style={{ width: `${(confrontStats.verify / (confrontStats.total || 1)) * 100}%` }} title="À vérifier" />
+                  </div>
                 </div>
               </div>
 
@@ -1492,108 +1692,188 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
               </div>
 
-              {/* Visual Color Legend Bar */}
-              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 font-bold text-slate-700 text-xs">
-                    <Tag className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Légende du Jeu de Couleurs (Confrontation Date & Montant Brut sans ticket modérateur) :</span>
+              {/* Toolbar: Search Table, Sorting & Fast Match Shortcuts */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-3 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  {/* Table Search Input */}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      value={tableSearchQuery}
+                      onChange={(e) => setTableSearchQuery(e.target.value)}
+                      placeholder="Rechercher par patient, matricule, code acte, montant ou date dans le tableau..."
+                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 shadow-2xs"
+                    />
+                    {tableSearchQuery && (
+                      <button
+                        onClick={() => setTableSearchQuery('')}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
+
+                  {/* Sorting & Batch Actions */}
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {/* Sort Selector */}
+                    <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                      <span className="text-slate-500 text-[11px] font-medium">Trier par :</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as any)}
+                        className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+                      >
+                        <option value="DEFAULT">Ordre du fichier</option>
+                        <option value="STATUS">Statut (Non rattachés d'abord)</option>
+                        <option value="DATE">Date Soins</option>
+                        <option value="PATIENT">Nom Patient</option>
+                        <option value="AMOUNT">Montant Net</option>
+                      </select>
+                      {sortBy !== 'DEFAULT' && (
+                        <button
+                          onClick={() => setSortOrder(prev => prev === 'ASC' ? 'DESC' : 'ASC')}
+                          className="text-xs font-bold text-indigo-700 hover:bg-indigo-50 px-1 py-0.5 rounded cursor-pointer"
+                          title="Changer le sens du tri"
+                        >
+                          {sortOrder === 'ASC' ? '↑ ASC' : '↓ DESC'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Auto-link batch action */}
                     <button
-                      onClick={() => handleToggleSelectAll(true)}
-                      className="text-xs text-indigo-700 font-semibold hover:underline"
+                      type="button"
+                      onClick={handleAutoLinkAllSuggestions}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+                      title="Rattacher automatiquement toutes les lignes non rattachées disposant d'une suggestion de candidat"
                     >
-                      Tout cocher
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      onClick={() => handleToggleSelectAll(false)}
-                      className="text-xs text-slate-500 hover:underline"
-                    >
-                      Tout décocher
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Rattacher les suggestions</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Filter Chips with counts & color codes */}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <button
-                    onClick={() => setConfrontFilter('ALL')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
-                      confrontFilter === 'ALL'
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
-                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                    }`}
-                  >
-                    <span>Tous</span>
-                    <span className="bg-white/20 px-1.5 py-0.2 rounded-full text-[10px]">{confrontStats.total}</span>
-                  </button>
+                {/* Legend & Filter Chips with counts & selection shortcuts */}
+                <div className="border-t border-slate-200/80 pt-2 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-700 text-xs">
+                      <Tag className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Filtres par statut de comparaison :</span>
+                    </div>
 
-                  <button
-                    onClick={() => setConfrontFilter('PERFECT')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
-                      confrontFilter === 'PERFECT'
-                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
-                        : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span>Même Date & Même Montant</span>
-                    <span className="bg-emerald-200/70 text-emerald-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.perfect}</span>
-                  </button>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-400 font-medium">Cocher rapides :</span>
+                      <button
+                        onClick={() => handleSelectByStatus('ALL')}
+                        className="text-indigo-700 font-semibold hover:underline cursor-pointer"
+                      >
+                        Tous
+                      </button>
+                      <span className="text-slate-300">•</span>
+                      <button
+                        onClick={() => handleSelectByStatus('LINKED')}
+                        className="text-emerald-700 font-semibold hover:underline cursor-pointer"
+                      >
+                        Rattachés
+                      </button>
+                      <span className="text-slate-300">•</span>
+                      <button
+                        onClick={() => handleSelectByStatus('UNLINKED')}
+                        className="text-amber-700 font-semibold hover:underline cursor-pointer"
+                      >
+                        Non rattachés
+                      </button>
+                      <span className="text-slate-300">•</span>
+                      <button
+                        onClick={() => handleToggleSelectAll(false)}
+                        className="text-slate-500 hover:underline cursor-pointer"
+                      >
+                        Aucun
+                      </button>
+                    </div>
+                  </div>
 
-                  <button
-                    onClick={() => setConfrontFilter('SAME_DATE')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
-                      confrontFilter === 'SAME_DATE'
-                        ? 'bg-sky-700 text-white border-sky-700 shadow-2xs'
-                        : 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-sky-500"></span>
-                    <span>Même Date (Montant diff.)</span>
-                    <span className="bg-sky-200/70 text-sky-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.sameDate}</span>
-                  </button>
+                  {/* Filter Chips */}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setConfrontFilter('ALL')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        confrontFilter === 'ALL'
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>Tous</span>
+                      <span className="bg-white/20 px-1.5 py-0.2 rounded-full text-[10px]">{confrontStats.total}</span>
+                    </button>
 
-                  <button
-                    onClick={() => setConfrontFilter('SAME_AMOUNT')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
-                      confrontFilter === 'SAME_AMOUNT'
-                        ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
-                        : 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                    <span>Même Montant (Date diff.)</span>
-                    <span className="bg-purple-200/70 text-purple-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.sameAmount}</span>
-                  </button>
+                    <button
+                      onClick={() => setConfrontFilter('PERFECT')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        confrontFilter === 'PERFECT'
+                          ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                          : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      <span>Même Date & Même Montant</span>
+                      <span className="bg-emerald-200/70 text-emerald-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.perfect}</span>
+                    </button>
 
-                  <button
-                    onClick={() => setConfrontFilter('VERIFY')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
-                      confrontFilter === 'VERIFY'
-                        ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
-                        : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    <span>À Vérifier (Écarts)</span>
-                    <span className="bg-amber-200/70 text-amber-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.verify}</span>
-                  </button>
+                    <button
+                      onClick={() => setConfrontFilter('SAME_DATE')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        confrontFilter === 'SAME_DATE'
+                          ? 'bg-sky-700 text-white border-sky-700 shadow-2xs'
+                          : 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+                      <span>Même Date (Montant diff.)</span>
+                      <span className="bg-sky-200/70 text-sky-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.sameDate}</span>
+                    </button>
 
-                  <button
-                    onClick={() => setConfrontFilter('UNLINKED')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition ${
-                      confrontFilter === 'UNLINKED'
-                        ? 'bg-slate-700 text-white border-slate-700 shadow-2xs'
-                        : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                    <span>Non Rattachés (Créer)</span>
-                    <span className="bg-slate-200 text-slate-800 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.unlinked}</span>
-                  </button>
+                    <button
+                      onClick={() => setConfrontFilter('SAME_AMOUNT')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        confrontFilter === 'SAME_AMOUNT'
+                          ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
+                          : 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      <span>Même Montant (Date diff.)</span>
+                      <span className="bg-purple-200/70 text-purple-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.sameAmount}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setConfrontFilter('VERIFY')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        confrontFilter === 'VERIFY'
+                          ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                          : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span>À Vérifier (Écarts)</span>
+                      <span className="bg-amber-200/70 text-amber-900 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.verify}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setConfrontFilter('UNLINKED')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        confrontFilter === 'UNLINKED'
+                          ? 'bg-slate-700 text-white border-slate-700 shadow-2xs'
+                          : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                      <span>Non Rattachés (Créer)</span>
+                      <span className="bg-slate-200 text-slate-800 px-1.5 py-0.2 rounded-full text-[10px] font-bold">{confrontStats.unlinked}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1802,15 +2082,57 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                 </div>
                               </div>
                             ) : (
-                              <div className="rounded-xl bg-slate-50 border border-slate-200 p-2.5 text-xs flex items-center justify-between shadow-2xs">
-                                <div className="flex items-center gap-1.5 text-slate-700 font-medium">
-                                  <AlertCircle className="h-4 w-4 text-slate-400 shrink-0" />
-                                  <span>Aucun acte non réglé rattaché</span>
-                                </div>
-                                <span className="text-[10px] font-semibold text-slate-700 bg-slate-200 px-2 py-0.5 rounded border border-slate-300">
-                                  Nouvelle Prestation
-                                </span>
-                              </div>
+                              (() => {
+                                const suggestions = getRowSuggestions(row);
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-2.5 text-xs flex items-center justify-between shadow-2xs">
+                                      <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                                        <AlertCircle className="h-4 w-4 text-slate-400 shrink-0" />
+                                        <span>Aucun acte non réglé rattaché</span>
+                                      </div>
+                                      <span className="text-[10px] font-semibold text-slate-700 bg-slate-200 px-2 py-0.5 rounded border border-slate-300">
+                                        Nouvelle Prestation
+                                      </span>
+                                    </div>
+
+                                    {suggestions.length > 0 && (
+                                      <div className="rounded-xl bg-indigo-50/90 border border-indigo-200 p-2.5 text-xs space-y-2 shadow-2xs">
+                                        <div className="flex items-center justify-between text-[11px] text-indigo-950 font-bold">
+                                          <span className="flex items-center gap-1">
+                                            <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                                            Suggestion(s) trouvée(s) :
+                                          </span>
+                                          <span className="text-[10px] text-indigo-700 font-medium">{suggestions.length} acte(s) disponible(s)</span>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                          {suggestions.map((sug) => (
+                                            <div key={sug.lignePrestationId} className="flex items-center justify-between gap-2 bg-white p-2 rounded-lg border border-indigo-100 shadow-2xs text-[11px]">
+                                              <div className="min-w-0 flex-1">
+                                                <div className="font-extrabold text-slate-900 truncate uppercase tracking-tight">{sug.personneNom}</div>
+                                                <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1.5 flex-wrap">
+                                                  <span className="font-mono bg-slate-100 px-1 py-0.2 rounded text-slate-700">{sug.codeActe}</span>
+                                                  <span>• Brut: {formatMoney(sug.montantInitial)}</span>
+                                                  <span>• {formatDate(sug.prestationDate)}</span>
+                                                </div>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAssignCandidate(row.rowId, sug)}
+                                                className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shrink-0 transition shadow-2xs cursor-pointer flex items-center gap-1"
+                                                title="Lier cet acte en 1 clic"
+                                              >
+                                                <Link2 className="w-3 h-3" />
+                                                Lier 1-Clic
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()
                             )}
                           </td>
 
@@ -1889,16 +2211,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             {parsedDoc && (
               <button
                 onClick={handleValidateAndSave}
-                disabled={selectedRows.length === 0 || isDuplicateBordereau}
+                disabled={selectedRows.length === 0 || isExactDuplicate}
                 className={`rounded-xl px-5 py-2 text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer ${
-                  isDuplicateBordereau
-                    ? 'bg-amber-600 text-white hover:bg-amber-500 opacity-60 cursor-not-allowed'
+                  isExactDuplicate
+                    ? 'bg-rose-600 text-white hover:bg-rose-500 opacity-60 cursor-not-allowed'
                     : 'bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50'
                 }`}
-                title={isDuplicateBordereau ? 'Bordereau déjà existant dans la base des règlements' : undefined}
+                title={isExactDuplicate ? `Doublon strict détecté (Même référence et même montant de ${formatMoney(exactAmountDuplicates[0]?.totalPaye || 0)})` : undefined}
               >
-                {isDuplicateBordereau ? <Ban className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                <span>{isDuplicateBordereau ? 'Bordereau déjà existant (Doublon)' : 'Valider et Enregistrer le Règlement'}</span>
+                {isExactDuplicate ? <Ban className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                <span>{isExactDuplicate ? 'Doublon Strict (Même Référence & Montant)' : 'Valider et Enregistrer le Règlement'}</span>
               </button>
             )}
           </div>
@@ -2092,45 +2414,133 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         </div>
       )}
       {/* Confirmation Modal for Missing Society */}
+      {/* Modal d'Alerte : Société Inexistante dans la Base */}
       {missingSocPrompt && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center gap-3 text-amber-600">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200 shrink-0">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0">
                 <AlertCircle className="h-6 w-6" />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">Société non répertoriée</h3>
-                <p className="text-xs text-slate-500">Validation requise avant règlement</p>
+                <p className="text-xs font-semibold text-rose-600">Création automatique interdite</p>
               </div>
             </div>
 
-            <div className="rounded-xl bg-amber-50/70 p-4 border border-amber-200/80 text-xs sm:text-sm text-slate-700 leading-relaxed">
-              La société / l'organisme payeur <strong className="font-bold text-amber-900">« {missingSocPrompt.socName} »</strong> figurant sur ce décompte ne se trouve pas dans votre liste de sociétés enregistrées.
-              <br /><br />
-              Souhaitez-vous créer automatiquement la société <strong className="font-bold text-slate-900">« {missingSocPrompt.socName} »</strong> pour poursuivre l'enregistrement du règlement, ou annuler l'importation ?
+            <div className="rounded-xl bg-rose-50/80 p-4 border border-rose-200 text-xs sm:text-sm text-slate-800 leading-relaxed space-y-2">
+              <p>
+                La société ou l'organisme payeur <strong className="font-bold text-rose-950">« {missingSocPrompt.socName} »</strong> figurant sur ce décompte n'existe pas dans la base de données.
+              </p>
+              <p className="text-xs text-slate-600">
+                <strong>Information :</strong> Aucune nouvelle société ne peut être créée automatiquement lors d'une importation. Veuillez d'abord enregistrer cette société dans le paramétrage de l'application, ou sélectionner ci-dessous une société existante à laquelle rattacher ce décompte.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <label className="block text-xs font-bold text-slate-700">Rattacher à une société existante (optionnel) :</label>
+              <select
+                value={selectedOverrideSocId}
+                onChange={(e) => setSelectedOverrideSocId(e.target.value)}
+                className="w-full bg-white text-xs font-semibold rounded-xl p-2.5 border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="">-- Choisir une société existante --</option>
+                {societes.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nom} ({s.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              {selectedOverrideSocId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const socId = selectedOverrideSocId;
+                    setMissingSocPrompt(null);
+                    setSelectedOverrideSocId('');
+                    executeValidateAndSave(socId);
+                  }}
+                  className="w-full inline-flex justify-center items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-500 transition focus:outline-none cursor-pointer"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Rattacher et enregistrer le décompte
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setMissingSocPrompt(null);
+                  setSelectedOverrideSocId('');
+                }}
+                className="w-full inline-flex justify-center items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition focus:outline-none cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+                Fermer / Annuler l'importation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirmation Modal for Unlinked Acts */}
+      {showUnlinkedConfirmModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200 shrink-0">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Actes non rattachés détectés</h3>
+                <p className="text-xs text-slate-500">Avertissement avant validation du règlement</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-amber-50/70 p-4 border border-amber-200/80 text-xs sm:text-sm text-slate-700 leading-relaxed space-y-2">
+              <p>
+                Il y a <strong className="font-bold text-amber-900">{selectedRows.filter(r => !r.matchedCandidate).length} acte(s) non relié(s)</strong> à une prescription ou facture existante dans votre sélection (sur un total de {selectedRows.length} actes sélectionnés).
+              </p>
+              <p className="text-xs text-slate-600">
+                Si vous continuez, ces lignes seront enregistrées dans le règlement en tant qu'actes autonomes (créant des prestations enregistrées au vol), et vous pourrez toujours les consulter et les filtrer sous <em>« Non reliés »</em> dans la vue des Règlements.
+              </p>
+              <p className="text-xs font-semibold text-slate-800">
+                Souhaitez-vous quand même valider et continuer l'importation ?
+              </p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => {
-                  const name = missingSocPrompt.socName;
-                  setMissingSocPrompt(null);
-                  executeValidateAndSave(name);
+                  setShowUnlinkedConfirmModal(false);
+                  executeValidateAndSave();
                 }}
-                className="flex-1 inline-flex justify-center items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-500 transition focus:outline-none cursor-pointer"
+                className="flex-1 inline-flex justify-center items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition focus:outline-none cursor-pointer"
               >
-                <CheckCircle2 className="h-4 w-4" />
-                Créer et poursuivre
+                <Check className="h-4 w-4" />
+                Continuer et enregistrer
               </button>
               <button
                 type="button"
-                onClick={() => setMissingSocPrompt(null)}
+                onClick={() => {
+                  setShowUnlinkedConfirmModal(false);
+                  setConfrontFilter('UNLINKED');
+                }}
+                className="inline-flex justify-center items-center gap-2 rounded-xl bg-amber-100 px-4 py-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-200 transition focus:outline-none cursor-pointer"
+                title="Afficher uniquement les actes non reliés pour les vérifier et les lier"
+              >
+                <Unlink className="h-4 w-4" />
+                Vérifier les non reliés
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUnlinkedConfirmModal(false)}
                 className="inline-flex justify-center items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition focus:outline-none cursor-pointer"
               >
                 <X className="h-4 w-4" />
-                Annuler l'importation
+                Annuler
               </button>
             </div>
           </div>

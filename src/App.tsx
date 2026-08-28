@@ -22,12 +22,13 @@ import {
   saveLocalTable,
   backupServerDataToLocalStorage,
 } from './utils/localPersistence';
-import { ServerOff, RefreshCw, AlertTriangle, Database, HardDrive, ArrowLeftRight } from 'lucide-react';
+import { ServerOff, RefreshCw, AlertTriangle, Database, HardDrive, ArrowLeftRight, Building2, Filter, Layers, RotateCcw } from 'lucide-react';
 
 export function App() {
   // Navigation & selection states
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
+  const [selectedSubSocieteId, setSelectedSubSocieteId] = useState<string>('ALL');
 
   // Storage Mode State: 'server' (MySQL WAMP) vs 'local' (LocalStorage)
   const [storageMode, setStorageMode] = useState<StorageMode>(() => getStoredStorageMode());
@@ -75,6 +76,20 @@ export function App() {
   const [familles, setFamilles] = useState<Famille[]>([]);
   const [prestations, setPrestations] = useState<Prestation[]>([]);
   const [paiements, setPaiements] = useState<Paiement[]>([]);
+
+  // Computed values for selected societe and sub-societe filter
+  const selectedSociete = societes.find(s => s.id === selectedSocieteId);
+
+  // Collect unique sub-societies / services for the selected societe
+  const availableSubSocietes = Array.from(
+    new Set([
+      ...(selectedSociete?.sousSocietes || []),
+      ...prestations.filter(p => p.societeId === selectedSocieteId && p.sousSociete?.trim()).map(p => p.sousSociete.trim()),
+      ...personnes.filter(p => p.societeId === selectedSocieteId && p.sousSociete?.trim()).map(p => p.sousSociete!.trim())
+    ])
+  ).filter(Boolean).sort();
+
+  const selectedSubSociete = selectedSubSocieteId !== 'ALL' ? selectedSubSocieteId : undefined;
 
   // Modals quick trigger
   const [isPrestationModalOpen, setIsPrestationModalOpen] = useState(false);
@@ -495,6 +510,97 @@ export function App() {
     }
   };
 
+  // Handler for Regrouping / Merging Sub-Societés
+  const handleMergeSubSocietes = async (
+    societeId: string,
+    sourceNames: string[],
+    targetName: string
+  ) => {
+    const cleanTarget = targetName.trim();
+    if (!cleanTarget || sourceNames.length === 0) return;
+
+    const normalizedSources = sourceNames.map(s => s.toLowerCase().trim());
+
+    // Find matching societe object to handle both id and name comparisons
+    const targetSocObj = societes.find(s => s.id === societeId);
+    const socNameLower = targetSocObj ? targetSocObj.nom.toLowerCase().trim() : '';
+
+    // 1. Update Prestations
+    const updatedPrestations: Prestation[] = [];
+    const nextPrestations = prestations.map(p => {
+      const pSocId = (p.societeId || '').toLowerCase().trim();
+      const pSocNom = (p.societeNom || '').toLowerCase().trim();
+      const matchesSoc = pSocId === societeId.toLowerCase() || (socNameLower && pSocNom === socNameLower);
+
+      if (matchesSoc && p.sousSociete && normalizedSources.includes(p.sousSociete.toLowerCase().trim())) {
+        const up = { ...p, sousSociete: cleanTarget };
+        updatedPrestations.push(up);
+        return up;
+      }
+      return p;
+    });
+
+    // 2. Update Personnes
+    const updatedPersonnes: Personne[] = [];
+    const nextPersonnes = personnes.map(p => {
+      const pSocId = (p.societeId || '').toLowerCase().trim();
+      const matchesSoc = pSocId === societeId.toLowerCase();
+
+      if (matchesSoc && p.sousSociete && normalizedSources.includes(p.sousSociete.toLowerCase().trim())) {
+        const up = { ...p, sousSociete: cleanTarget };
+        updatedPersonnes.push(up);
+        return up;
+      }
+      return p;
+    });
+
+    // 3. Update Societe's sousSocietes list
+    let updatedSociete: Societe | null = null;
+    if (targetSocObj) {
+      const existingList = targetSocObj.sousSocietes || [];
+      const filteredList = existingList.filter(s => !normalizedSources.includes(s.toLowerCase().trim()));
+      if (!filteredList.some(s => s.toLowerCase().trim() === cleanTarget.toLowerCase())) {
+        filteredList.push(cleanTarget);
+      }
+      filteredList.sort();
+      updatedSociete = { ...targetSocObj, sousSocietes: filteredList };
+    }
+
+    try {
+      if (storageMode === 'server') {
+        if (updatedPrestations.length > 0) {
+          await saveWampDataBulk('prestations', updatedPrestations);
+        }
+        if (updatedPersonnes.length > 0) {
+          await saveWampDataBulk('personnes', updatedPersonnes);
+        }
+        if (updatedSociete) {
+          await saveWampData('societes', updatedSociete);
+        }
+      }
+
+      if (updatedPrestations.length > 0) {
+        setPrestations(nextPrestations);
+        saveLocalTable('prestations', nextPrestations);
+      }
+      if (updatedPersonnes.length > 0) {
+        setPersonnes(nextPersonnes);
+        saveLocalTable('personnes', nextPersonnes);
+      }
+      if (updatedSociete) {
+        setSocietes(prev => {
+          const next = prev.map(s => s.id === societeId ? updatedSociete! : s);
+          saveLocalTable('societes', next);
+          return next;
+        });
+      }
+
+      setLastSyncTime(new Date());
+    } catch (err: any) {
+      alert(`Erreur lors du regroupement des sous-sociétés : ${err.message || err}`);
+    }
+  };
+
   // Handlers for Personnes
   const handleSavePersonne = async (personne: Personne) => {
     try {
@@ -795,6 +901,83 @@ export function App() {
         onSyncServerToLocal={handleSyncServerToLocal}
       />
 
+      {/* BANDEAU DU FILTRE AVANCÉ : SOCIÉTÉ / GARANT (TRANSPARENT, ANCRÉ À GAUCHE) */}
+      <div id="advanced-filter-banner" className="bg-transparent text-slate-900 border-b border-slate-200 px-4 py-2.5 sm:px-6 lg:px-8 relative z-20">
+        <div className="max-w-7xl flex flex-col md:flex-row md:items-center justify-start gap-4 md:gap-8">
+          
+          {/* Intitulé et statut */}
+          <div className="flex items-center space-x-3 shrink-0">
+            <div className="p-2 rounded-xl bg-indigo-100/80 border border-indigo-200 text-indigo-700 shadow-xs">
+              <Filter className="w-4.5 h-4.5 text-indigo-600" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-950">
+                  Filtre Avancé
+                </span>
+                {selectedSocieteId !== 'ALL' ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-xs">
+                    Filtre actif
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200/70 text-slate-700 border border-slate-300">
+                    Vue Globale (Tous les Garants)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs font-semibold text-slate-600 mt-0.5">
+                Périmètre : <strong className="text-slate-900">{selectedSociete ? selectedSociete.nom : 'Tous les Garants'}</strong>
+              </p>
+            </div>
+          </div>
+
+          {/* Formulaire des Sélecteurs */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 1. Sélecteur Société / Garant */}
+            <div className="flex items-center bg-white rounded-xl p-1 border border-slate-300 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-700 px-2 flex items-center gap-1.5 whitespace-nowrap">
+                <Building2 className="w-3.5 h-3.5 text-rose-600" />
+                Société / Garant :
+              </span>
+              <select
+                id="select-filter-societe"
+                value={selectedSocieteId}
+                onChange={(e) => {
+                  setSelectedSocieteId(e.target.value);
+                  setSelectedSubSocieteId('ALL');
+                }}
+                className="bg-slate-50 text-slate-900 text-xs font-bold rounded-lg px-2.5 py-1.5 border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 hover:border-slate-400 cursor-pointer"
+              >
+                <option value="ALL">Tous les Garants ({societes.length})</option>
+                {societes.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.nom} ({s.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Bouton Réinitialiser */}
+            {selectedSocieteId !== 'ALL' && (
+              <button
+                id="btn-reset-filter"
+                type="button"
+                onClick={() => {
+                  setSelectedSocieteId('ALL');
+                  setSelectedSubSocieteId('ALL');
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-bold transition flex items-center space-x-1 cursor-pointer shadow-xs"
+                title="Réinitialiser pour afficher tous les garants"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Réinitialiser</span>
+              </button>
+            )}
+          </div>
+
+        </div>
+      </div>
+
       {/* Navigation Tab Bar */}
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
 
@@ -827,6 +1010,7 @@ export function App() {
             personnes={personnes}
             familles={familles}
             selectedSocieteId={selectedSocieteId}
+            selectedSubSocieteId={selectedSubSocieteId}
             onSavePrestation={handleSavePrestation}
             onDeletePrestation={handleDeletePrestation}
             onDeleteFacture={handleDeleteFacture}
@@ -876,8 +1060,11 @@ export function App() {
         {activeTab === 'societes' && (
           <SocietesView
             societes={societes}
+            prestations={prestations}
+            personnes={personnes}
             onSaveSociete={handleSaveSociete}
             onDeleteSociete={handleDeleteSociete}
+            onMergeSubSocietes={handleMergeSubSocietes}
           />
         )}
 

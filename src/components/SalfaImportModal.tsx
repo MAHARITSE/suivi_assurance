@@ -101,6 +101,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   const [autoCreateMissingSocietes, setAutoCreateMissingSocietes] = useState(true);
   const [autoCreateMissingPersonnes, setAutoCreateMissingPersonnes] = useState(true);
   const [missingSocPrompt, setMissingSocPrompt] = useState<{ socName: string } | null>(null);
+  const [selectedOverrideSocId, setSelectedOverrideSocId] = useState<string>('');
   const [selectedLines, setSelectedLines] = useState<Record<number, boolean>>({});
   const excelInputRef = useRef<HTMLInputElement>(null);
 
@@ -307,7 +308,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     }));
   };
 
-  const executeImportWithSociety = (approvedSocName?: string) => {
+  const executeImportWithSociety = (overrideExistingSocId?: string) => {
     if (!parsedInvoice) return;
 
     const chosenLignes = parsedInvoice.lignes.filter((_, idx) => selectedLines[idx]);
@@ -318,24 +319,16 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
     const docSocName = (parsedInvoice.clientDoit || chosenLignes[0]?.societeAffiliee || targetSocietyName || 'MCI CARE').trim();
 
-    let matchedSoc = findBestMatchingSociete(docSocName, societes, targetSocietyName);
+    let matchedSoc = overrideExistingSocId
+      ? societes.find(s => s.id === overrideExistingSocId)
+      : findBestMatchingSociete(docSocName, societes, targetSocietyName);
 
     const createdSocietes: Societe[] = [];
     const createdPersonnes: Personne[] = [];
 
     if (!matchedSoc) {
-      if (approvedSocName) {
-        matchedSoc = {
-          id: generateId(`soc-new-${Date.now()}`),
-          nom: approvedSocName,
-          code: approvedSocName.substring(0, 4).toUpperCase(),
-          tauxCouvertureDefaut: 100,
-        };
-        createdSocietes.push(matchedSoc);
-      } else {
-        setMissingSocPrompt({ socName: docSocName });
-        return;
-      }
+      setMissingSocPrompt({ socName: docSocName });
+      return;
     }
 
     const isRealMatricule = (mat: string) => {
@@ -350,22 +343,91 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     };
 
     const fileBestMatricules: Record<string, string> = {};
+    const fileBestSousSocietes: Record<string, string> = {};
+
     chosenLignes.forEach(l => {
       const nameKey = (l.nomPrenom || '').trim().toLowerCase();
       const mat = (l.matricule || '').replace(/\s+/g, '');
+      const matKey = mat.toLowerCase();
+      const ss = (l.sousSociete || '').trim();
+
       if (nameKey) {
         if (!fileBestMatricules[nameKey]) {
           fileBestMatricules[nameKey] = mat;
         } else {
           fileBestMatricules[nameKey] = getBestMatricule(fileBestMatricules[nameKey], mat);
         }
+        if (ss) {
+          fileBestSousSocietes[`name:${nameKey}`] = ss;
+        }
+      }
+      if (matKey && ss) {
+        fileBestSousSocietes[`mat:${matKey}`] = ss;
       }
     });
+
+    const updateOrCreatePersonneRecord = (per: Personne) => {
+      const existingIdx = createdPersonnes.findIndex(p => p.id === per.id);
+      if (existingIdx >= 0) {
+        createdPersonnes[existingIdx] = { ...per };
+      } else {
+        createdPersonnes.push({ ...per });
+      }
+    };
+
+    const findExistingSousSocieteForPerson = (
+      perObj?: Personne,
+      nameKey?: string,
+      matKey?: string
+    ): string => {
+      if (perObj?.sousSociete && perObj.sousSociete.trim()) {
+        return perObj.sousSociete.trim();
+      }
+
+      const createdMatch = createdPersonnes.find(p => 
+        (perObj && p.id === perObj.id) ||
+        (nameKey && p.nomPrenom && p.nomPrenom.toLowerCase().trim() === nameKey) ||
+        (matKey && p.matricule && p.matricule.replace(/\s+/g, '').toLowerCase() === matKey)
+      );
+      if (createdMatch?.sousSociete && createdMatch.sousSociete.trim()) {
+        return createdMatch.sousSociete.trim();
+      }
+
+      if (nameKey && fileBestSousSocietes[`name:${nameKey}`]) {
+        return fileBestSousSocietes[`name:${nameKey}`];
+      }
+      if (matKey && fileBestSousSocietes[`mat:${matKey}`]) {
+        return fileBestSousSocietes[`mat:${matKey}`];
+      }
+
+      const dbPer = personnes.find(p => 
+        (nameKey && p.nomPrenom && p.nomPrenom.toLowerCase().trim() === nameKey) ||
+        (matKey && p.matricule && p.matricule.replace(/\s+/g, '').toLowerCase() === matKey)
+      );
+      if (dbPer?.sousSociete && dbPer.sousSociete.trim()) {
+        return dbPer.sousSociete.trim();
+      }
+
+      const prevPrest = prestations.find(p => {
+        if (!p.sousSociete || !p.sousSociete.trim()) return false;
+        if (perObj && p.personneId === perObj.id) return true;
+        if (nameKey && p.nomAgent && p.nomAgent.toLowerCase().trim() === nameKey) return true;
+        if (matKey && p.matricule && p.matricule.replace(/\s+/g, '').toLowerCase() === matKey) return true;
+        return false;
+      });
+
+      if (prevPrest?.sousSociete && prevPrest.sousSociete.trim()) {
+        return prevPrest.sousSociete.trim();
+      }
+
+      return '';
+    };
+
+    const updatedOlderPrestationsMap: Record<string, Prestation> = {};
 
     const newPrestations: Prestation[] = chosenLignes.map((ligne, idx) => {
       const prestId = generateId(`prest-salfa-${idx}`);
       const mainSocName = docSocName;
-      const sousSoc = ligne.sousSociete || '';
 
       // Patient match / create
       const nameKey = (ligne.nomPrenom || '').trim().toLowerCase();
@@ -380,6 +442,8 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       );
 
       const rowMatricule = fileMat || (ligne.matricule || '').replace(/\s+/g, '');
+      const matKey = rowMatricule.toLowerCase();
+
       if (!matchedPer && rowMatricule) {
         matchedPer = personnes.find(p => 
           p.matricule.replace(/\s+/g, '').toLowerCase() === rowMatricule.toLowerCase()
@@ -392,19 +456,43 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         
         if (isRealMatricule(finalMatricule) && finalMatricule.trim() !== (matchedPer.matricule || '').trim()) {
           matchedPer.matricule = finalMatricule;
-          const existingIdx = createdPersonnes.findIndex(p => p.id === matchedPer!.id);
-          if (existingIdx >= 0) {
-            createdPersonnes[existingIdx] = {
-              ...matchedPer,
-              matricule: finalMatricule
-            };
-          } else {
-            createdPersonnes.push({
-              ...matchedPer,
-              matricule: finalMatricule
-            });
-          }
+          updateOrCreatePersonneRecord(matchedPer);
         }
+      }
+
+      // Sub-societé Auto-Attribution and Retroactive Update Logic
+      const rawSousSoc = (ligne.sousSociete || '').trim();
+      let finalSousSoc = rawSousSoc;
+
+      if (!rawSousSoc) {
+        // RULE 1: If person has no sub-company in import file, search DB / file for previously assigned sub-company
+        const foundSousSoc = findExistingSousSocieteForPerson(matchedPer, nameKey, matKey);
+        if (foundSousSoc) {
+          finalSousSoc = foundSousSoc;
+        }
+      } else {
+        // RULE 2: If person HAS sub-company in import file, update older prestations without sub-company
+        const targetPerId = matchedPer?.id;
+        const olderUnassigned = prestations.filter(oldP => {
+          if (oldP.sousSociete && oldP.sousSociete.trim() !== '') return false;
+          if (targetPerId && oldP.personneId === targetPerId) return true;
+          if (nameKey && oldP.nomAgent && oldP.nomAgent.trim().toLowerCase() === nameKey) return true;
+          if (matKey && oldP.matricule && oldP.matricule.replace(/\s+/g, '').toLowerCase() === matKey) return true;
+          return false;
+        });
+
+        olderUnassigned.forEach(oldP => {
+          updatedOlderPrestationsMap[oldP.id] = {
+            ...oldP,
+            sousSociete: finalSousSoc,
+          };
+        });
+      }
+
+      // Keep matched person's sub-company in sync
+      if (matchedPer && finalSousSoc && (!matchedPer.sousSociete || matchedPer.sousSociete.trim() !== finalSousSoc)) {
+        matchedPer.sousSociete = finalSousSoc;
+        updateOrCreatePersonneRecord(matchedPer);
       }
 
       if (!matchedPer && autoCreateMissingPersonnes) {
@@ -413,10 +501,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           matricule: finalMatricule || `MAT-${100000 + idx}`,
           nomPrenom: ligne.nomPrenom,
           societeId: matchedSoc?.id || societes[0]?.id || 'soc-mcicare',
-          sousSociete: sousSoc || undefined,
+          sousSociete: finalSousSoc || undefined,
           qualite: (ligne.ayantDroit ? 'Ayant droit' : 'Adhérent Principal') as any,
         };
-        createdPersonnes.push(matchedPer);
+        updateOrCreatePersonneRecord(matchedPer);
       }
 
       // Build multiple sub-lines per act
@@ -462,7 +550,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         date: ligne.dateSoins || parsedInvoice.dateEmission || new Date().toISOString().split('T')[0],
         societeId: matchedSoc?.id || societes[0]?.id || 'soc-1',
         societeNom: matchedSoc?.nom || mainSocName,
-        sousSociete: sousSoc,
+        sousSociete: finalSousSoc,
         personneId: matchedPer?.id || personnes[0]?.id || 'per-1',
         nomAgent: ligne.nomPrenom,
         matricule: finalMatricule || matchedPer?.matricule || '',
@@ -480,7 +568,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
       };
     });
 
-    onImportPrestations(newPrestations, createdSocietes, createdPersonnes);
+    const retroUpdatedList = Object.values(updatedOlderPrestationsMap);
+    const allPrestationsToPass = [...newPrestations, ...retroUpdatedList];
+
+    onImportPrestations(allPrestationsToPass, createdSocietes, createdPersonnes);
     handleResetAndBack();
     onClose();
   };
@@ -1007,46 +1098,71 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
         </div>
       </div>
 
-      {/* Confirmation Modal for Missing Society */}
+      {/* Modal d'Alerte : Société Inexistante dans la Base */}
       {missingSocPrompt && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center gap-3 text-amber-600">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200 shrink-0">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0">
                 <AlertCircle className="h-6 w-6" />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">Société non répertoriée</h3>
-                <p className="text-xs text-slate-500">Validation requise avant importation</p>
+                <p className="text-xs font-semibold text-rose-600">Création automatique interdite</p>
               </div>
             </div>
 
-            <div className="rounded-xl bg-amber-50/70 p-4 border border-amber-200/80 text-xs sm:text-sm text-slate-700 leading-relaxed">
-              La société / l'organisme payeur <strong className="font-bold text-amber-900">« {missingSocPrompt.socName} »</strong> figurant sur ce document ne se trouve pas dans votre liste de sociétés enregistrées.
-              <br /><br />
-              Souhaitez-vous créer automatiquement la société <strong className="font-bold text-slate-900">« {missingSocPrompt.socName} »</strong> pour poursuivre l'importation, ou annuler l'importation ?
+            <div className="rounded-xl bg-rose-50/80 p-4 border border-rose-200 text-xs sm:text-sm text-slate-800 leading-relaxed space-y-2">
+              <p>
+                La société ou l'organisme payeur <strong className="font-bold text-rose-950">« {missingSocPrompt.socName} »</strong> figurant sur ce document n'existe pas dans la base de données.
+              </p>
+              <p className="text-xs text-slate-600">
+                <strong>Information :</strong> Aucune nouvelle société ne peut être créée automatiquement lors d'une importation. Veuillez d'abord enregistrer cette société dans le paramétrage de l'application, ou sélectionner ci-dessous une société existante à laquelle rattacher cette facture.
+              </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="space-y-1.5 pt-1">
+              <label className="block text-xs font-bold text-slate-700">Rattacher à une société existante (optionnel) :</label>
+              <select
+                value={selectedOverrideSocId}
+                onChange={(e) => setSelectedOverrideSocId(e.target.value)}
+                className="w-full bg-white text-xs font-semibold rounded-xl p-2.5 border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="">-- Choisir une société existante --</option>
+                {societes.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nom} ({s.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              {selectedOverrideSocId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const socId = selectedOverrideSocId;
+                    setMissingSocPrompt(null);
+                    setSelectedOverrideSocId('');
+                    executeImportWithSociety(socId);
+                  }}
+                  className="w-full inline-flex justify-center items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-500 transition focus:outline-none cursor-pointer"
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Rattacher et poursuivre l'importation
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
-                  const name = missingSocPrompt.socName;
                   setMissingSocPrompt(null);
-                  executeImportWithSociety(name);
+                  setSelectedOverrideSocId('');
                 }}
-                className="flex-1 inline-flex justify-center items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-500 transition focus:outline-none cursor-pointer"
-              >
-                <CheckCircle className="h-4 w-4" />
-                Créer et poursuivre
-              </button>
-              <button
-                type="button"
-                onClick={() => setMissingSocPrompt(null)}
-                className="inline-flex justify-center items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition focus:outline-none cursor-pointer"
+                className="w-full inline-flex justify-center items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition focus:outline-none cursor-pointer"
               >
                 <X className="h-4 w-4" />
-                Annuler l'importation
+                Fermer / Annuler l'importation
               </button>
             </div>
           </div>

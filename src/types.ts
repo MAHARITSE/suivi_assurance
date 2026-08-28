@@ -7,6 +7,7 @@ export interface Societe {
   email?: string;
   adresse?: string;
   tauxCouvertureDefaut: number; // e.g. 80%
+  sousSocietes?: string[];
 }
 
 export interface Personne {

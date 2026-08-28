@@ -95,6 +95,7 @@ interface PrestationsViewProps {
   personnes: Personne[];
   familles: Famille[];
   selectedSocieteId: string;
+  selectedSubSocieteId?: string;
   onSavePrestation: (prestation: Prestation) => void;
   onDeletePrestation: (id: string) => void;
   onDeleteFacture?: (numeroFacture: string) => void;
@@ -125,6 +126,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
   personnes,
   familles,
   selectedSocieteId,
+  selectedSubSocieteId,
   onSavePrestation,
   onDeletePrestation,
   onDeleteFacture,
@@ -222,10 +224,14 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     }
   }, [factureExcludeContext]);
 
-  // Sync prop selectedSocieteId
+  // Sync props selectedSocieteId & selectedSubSocieteId
   React.useEffect(() => {
     setFilterSocieteId(selectedSocieteId && selectedSocieteId !== 'ALL' ? selectedSocieteId : 'ALL');
   }, [selectedSocieteId]);
+
+  React.useEffect(() => {
+    setFilterSousSociete(selectedSubSocieteId && selectedSubSocieteId !== 'ALL' ? selectedSubSocieteId : 'ALL');
+  }, [selectedSubSocieteId]);
 
   const handleExportRecouvrementPdfSelected = () => {
     if (selectedPrestations.size === 0) return;
@@ -547,10 +553,35 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     );
   };
 
-  // Status counters for quick badges
+  // Status counters for quick badges, scoped to current societe & sub-societe filters
   const statusCounts = useMemo(() => {
     let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
-    const realPrestations = prestations.filter(p => !isReglementPrestation(p));
+
+    const isSocAll = !filterSocieteId || filterSocieteId === 'ALL';
+    const filterSocLower = (filterSocieteId || '').toLowerCase().trim();
+    const matchedSocObj = societes.find(s => (s.id && s.id.toLowerCase() === filterSocLower) || (s.nom && s.nom.toLowerCase() === filterSocLower));
+
+    const realPrestations = prestations.filter(p => {
+      if (isReglementPrestation(p)) return false;
+
+      // Societe filter
+      const socNameInList = (p.societeNom || '').toLowerCase().trim();
+      const socIdInList = (p.societeId || '').toLowerCase().trim();
+      const matchesSociete = isSocAll || 
+        socIdInList === filterSocLower || 
+        socNameInList === filterSocLower ||
+        (matchedSocObj && (socIdInList === matchedSocObj.id.toLowerCase() || socNameInList === matchedSocObj.nom.toLowerCase()));
+
+      if (!matchesSociete) return false;
+
+      // Sous-societe filter
+      const matchesSousSoc = !filterSousSociete || filterSousSociete === 'ALL' || 
+        (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
+
+      if (!matchesSousSoc) return false;
+
+      return true;
+    });
 
     realPrestations.forEach(p => {
       const fin = getPrestationFinancials(p);
@@ -566,6 +597,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         enCours++;
       }
     });
+
     return {
       all: realPrestations.length,
       enCours,
@@ -574,7 +606,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       paye,
       rejete,
     };
-  }, [prestations, paymentsMap]);
+  }, [prestations, paymentsMap, filterSocieteId, filterSousSociete, societes]);
 
   // Filtered and Sorted List
   const filteredAndSortedList = useMemo(() => {

@@ -90,6 +90,11 @@ export const ChangerLiaisonModal: React.FC<ChangerLiaisonModalProps> = ({
     const lRemb = Math.max(0, lBrut - lPart);
 
     (paiements || []).forEach(p => {
+      // STRICT INTER-SOCIETY RULE: Disallow linking payment to prestation of a different society/garant
+      if (p.societeId && prestation.societeId && p.societeId !== prestation.societeId) {
+        return;
+      }
+
       (p.lignes || []).forEach(l => {
         const pAgent = (l.nomAgent || l.nomBaseAssurance || '').trim().toLowerCase();
         const pMat = (l.immatriculation || '').trim().toLowerCase();

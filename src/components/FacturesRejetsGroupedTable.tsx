@@ -3,16 +3,11 @@ import {
   ChevronDown,
   ChevronRight,
   Receipt,
-  FileText,
   AlertTriangle,
-  Clock,
-  RefreshCw,
-  CheckCircle2,
   XCircle,
   Building2,
   Calendar,
   Users,
-  Edit3,
   RotateCcw,
   ArrowUpDown,
   ArrowUp,
@@ -34,7 +29,6 @@ export interface GroupedRejetFacture {
   totalMontantBrut: number;
   totalMontantRejete: number;
   tauxRejet: number; // (totalMontantRejete / totalMontantBrut) * 100
-  statutGlobal: 'À traiter' | 'En contestation' | 'Régularisé' | 'Rejet définitif' | 'Mixte';
   hasDismissed?: boolean;
 }
 
@@ -46,8 +40,7 @@ export type RejetFactureSortField =
   | 'nombreLignesRejet'
   | 'totalMontantBrut'
   | 'totalMontantRejete'
-  | 'tauxRejet'
-  | 'statutGlobal';
+  | 'tauxRejet';
 
 interface FacturesRejetsGroupedTableProps {
   groupedFactures: GroupedRejetFacture[];
@@ -56,7 +49,6 @@ interface FacturesRejetsGroupedTableProps {
   sortField: RejetFactureSortField;
   sortDirection: 'asc' | 'desc';
   onSort: (field: RejetFactureSortField) => void;
-  onOpenEditModal: (rejet: RejetDetail) => void;
   onDismissRejet: (id: string, numFacture: string) => void;
   onRestoreRejet: (id: string, numFacture: string) => void;
   showDismissed: boolean;
@@ -69,7 +61,6 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
   sortField,
   sortDirection,
   onSort,
-  onOpenEditModal,
   onDismissRejet,
   onRestoreRejet,
   showDismissed
@@ -195,19 +186,6 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                 </div>
               </th>
 
-              {/* Statut Global */}
-              <th
-                onClick={() => onSort('statutGlobal')}
-                className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${
-                  sortField === 'statutGlobal' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
-                }`}
-              >
-                <div className="flex items-center justify-center">
-                  <span>Statut Suivi</span>
-                  {renderSortIcon('statutGlobal')}
-                </div>
-              </th>
-
               <th className="py-3 px-3 text-center">Détails</th>
             </tr>
           </thead>
@@ -327,39 +305,6 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                         </div>
                       </td>
 
-                      {/* Statut Global */}
-                      <td className="py-3 px-3 text-center">
-                        {facture.statutGlobal === 'À traiter' && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                            <Clock className="w-3 h-3 mr-1" />
-                            À traiter
-                          </span>
-                        )}
-                        {facture.statutGlobal === 'En contestation' && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                            <RefreshCw className="w-3 h-3 mr-1" />
-                            En contestation
-                          </span>
-                        )}
-                        {facture.statutGlobal === 'Régularisé' && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            <CheckCircle2 className="w-3 h-3 mr-1" />
-                            Régularisé
-                          </span>
-                        )}
-                        {facture.statutGlobal === 'Rejet définitif' && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
-                            <XCircle className="w-3 h-3 mr-1" />
-                            Définitif
-                          </span>
-                        )}
-                        {facture.statutGlobal === 'Mixte' && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
-                            Mixte
-                          </span>
-                        )}
-                      </td>
-
                       {/* Action Expand Details */}
                       <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <button
@@ -375,7 +320,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                     {/* Expanded Detail Rows */}
                     {isExpanded && (
                       <tr className="bg-slate-50/80">
-                        <td colSpan={10} className="p-4 space-y-3">
+                        <td colSpan={9} className="p-4 space-y-3">
                           <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs space-y-2">
                             <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                               <span className="flex items-center gap-1.5 text-rose-700">
@@ -397,7 +342,6 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                                   <th className="py-2 px-2 text-right text-rose-700">Montant Rejeté</th>
                                   <th className="py-2 px-2 text-left">Motif notifié</th>
                                   <th className="py-2 px-2 text-center">Bordereau Paiement</th>
-                                  <th className="py-2 px-2 text-center">Statut Contestation</th>
                                   <th className="py-2 px-2 text-center">Actions</th>
                                 </tr>
                               </thead>
@@ -425,51 +369,11 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                                       <p className="text-[11px] text-slate-700 truncate" title={r.motif}>
                                         {r.motif}
                                       </p>
-                                      {r.commentaireContestation && (
-                                        <div className="text-[10px] text-indigo-700 italic mt-0.5">
-                                          Note : {r.commentaireContestation}
-                                        </div>
-                                      )}
                                     </td>
                                     <td className="py-2 px-2 text-center font-mono text-[10px] text-slate-600 whitespace-nowrap">
                                       {r.bordereauPaiement || '-'}
                                     </td>
-                                    <td className="py-2 px-2 text-center whitespace-nowrap">
-                                      {r.statutContestation === 'À traiter' && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-800">
-                                          <Clock className="w-2.5 h-2.5 mr-1" />
-                                          À traiter
-                                        </span>
-                                      )}
-                                      {r.statutContestation === 'En contestation' && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-100 text-blue-800">
-                                          <RefreshCw className="w-2.5 h-2.5 mr-1" />
-                                          En contestation
-                                        </span>
-                                      )}
-                                      {r.statutContestation === 'Régularisé' && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800">
-                                          <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
-                                          Régularisé
-                                        </span>
-                                      )}
-                                      {r.statutContestation === 'Rejet définitif' && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-200 text-slate-700">
-                                          <XCircle className="w-2.5 h-2.5 mr-1" />
-                                          Définitif
-                                        </span>
-                                      )}
-                                    </td>
                                     <td className="py-2 px-2 text-center whitespace-nowrap space-x-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => onOpenEditModal(r)}
-                                        className="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold text-[10px] transition cursor-pointer"
-                                        title="Modifier le statut"
-                                      >
-                                        <Edit3 className="w-3 h-3 inline mr-1 text-slate-500" />
-                                        Traiter
-                                      </button>
                                       {showDismissed ? (
                                         <button
                                           type="button"
