@@ -204,27 +204,117 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     return list;
   }, [prestations]);
 
-  // Reconciliation analysis for a payment
+  // Helper to get normalized signature of lines in a payment
+  const getPaiementLinesSignature = (lines: LignePaiement[] | undefined) => {
+    if (!lines || lines.length === 0) return [];
+    return lines.map(l => {
+      const nom = (l.nomAgent || l.nomBaseAssurance || '').trim().toLowerCase();
+      const matricule = (l.immatriculation || '').trim().toLowerCase();
+      const dateSoins = (l.dateSoins || '').split('T')[0];
+      const paye = Math.round(Number(l.totalPaye || l.montantPaye || 0));
+      const code = (l.codeActe || (l.actesPayes && l.actesPayes[0]?.code) || '').trim().toLowerCase();
+      const numFact = (l.prestationNumero || '').trim().toLowerCase();
+      return `${nom}|${matricule}|${dateSoins}|${code}|${paye}|${numFact}`;
+    }).sort();
+  };
+
+  // Reconciliation and detailed duplicate analysis for a payment
   const getPaiementReconciliationInfo = (p: Paiement) => {
     const pDate = p.datePaiement ? p.datePaiement.split('T')[0] : '';
     const pPaye = p.totalPaye || 0;
     const pReclame = p.totalReclame || 0;
+    const pLines = p.lignes || [];
 
-    // Check if any payment line or total matches a prestation on date and montant
+    // Check if any payment line or total matches a prestation on date, agent name or amount
     const matchingPrestations = prestationActsLookup.filter(pa => {
-      const matchDate = (pa.date && pa.date === pDate) || (p.lignes?.some(l => l.dateSoins && l.dateSoins.split('T')[0] === pa.date));
+      const matchDate = (pa.date && pa.date === pDate) || (pLines.some(l => l.dateSoins && l.dateSoins.split('T')[0] === pa.date));
+      const matchAgent = pa.nomAgent && pLines.some(l => {
+        const nomL = (l.nomAgent || l.nomBaseAssurance || '').trim().toLowerCase();
+        return nomL && pa.nomAgent!.toLowerCase().includes(nomL);
+      });
       const matchAmount = Math.abs(pa.montantBrut - pReclame) < 1 || 
                           Math.abs(pa.montantARembourser - pPaye) < 1 || 
                           Math.abs(pa.montantBrut - pPaye) < 1 ||
-                          (p.lignes?.some(l => Math.abs(pa.montantBrut - (l.montantReclame || l.totalPaye)) < 1 || Math.abs(pa.montantARembourser - l.totalPaye) < 1));
-      return matchDate && matchAmount;
+                          (pLines.some(l => Math.abs(pa.montantBrut - (l.montantReclame || l.totalPaye)) < 1 || Math.abs(pa.montantARembourser - l.totalPaye) < 1));
+      return (matchDate || matchAgent) && matchAmount;
     });
 
-    // Check duplicate payments (same payment date and same totalPaye)
+    // Check duplicate payments:
+    // STRICT RULE: Duplicate detection MUST compare BOTH the exact payment date AND the payment amount.
+    // Two payments can ONLY be duplicates if they share the exact same payment date AND identical amounts (or line amounts).
+    const currentLinesSig = getPaiementLinesSignature(pLines);
+
     const duplicatePayments = paiements.filter(other => {
       if (other.id === p.id) return false;
+      
       const oDate = other.datePaiement ? other.datePaiement.split('T')[0] : '';
-      return oDate === pDate && Math.abs((other.totalPaye || 0) - pPaye) < 1;
+      const oLines = other.lignes || [];
+
+      // 1. Mandatory Date Check: Both must have dates and they must be identical
+      if (!pDate || !oDate || pDate !== oDate) {
+        return false;
+      }
+
+      // 2. Mandatory Society Check
+      const sameSociete = !p.societeId || !other.societeId || p.societeId === other.societeId;
+      if (!sameSociete) return false;
+
+      // 3. Mandatory Amount Check
+      const sameTotalAmount = Math.abs((other.totalPaye || 0) - pPaye) < 1;
+
+      const cleanBord = (s?: string) => (s || '').replace(/[\s\-_.\/]/g, '').toLowerCase();
+      const sameBordereauNum = Boolean(
+        cleanBord(p.numeroBordereau) && 
+        cleanBord(other.numeroBordereau) && 
+        cleanBord(p.numeroBordereau) === cleanBord(other.numeroBordereau)
+      );
+
+      const sameRef = Boolean(
+        cleanBord(p.referencePaiement) && 
+        cleanBord(other.referencePaiement) && 
+        cleanBord(p.referencePaiement) === cleanBord(other.referencePaiement)
+      );
+
+      // 4. Check detailed line matching:
+      if (pLines.length > 0 && oLines.length > 0) {
+        const otherLinesSig = getPaiementLinesSignature(oLines);
+        
+        // Exact signature match
+        const isExactLinesMatch = currentLinesSig.length === otherLinesSig.length && 
+          currentLinesSig.every((sig, idx) => sig === otherLinesSig[idx]);
+
+        // Check overlapping lines with same patient + dateSoins + code + amount
+        const matchingLinesCount = pLines.filter(l1 => {
+          const nom1 = (l1.nomAgent || l1.nomBaseAssurance || '').trim().toLowerCase();
+          const d1 = (l1.dateSoins || '').split('T')[0];
+          const pay1 = Math.round(Number(l1.totalPaye || l1.montantPaye || 0));
+          const code1 = (l1.codeActe || (l1.actesPayes && l1.actesPayes[0]?.code) || '').trim().toLowerCase();
+
+          return oLines.some(l2 => {
+            const nom2 = (l2.nomAgent || l2.nomBaseAssurance || '').trim().toLowerCase();
+            const d2 = (l2.dateSoins || '').split('T')[0];
+            const pay2 = Math.round(Number(l2.totalPaye || l2.montantPaye || 0));
+            const code2 = (l2.codeActe || (l2.actesPayes && l2.actesPayes[0]?.code) || '').trim().toLowerCase();
+
+            const matchNom = nom1 && nom2 && (nom1 === nom2 || nom1.includes(nom2) || nom2.includes(nom1));
+            const matchDateSoins = !d1 || !d2 || d1 === d2;
+            const matchMontant = Math.abs(pay1 - pay2) < 1;
+            const matchCode = !code1 || !code2 || code1 === code2;
+
+            return matchNom && matchDateSoins && matchMontant && matchCode;
+          });
+        }).length;
+
+        const hasHighOverlap = matchingLinesCount >= Math.min(pLines.length, oLines.length) && matchingLinesCount > 0;
+
+        return (isExactLinesMatch && sameTotalAmount) || 
+               (hasHighOverlap && sameTotalAmount) ||
+               (sameBordereauNum && sameTotalAmount) ||
+               (sameRef && sameTotalAmount);
+      }
+
+      // If one of the payments has no lines, require exact same date + same total amount + (same bordereau OR same reference)
+      return sameTotalAmount && (sameBordereauNum || sameRef);
     });
 
     const hasMatch = matchingPrestations.length > 0;
@@ -1494,10 +1584,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                     // Tooltip text for reconciliation
                     const matchTooltip = recInfo.hasMatch
-                      ? `Même date et montant qu'une prestation (${recInfo.matchingPrestations.map(m => `Facture ${m.numeroFacture} : ${formatMoney(m.montantBrut)}`).join(', ')})`
+                      ? `Concordance avec prestation(s) (${recInfo.matchingPrestations.map(m => `Facture ${m.numeroFacture} : ${formatMoney(m.montantBrut)}`).join(', ')})`
                       : undefined;
                     const duplicateTooltip = recInfo.hasDuplicate
-                      ? `Attention : ${recInfo.duplicatePayments.length} autre(s) bordereau(x) avec la même date (${formatDate(p.datePaiement)}) et le même montant (${formatMoney(p.totalPaye)}) : ${recInfo.duplicatePayments.map(d => d.numeroBordereau).join(', ')}`
+                      ? `Doublon potentiel détecté sur les lignes ou le bordereau avec : ${recInfo.duplicatePayments.map(d => `${d.numeroBordereau} (${formatDate(d.datePaiement)} - ${formatMoney(d.totalPaye)})`).join(', ')}`
                       : undefined;
 
                     return (

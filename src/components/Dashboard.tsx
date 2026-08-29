@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -8,7 +8,9 @@ import {
   CheckCircle2, 
   Plus, 
   ArrowRight,
-  Clock
+  Clock,
+  Calendar,
+  Filter
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -20,7 +22,8 @@ import {
   ResponsiveContainer, 
   PieChart, 
   Pie, 
-  Cell 
+  Cell,
+  Legend
 } from 'recharts';
 import { Prestation, Paiement, Societe, Personne, ActiveTab } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
@@ -39,11 +42,19 @@ interface DashboardProps {
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-lg text-xs">
-        <p className="font-bold text-slate-700 mb-1">{label || payload[0].name}</p>
-        <p className="text-indigo-600 font-semibold">
-          {formatMoney(payload[0].value)}
-        </p>
+      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xl text-xs space-y-1.5 min-w-[170px]">
+        <p className="font-bold text-slate-800 border-b border-slate-100 pb-1">{label || payload[0].name}</p>
+        {payload.map((entry: any, index: number) => (
+          <div key={index} className="flex items-center justify-between gap-3">
+            <span className="text-slate-500 font-medium flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: entry.color || entry.fill }}></span>
+              {entry.name || 'Montant'} :
+            </span>
+            <span className="font-bold font-mono" style={{ color: entry.color || entry.fill }}>
+              {formatMoney(entry.value)}
+            </span>
+          </div>
+        ))}
       </div>
     );
   }
@@ -115,7 +126,146 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société Inconnue';
   const getPersonneNom = (id: string) => personnes.find(p => p.id === id)?.nomPrenom || 'Assuré Inconnu';
 
+  // --- Year Selector for Monthly Recovery Section ---
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<string>();
+    filteredPrestations.forEach(p => {
+      if (p.date) {
+        const d = new Date(p.date);
+        if (!isNaN(d.getTime())) {
+          yearsSet.add(String(d.getFullYear()));
+        }
+      }
+    });
+    const sorted = Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
+    if (sorted.length === 0) {
+      sorted.push(String(new Date().getFullYear()));
+    }
+    return sorted;
+  }, [filteredPrestations]);
+
+  const [selectedYear, setSelectedYear] = useState<string>('ALL');
+
+  // Prestations filtered by selected year for monthly analysis
+  const monthlyFilteredPrestations = useMemo(() => {
+    if (selectedYear === 'ALL') return filteredPrestations;
+    return filteredPrestations.filter(p => {
+      if (!p.date) return false;
+      const d = new Date(p.date);
+      return !isNaN(d.getTime()) && String(d.getFullYear()) === selectedYear;
+    });
+  }, [filteredPrestations, selectedYear]);
+
+  // Section specific totals for the selected year
+  const monthlySectionTotalReclame = useMemo(() => 
+    monthlyFilteredPrestations.reduce((sum, p) => sum + (p.totalPrestation || 0), 0)
+  , [monthlyFilteredPrestations]);
+
+  const monthlySectionTotalPartAssurance = useMemo(() => 
+    monthlyFilteredPrestations.reduce((sum, p) => 
+      sum + (p.montantARembourser ?? Math.max(0, (p.totalPrestation || 0) - (p.participation || p.ticketModerateur || 0)))
+    , 0)
+  , [monthlyFilteredPrestations]);
+
+  const monthlySectionTotalPaye = useMemo(() => 
+    monthlyFilteredPrestations.reduce((sum, p) => sum + (p.totalPaye || 0), 0)
+  , [monthlyFilteredPrestations]);
+
+  const monthlySectionTotalExclu = useMemo(() => 
+    monthlyFilteredPrestations.reduce((sum, p) => sum + (p.montantExclu || 0), 0)
+  , [monthlyFilteredPrestations]);
+
+  const monthlySectionTotalARecouvrer = useMemo(() => 
+    monthlyFilteredPrestations.reduce((sum, p) => {
+      const partAssurance = p.montantARembourser ?? Math.max(0, (p.totalPrestation || 0) - (p.participation || p.ticketModerateur || 0));
+      const paye = p.totalPaye || 0;
+      const exclu = p.montantExclu || 0;
+      return sum + Math.max(0, partAssurance - paye - exclu);
+    }, 0)
+  , [monthlyFilteredPrestations]);
+
+  const monthlySectionDossiersARecouvrer = useMemo(() => 
+    monthlyFilteredPrestations.filter(p => {
+      const partAssurance = p.montantARembourser ?? Math.max(0, (p.totalPrestation || 0) - (p.participation || p.ticketModerateur || 0));
+      const paye = p.totalPaye || 0;
+      const exclu = p.montantExclu || 0;
+      return (partAssurance - paye - exclu) > 50;
+    }).length
+  , [monthlyFilteredPrestations]);
+
+  const monthlySectionTauxCouverture = useMemo(() => {
+    if (monthlySectionTotalPartAssurance > 0) {
+      return Math.round((monthlySectionTotalPaye / monthlySectionTotalPartAssurance) * 100);
+    }
+    return monthlySectionTotalReclame > 0 ? Math.round((monthlySectionTotalPaye / monthlySectionTotalReclame) * 100) : 0;
+  }, [monthlySectionTotalPaye, monthlySectionTotalPartAssurance, monthlySectionTotalReclame]);
+
   // --- Charts Data Preparation ---
+  // --- Data for Factures à Recouvrir par Mois ---
+  const monthlyRecouvrementMap = monthlyFilteredPrestations.reduce((acc, p) => {
+    if (!p.date) return acc;
+    const dateObj = new Date(p.date);
+    if (isNaN(dateObj.getTime())) return acc;
+    
+    const year = dateObj.getFullYear();
+    const monthStr = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const monthKey = `${year}-${monthStr}`;
+    
+    const monthLabelRaw = dateObj.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    const monthLabel = monthLabelRaw.charAt(0).toUpperCase() + monthLabelRaw.slice(1);
+    const shortLabel = dateObj.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+
+    const totalPrestation = p.totalPrestation || 0;
+    const partAssurance = p.montantARembourser ?? Math.max(0, totalPrestation - (p.participation || p.ticketModerateur || 0));
+    const paye = p.totalPaye || 0;
+    const exclu = p.montantExclu || 0;
+    const reste = Math.max(0, partAssurance - paye - exclu);
+
+    if (!acc[monthKey]) {
+      acc[monthKey] = {
+        monthKey,
+        monthLabel,
+        shortLabel,
+        totalPrestation: 0,
+        partAssurance: 0,
+        totalPaye: 0,
+        totalExclu: 0,
+        totalARecouvrer: 0,
+        countTotal: 0,
+        countEnAttente: 0,
+      };
+    }
+
+    acc[monthKey].totalPrestation += totalPrestation;
+    acc[monthKey].partAssurance += partAssurance;
+    acc[monthKey].totalPaye += paye;
+    acc[monthKey].totalExclu += exclu;
+    acc[monthKey].totalARecouvrer += reste;
+    acc[monthKey].countTotal += 1;
+    if (reste > 50) {
+      acc[monthKey].countEnAttente += 1;
+    }
+
+    return acc;
+  }, {} as Record<string, {
+    monthKey: string;
+    monthLabel: string;
+    shortLabel: string;
+    totalPrestation: number;
+    partAssurance: number;
+    totalPaye: number;
+    totalExclu: number;
+    totalARecouvrer: number;
+    countTotal: number;
+    countEnAttente: number;
+  }>);
+
+  const monthlyRecouvrementChronological = Object.values(monthlyRecouvrementMap)
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+
+  const monthlyRecouvrementList = Object.values(monthlyRecouvrementMap)
+    .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+
   const caParSocieteMap = filteredPrestations.reduce((acc, p) => {
     const societeNom = getSocieteNom(p.societeId);
     if (!acc[societeNom]) acc[societeNom] = 0;
@@ -335,85 +485,237 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Recent Prestations Table */}
-      <div className="grid grid-cols-1 gap-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-900 text-sm">Derniers Dossiers de Prestations</h3>
-            <button
-              onClick={() => onNavigate('prestations')}
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center"
-            >
-              Tout voir <ArrowRight className="w-3 h-3 ml-1" />
-            </button>
+      {/* SECTION : Factures à Recouvrir par Mois */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-900 text-base">Factures à Recouvrir par Mois</h3>
+                {selectedYear !== 'ALL' && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-800 border border-sky-200">
+                    Année {selectedYear}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Suivi mensuel et historique des montants de la part assurance restant en attente de paiement.
+              </p>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-y border-slate-200">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Year Selector Control */}
+            <div className="flex items-center gap-1.5 bg-slate-100/90 p-1 rounded-xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center gap-1 px-2 text-slate-500 text-xs font-semibold shrink-0">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">Année :</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedYear('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  selectedYear === 'ALL'
+                    ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                Toutes
+              </button>
+              {availableYears.map(yr => (
+                <button
+                  key={yr}
+                  type="button"
+                  onClick={() => setSelectedYear(yr)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    selectedYear === yr
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  {yr}
+                </button>
+              ))}
+            </div>
+
+            {/* Total Badge for Selected Year */}
+            <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-3.5 py-1.5 rounded-xl text-xs shrink-0">
+              <div>
+                <span className="text-slate-500 font-medium block text-[10px] uppercase tracking-wider">
+                  {selectedYear === 'ALL' ? 'Total à recouvrir' : `À recouvrir (${selectedYear})`}
+                </span>
+                <span className="font-extrabold text-sky-700 text-sm font-mono">{formatMoney(monthlySectionTotalARecouvrer)}</span>
+              </div>
+              <div className="w-px h-7 bg-slate-200"></div>
+              <div>
+                <span className="text-slate-500 font-medium block text-[10px] uppercase tracking-wider">En attente</span>
+                <span className="font-bold text-slate-800 text-xs">{monthlySectionDossiersARecouvrer} dossier(s)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Visual Graph: Règlements reçus vs Solde à recouvrir par mois */}
+        {monthlyRecouvrementChronological.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700">
+                Aperçu Visuel des Règlements vs Restant dû {selectedYear !== 'ALL' ? `(${selectedYear})` : ''}
+              </span>
+              <div className="flex items-center gap-4 text-xs">
+                <span className="flex items-center gap-1.5 text-slate-600 font-medium text-[11px]">
+                  <span className="w-3 h-3 rounded-xs bg-emerald-500 inline-block"></span>
+                  Règlements reçus
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-600 font-medium text-[11px]">
+                  <span className="w-3 h-3 rounded-xs bg-sky-500 inline-block"></span>
+                  Solde à recouvrir
+                </span>
+              </div>
+            </div>
+            <div className="h-[200px] w-full pt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyRecouvrementChronological} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis 
+                    dataKey="shortLabel" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 11, fill: '#64748b' }} 
+                    dy={5}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 11, fill: '#64748b' }} 
+                    tickFormatter={(val) => val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}
+                  />
+                  <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: '#f8fafc' }} />
+                  <Bar dataKey="totalPaye" name="Règlements reçus" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                  <Bar dataKey="totalARecouvrer" name="Solde à recouvrir" fill="#0284c7" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* Tableau Récapitulatif Mensuel */}
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-500 uppercase text-[10.5px] font-semibold border-b border-slate-200">
+              <tr>
+                <th className="py-2.5 px-3.5">Mois</th>
+                <th className="py-2.5 px-3 text-center">Dossiers (Attente / Total)</th>
+                <th className="py-2.5 px-3 text-right">Total Facturé</th>
+                <th className="py-2.5 px-3 text-right">Part Assurance</th>
+                <th className="py-2.5 px-3 text-right text-emerald-700">Règlements Reçus</th>
+                <th className="py-2.5 px-3 text-right text-rose-700">Exclusions</th>
+                <th className="py-2.5 px-3 text-right text-sky-900 bg-sky-50/70">Solde à Recouvrir</th>
+                <th className="py-2.5 px-3 text-center min-w-[120px]">Taux Recouvrement</th>
+                <th className="py-2.5 px-3 text-center">Statut</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {monthlyRecouvrementList.length === 0 ? (
                 <tr>
-                  <th className="py-2.5 px-3">Date</th>
-                  <th className="py-2.5 px-3">Facture N°</th>
-                  <th className="py-2.5 px-3">Assuré / Adhérent</th>
-                  <th className="py-2.5 px-3">Société</th>
-                  <th className="py-2.5 px-3 text-right">Montant</th>
-                  <th className="py-2.5 px-3 text-center">Statut</th>
+                  <td colSpan={9} className="py-8 text-center text-slate-400">
+                    Aucune prestation enregistrée pour l'année {selectedYear}.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredPrestations.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-8 px-3 text-center text-slate-400">
-                      Aucune prestation enregistrée.
-                    </td>
-                  </tr>
-                )}
-                {filteredPrestations.slice(0, 5).map(prestation => {
-                  const pTot = prestation.totalPrestation || 0;
-                  const pMod = prestation.participation || 0;
-                  const pRemb = prestation.montantARembourser ?? Math.max(0, pTot - pMod);
-                  const pPaye = prestation.totalPaye || 0;
-                  const pExclu = prestation.montantExclu || 0;
-                  const pReste = Math.max(0, pRemb - pPaye - pExclu);
-                  const isFullyPaid = (pPaye >= pRemb && pRemb > 0) || (pReste <= 0 && pPaye > 0);
-                  const isPartiallyPaid = pPaye > 0 && !isFullyPaid && pReste > 0;
-                  const isExclu = pExclu >= pRemb && pRemb > 0 && pPaye === 0;
-                  const statutDisplay = isExclu
-                    ? 'Rejeté'
-                    : isFullyPaid
-                    ? 'Payé'
-                    : isPartiallyPaid
-                    ? 'Partiellement payé'
-                    : 'En attente';
+              ) : (
+                monthlyRecouvrementList.map(item => {
+                  const pctRecouvre = item.partAssurance > 0 
+                    ? Math.min(100, Math.round((item.totalPaye / item.partAssurance) * 100))
+                    : 100;
+
+                  const isSolde = item.totalARecouvrer <= 50;
+                  const isPartiel = item.totalPaye > 0 && !isSolde;
 
                   return (
-                    <tr key={prestation.id} className="hover:bg-slate-50/80 transition">
-                      <td className="py-2.5 px-3 text-slate-600">{formatDate(prestation.date)}</td>
-                      <td className="py-2.5 px-3 font-semibold text-indigo-600">{prestation.numeroFacture}</td>
-                      <td className="py-2.5 px-3 font-medium text-slate-900">{getPersonneNom(prestation.personneId)}</td>
-                      <td className="py-2.5 px-3 text-slate-600">{getSocieteNom(prestation.societeId)}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-slate-900">
-                        {formatMoney(prestation.totalPrestation)}
+                    <tr key={item.monthKey} className="hover:bg-slate-50/80 transition">
+                      <td className="py-3 px-3.5 font-bold text-slate-900 flex items-center gap-2">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>{item.monthLabel}</span>
                       </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          statutDisplay === 'Payé'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : statutDisplay === 'Partiellement payé'
-                            ? 'bg-sky-100 text-sky-800'
-                            : statutDisplay === 'Rejeté'
-                            ? 'bg-rose-100 text-rose-800'
-                            : 'bg-amber-100 text-amber-800'
+                      <td className="py-3 px-3 text-center font-medium">
+                        <span className={item.countEnAttente > 0 ? 'text-sky-700 font-bold' : 'text-slate-500'}>
+                          {item.countEnAttente}
+                        </span>
+                        <span className="text-slate-400"> / {item.countTotal}</span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-slate-600">
+                        {formatMoney(item.totalPrestation)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-slate-800 font-medium">
+                        {formatMoney(item.partAssurance)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-600">
+                        {formatMoney(item.totalPaye)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-rose-600">
+                        {item.totalExclu > 0 ? formatMoney(item.totalExclu) : '-'}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-extrabold text-sky-800 bg-sky-50/40">
+                        {formatMoney(item.totalARecouvrer)}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <div className="flex items-center gap-1.5 justify-center">
+                          <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden shrink-0">
+                            <div 
+                              className={`h-full rounded-full ${isSolde ? 'bg-emerald-500' : isPartiel ? 'bg-sky-500' : 'bg-amber-400'}`}
+                              style={{ width: `${pctRecouvre}%` }}
+                            ></div>
+                          </div>
+                          <span className="font-mono text-[10.5px] font-semibold text-slate-700 min-w-[28px] text-right">
+                            {pctRecouvre}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          isSolde 
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : isPartiel
+                            ? 'bg-sky-100 text-sky-800 border border-sky-200'
+                            : 'bg-amber-100 text-amber-800 border border-amber-200'
                         }`}>
-                          {statutDisplay}
+                          {isSolde ? 'Soldé' : isPartiel ? 'En cours' : 'En attente'}
                         </span>
                       </td>
                     </tr>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
+                })
+              )}
+            </tbody>
+            {monthlyRecouvrementList.length > 0 && (
+              <tfoot className="bg-slate-100/80 font-bold border-t-2 border-slate-300 text-xs text-slate-900">
+                <tr>
+                  <td className="py-3 px-3.5 uppercase text-[10px] tracking-wider text-slate-600">
+                    {selectedYear === 'ALL' ? 'Total Général' : `Total Année ${selectedYear}`}
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <span className="text-sky-800">{monthlySectionDossiersARecouvrer}</span> / {monthlyFilteredPrestations.length}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono">{formatMoney(monthlySectionTotalReclame)}</td>
+                  <td className="py-3 px-3 text-right font-mono">{formatMoney(monthlySectionTotalPartAssurance)}</td>
+                  <td className="py-3 px-3 text-right font-mono text-emerald-700">{formatMoney(monthlySectionTotalPaye)}</td>
+                  <td className="py-3 px-3 text-right font-mono text-rose-700">{formatMoney(monthlySectionTotalExclu)}</td>
+                  <td className="py-3 px-3 text-right font-mono text-sky-900 text-sm bg-sky-100/70 border-x border-sky-200">
+                    {formatMoney(monthlySectionTotalARecouvrer)}
+                  </td>
+                  <td className="py-3 px-3 text-center font-mono text-slate-700">{monthlySectionTauxCouverture}%</td>
+                  <td className="py-3 px-3 text-center">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+                      {selectedYear === 'ALL' ? 'Historique' : `Bilan ${selectedYear}`}
+                    </span>
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
         </div>
       </div>
     </div>

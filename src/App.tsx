@@ -838,30 +838,21 @@ export function App() {
             </div>
 
             <div className="space-y-2 text-xs text-slate-700">
-              <h4 className="font-bold text-slate-900">Options disponibles :</h4>
+              <h4 className="font-bold text-slate-900">Que faire ?</h4>
               <p className="text-slate-600 leading-relaxed">
-                Vous pouvez réessayer la connexion à MySQL WAMP si votre serveur est en cours de démarrage, ou basculer immédiatement en <strong>Mode Local (LocalStorage)</strong> pour continuer à travailler sans blocage.
+                Vérifiez que l'icône de WAMP Server dans la barre des tâches est <strong>Verte</strong> et que le service MySQL est bien démarré, puis cliquez sur le bouton ci-dessous.
               </p>
             </div>
 
-            <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
+            <div className="pt-2 flex">
               <button
                 type="button"
                 onClick={() => checkAndLoadWampData(false)}
                 disabled={isRetryingDb}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${isRetryingDb ? 'animate-spin' : ''}`} />
-                <span>{isRetryingDb ? 'Vérification...' : 'Réessayer connexion MySQL'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleToggleStorageMode('local')}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition cursor-pointer"
-              >
-                <HardDrive className="h-4 w-4 text-blue-200" />
-                <span>Basculer en Mode Local</span>
+                <span>{isRetryingDb ? 'Vérification en cours...' : 'Réessayer connexion MySQL WAMP'}</span>
               </button>
             </div>
           </div>
@@ -895,10 +886,6 @@ export function App() {
         lastSyncTime={lastSyncTime}
         dbConnected={dbStatus === 'connected'}
         logoUrl={enteteConfig.logoUrl}
-        storageMode={storageMode}
-        onToggleStorageMode={handleToggleStorageMode}
-        onSyncLocalToServer={handleSyncLocalToServer}
-        onSyncServerToLocal={handleSyncServerToLocal}
       />
 
       {/* BANDEAU DU FILTRE AVANCÉ : SOCIÉTÉ / GARANT (TRANSPARENT, ANCRÉ À GAUCHE) */}

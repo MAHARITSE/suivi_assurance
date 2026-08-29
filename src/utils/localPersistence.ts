@@ -13,12 +13,11 @@ const STORAGE_KEYS = {
 export type StorageMode = 'server' | 'local';
 
 export function getStoredStorageMode(): StorageMode {
-  const mode = localStorage.getItem(STORAGE_KEYS.STORAGE_MODE);
-  return mode === 'local' ? 'local' : 'server';
+  return 'server';
 }
 
-export function setStoredStorageMode(mode: StorageMode): void {
-  localStorage.setItem(STORAGE_KEYS.STORAGE_MODE, mode);
+export function setStoredStorageMode(_mode: StorageMode): void {
+  localStorage.setItem(STORAGE_KEYS.STORAGE_MODE, 'server');
 }
 
 export function loadLocalDataset(): {

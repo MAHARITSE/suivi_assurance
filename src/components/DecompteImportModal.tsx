@@ -32,7 +32,10 @@ import {
   ShieldAlert,
   Ban,
   User,
-  Edit3
+  Edit3,
+  Files,
+  Clock,
+  FastForward
 } from 'lucide-react';
 import { 
   Paiement, 
@@ -283,6 +286,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   const [selectedOverrideSocId, setSelectedOverrideSocId] = useState<string>('');
   const [showUnlinkedConfirmModal, setShowUnlinkedConfirmModal] = useState<boolean>(false);
   
+  // Multi-File Queue Processing state
+  const [fileQueue, setFileQueue] = useState<File[]>([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState<number>(0);
+  const [batchHistory, setBatchHistory] = useState<Array<{ fileName: string; count: number; status: 'SUCCESS' | 'SKIPPED' }>>([]);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+
   // Search / Change Link modal state
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
   const [actSearchQuery, setActSearchQuery] = useState<string>('');
@@ -315,9 +324,44 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setTableSearchQuery('');
     setSortBy('DEFAULT');
     setSortOrder('ASC');
+    setFileQueue([]);
+    setCurrentFileIndex(0);
+    setBatchNotice(null);
     if (excelInputRef.current) {
       excelInputRef.current.value = '';
     }
+  };
+
+  const handleSkipCurrentFile = () => {
+    if (fileQueue.length > 1 && currentFileIndex + 1 < fileQueue.length) {
+      const skippedFileName = fileQueue[currentFileIndex]?.name || 'Fichier';
+      setBatchHistory(prev => [...prev, { fileName: skippedFileName, count: 0, status: 'SKIPPED' }]);
+      const nextIdx = currentFileIndex + 1;
+      setCurrentFileIndex(nextIdx);
+      const nextFile = fileQueue[nextIdx];
+      setBatchNotice(`Fichier « ${skippedFileName} » ignoré. Chargement du fichier ${nextIdx + 1} / ${fileQueue.length}...`);
+      processFile(nextFile);
+    } else {
+      handleClose();
+    }
+  };
+
+  const handleFilesSelected = (selectedFiles: FileList | File[]) => {
+    const list = Array.from(selectedFiles).filter(f => {
+      const ext = f.name.toLowerCase();
+      return ext.endsWith('.xlsx') || ext.endsWith('.xls') || ext.endsWith('.csv');
+    });
+
+    if (list.length === 0) {
+      setErrorMessage("Veuillez sélectionner au moins un fichier Excel (.xlsx, .xls, .csv).");
+      return;
+    }
+
+    setFileQueue(list);
+    setCurrentFileIndex(0);
+    setBatchHistory([]);
+    setBatchNotice(list.length > 1 ? `${list.length} fichiers ajoutés à la file d'attente. Traitement du fichier 1 / ${list.length}...` : null);
+    processFile(list[0]);
   };
 
   const handleClose = () => {
@@ -410,6 +454,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
   // Intelligent Automatic Matcher for a settlement line
   // Confronts date of care against prescription act date, gross amount without ticket moderator against prescription act gross amount, and society
+  // STRICT RULE: Automatic linking is strictly restricted to the same month & year (YYYY-MM).
   const autoMatchSettlementLine = (
     matricule: string, 
     nomPrenom: string, 
@@ -425,6 +470,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     const cleanNom = (nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const cleanCode = normalizeActFamilyCode(actCode);
     const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
+    const isoDateSoins = normalizeDateISO(dateSoins);
+    const monthSoins = isoDateSoins ? isoDateSoins.substring(0, 7) : '';
     const brutMontant = Number(montantBrut || netMontant || 0);
 
     let bestCandidate: MatchCandidate | null = null;
@@ -435,12 +482,20 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       const candMatricule = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
       const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       const candDate = (cand.prestationDate || '').trim().substring(0, 10);
+      const isoCandDate = normalizeDateISO(cand.prestationDate);
+      const monthCand = isoCandDate ? isoCandDate.substring(0, 7) : '';
+
+      // 1. REGLE STRICTE DE LIAISON AUTOMATIQUE : Même mois & année uniquement (YYYY-MM)
+      if (!monthSoins || !monthCand || monthSoins !== monthCand) {
+        return; // Ne pas lier automatiquement si pas dans le même mois
+      }
+
       const candCode = normalizeActFamilyCode(cand.codeActe);
       const candBrut = Number(cand.montantInitial || 0);
       const candRemb = Number(cand.montantARembourser || 0);
       const candReste = Number(cand.resteAPayer || 0);
 
-      // 1. Patient matching
+      // 2. Patient matching
       const exactMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && cleanMatricule === candMatricule;
       const partialMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && (cleanMatricule.includes(candMatricule) || candMatricule.includes(cleanMatricule));
       const nameMatch = cleanNom && candNom && (candNom.includes(cleanNom) || cleanNom.includes(candNom));
@@ -453,7 +508,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         return;
       }
 
-      // 2. STRICT INTER-SOCIETY RULE: Disallow inter-company/inter-society matching
+      // 3. STRICT INTER-SOCIETY RULE: Disallow inter-company/inter-society matching
       if (targetSocId) {
         const targetSoc = societes.find(s => s.id === targetSocId || s.nom.toLowerCase() === targetSocId.toLowerCase());
         const expectedSocId = targetSoc?.id || targetSocId;
@@ -466,13 +521,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         score += 80;
       }
 
-      // 3. Date de soins vs Date de l'acte dans la prescription
+      // 4. Date de soins vs Date de l'acte dans la prescription
       const isSameDate = Boolean(cleanDateSoins && candDate && cleanDateSoins === candDate);
       if (isSameDate) {
         score += 70;
       }
 
-      // 4. Montant sans ticket modérateur (Montant brut initial)
+      // 5. Montant sans ticket modérateur (Montant brut initial)
       const isSameGrossAmount = Math.abs(brutMontant - candBrut) < 2;
       const isSameNetAmount = Math.abs(netMontant - candRemb) < 2 || Math.abs(netMontant - candReste) < 2;
 
@@ -484,7 +539,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         score += 20;
       }
 
-      // 5. Code / Famille Acte matching
+      // 6. Code / Famille Acte matching
       const exactCode = cleanCode && candCode && (cleanCode === candCode);
       if (exactCode) {
         score += 45;
@@ -909,10 +964,17 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = e.target.files;
     e.target.value = '';
-    if (!file) return;
-    processFile(file);
+    if (!files || files.length === 0) return;
+    if (files.length === 1) {
+      setFileQueue([files[0]]);
+      setCurrentFileIndex(0);
+      setBatchHistory([]);
+      processFile(files[0]);
+    } else {
+      handleFilesSelected(files);
+    }
   };
 
   const handleRetryLastFile = () => {
@@ -985,17 +1047,27 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     });
   }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
 
-  // Helper to find top candidate suggestions for a settlement row
+  // Helper to find top candidate suggestions for a settlement row (strictly in the same month & year)
   const getRowSuggestions = (row: SettlementRowItem): MatchCandidate[] => {
     const normNom = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const cleanMat = (row.matricule || '').replace(/\s+/g, '').toLowerCase();
 
     if (!normNom && (!cleanMat || cleanMat === '-')) return [];
 
+    const isoDateSoins = normalizeDateISO(row.dateSoins);
+    const monthSoins = isoDateSoins ? isoDateSoins.substring(0, 7) : '';
+
     return allEligibleActs.filter(cand => {
       // Avoid candidates already assigned to another row in this settlement
       const isAlreadyAssigned = rows.some(r => r.rowId !== row.rowId && r.matchedCandidate?.lignePrestationId === cand.lignePrestationId);
       if (isAlreadyAssigned) return false;
+
+      // Restreindre les suggestions automatiques au même mois (YYYY-MM)
+      const isoCandDate = normalizeDateISO(cand.prestationDate);
+      const monthCand = isoCandDate ? isoCandDate.substring(0, 7) : '';
+      if (!monthSoins || !monthCand || monthSoins !== monthCand) {
+        return false;
+      }
 
       const candMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
       const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -1353,8 +1425,30 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
     const finalPersonnesList = Array.from(finalPersonnesMap.values());
     onSavePaiement(nouveauPaiement, updatedPrestations, createdSocietes, finalPersonnesList);
-    handleResetAndBack();
-    onClose();
+
+    // Sequential Queue check: proceed to next file if present
+    const currentFileName = fileQueue[currentFileIndex]?.name || parsedDoc.numeroBordereau || 'Fichier';
+    const nextBatchHistory = [...batchHistory, { fileName: currentFileName, count: selectedRows.length, status: 'SUCCESS' as const }];
+    setBatchHistory(nextBatchHistory);
+
+    if (fileQueue.length > 1 && currentFileIndex + 1 < fileQueue.length) {
+      const nextIdx = currentFileIndex + 1;
+      setCurrentFileIndex(nextIdx);
+      const nextFile = fileQueue[nextIdx];
+      setParsedDoc(null);
+      setRows([]);
+      setErrorMessage(null);
+      setSearchingRowId(null);
+      setBatchNotice(`Fichier ${currentFileIndex + 1} « ${currentFileName} » importé avec succès (${selectedRows.length} actes). Traitement du fichier suivant ${nextIdx + 1} / ${fileQueue.length} (${nextFile.name})...`);
+      processFile(nextFile);
+    } else {
+      const totalImportedCount = nextBatchHistory.reduce((acc, h) => acc + h.count, 0);
+      if (fileQueue.length > 1) {
+        alert(`Traitement par lot terminé avec succès !\n${fileQueue.length} fichier(s) traité(s), ${totalImportedCount} actes de règlement enregistrés.`);
+      }
+      handleResetAndBack();
+      onClose();
+    }
   };
 
   const handleValidateAndSave = () => {
@@ -1386,10 +1480,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     ? paiements.filter(p => cleanNum(p.numeroBordereau) === bordereauClean || cleanNum(p.referencePaiement) === bordereauClean)
     : [];
 
-  // Exact duplicate: SAME reference AND SAME total amount (tolerance < 2 Ar)
+  // Exact duplicate: SAME reference AND SAME payment date AND SAME total amount (tolerance < 2 Ar)
   const exactAmountDuplicates = matchingRefPaiements.filter(p => {
     const pTotal = Number(p.totalPaye || 0);
-    return Math.abs(pTotal - docNetTotal) < 2 || Math.abs(pTotal - totalSelectedPaye) < 2;
+    const pDate = p.datePaiement ? p.datePaiement.split('T')[0] : '';
+    const docDate = parsedDoc?.dateEmission ? parsedDoc.dateEmission.split('T')[0] : '';
+    const isSameDate = Boolean(pDate && docDate && pDate === docDate);
+    const isSameAmount = Math.abs(pTotal - docNetTotal) < 2 || Math.abs(pTotal - totalSelectedPaye) < 2;
+    return isSameDate && isSameAmount;
   });
 
   // Reference match with a different amount (e.g. tranche, installment, partial payment)
@@ -1442,8 +1540,94 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
           </button>
         </div>
 
+        {/* Multi-File Sequential Processing Header */}
+        {fileQueue.length > 1 && (
+          <div className="border-b border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-sky-50/70 to-indigo-50/90 px-6 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white font-black text-xs shadow-xs">
+                  <Files className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-indigo-900">
+                      File d'attente Décomptes : Fichier {currentFileIndex + 1} / {fileQueue.length}
+                    </span>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-full">
+                      Traitement séquentiel
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium truncate max-w-md">
+                    Fichier en cours : <strong className="text-slate-900 font-bold">{fileQueue[currentFileIndex]?.name}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress Steps / Actions */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleSkipCurrentFile}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-[11px] font-semibold transition shadow-2xs cursor-pointer"
+                  title="Ignorer ce décompte et passer au fichier suivant dans la file"
+                >
+                  <FastForward className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Ignorer ce fichier</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetAndBack}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-[11px] font-semibold transition cursor-pointer"
+                  title="Arrêter l'importation de toute la liste de fichiers"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Arrêter la file</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Queue Files Horizontal Stepper */}
+            <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+              {fileQueue.map((file, idx) => {
+                const isCurrent = idx === currentFileIndex;
+                const isPassed = idx < currentFileIndex;
+                const historyItem = batchHistory.find(h => h.fileName === file.name);
+                const isSkipped = historyItem?.status === 'SKIPPED';
+
+                return (
+                  <div
+                    key={`${file.name}-${idx}`}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium whitespace-nowrap shrink-0 border transition ${
+                      isCurrent
+                        ? 'bg-indigo-600 text-white font-bold border-indigo-700 shadow-xs'
+                        : isPassed
+                        ? isSkipped
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-white/80 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {isCurrent && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
+                    {isPassed && !isSkipped && <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />}
+                    {isPassed && isSkipped && <FastForward className="w-3 h-3 text-amber-600 shrink-0" />}
+                    {!isCurrent && !isPassed && <Clock className="w-3 h-3 text-slate-400 shrink-0" />}
+                    <span className="truncate max-w-[140px]">{idx + 1}. {file.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Modal Content */}
         <div className="flex-1 overflow-y-auto p-6">
+          {batchNotice && (
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-900 font-semibold shadow-2xs flex items-center gap-2 animate-in fade-in">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>{batchNotice}</span>
+            </div>
+          )}
+
           {errorMessage && (
             <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 space-y-2">
               <div className="flex items-start gap-2">
@@ -1479,6 +1663,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <Upload className="h-3.5 w-3.5" />
                   <span>Choisir un autre fichier</span>
                 </button>
+                {fileQueue.length > 1 && currentFileIndex + 1 < fileQueue.length && (
+                  <button
+                    type="button"
+                    onClick={handleSkipCurrentFile}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-200 font-semibold transition cursor-pointer"
+                  >
+                    <FastForward className="h-3.5 w-3.5" />
+                    <span>Passer au fichier suivant ({currentFileIndex + 2}/{fileQueue.length})</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -1507,9 +1701,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) {
-                    processFile(file);
+                  const files = e.dataTransfer.files;
+                  if (files && files.length > 0) {
+                    handleFilesSelected(files);
                   }
                 }}
                 className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
@@ -1519,10 +1713,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
                 <div>
                   <h4 className="text-sm font-semibold text-slate-900">
-                    {isProcessing ? 'Confrontation des actes en cours...' : 'Déposez votre fichier Excel de décompte (.xlsx, .xls, .csv)'}
+                    {isProcessing ? 'Confrontation des actes en cours...' : 'Déposez un ou plusieurs fichiers Excel (.xlsx, .xls, .csv)'}
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 max-w-md">
-                    Rapprochement automatique par date de soins et montant initial sans ticket modérateur. Exclut les actes déjà réglés.
+                    Sélectionnez un ou plusieurs bordereaux Excel. Ils seront traités séquentiellement un par un avec rapprochement automatique.
                   </p>
                 </div>
                 <input
@@ -1530,6 +1724,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   ref={excelInputRef}
                   onChange={handleFileUpload}
                   accept=".xlsx,.xls,.csv"
+                  multiple
                   className="hidden"
                 />
                 <button
@@ -1538,9 +1733,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     excelInputRef.current?.click();
                   }}
                   disabled={isProcessing}
-                  className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer"
+                  className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer flex items-center gap-2"
                 >
-                  Parcourir un fichier Excel
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Parcourir des fichiers Excel (Mono ou Multi-fichiers)</span>
                 </button>
               </div>
             </div>
@@ -2172,7 +2368,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             <button
                               onClick={() => {
                                 setSearchingRowId(row.rowId);
-                                setActSearchQuery(row.nomPrenom || row.matricule || '');
+                                const firstWord = (row.nomPrenom || '').trim().split(/\s+/)[0] || '';
+                                setActSearchQuery(firstWord || row.matricule || '');
                               }}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
                               title="Modifier ou rechercher un acte à rattacher"
@@ -2243,10 +2440,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     ? 'bg-rose-600 text-white hover:bg-rose-500 opacity-60 cursor-not-allowed'
                     : 'bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50'
                 }`}
-                title={isExactDuplicate ? `Doublon strict détecté (Même référence et même montant de ${formatMoney(exactAmountDuplicates[0]?.totalPaye || 0)})` : undefined}
+                title={isExactDuplicate ? `Doublon strict détecté (Même référence, même date et même montant de ${formatMoney(exactAmountDuplicates[0]?.totalPaye || 0)})` : undefined}
               >
                 {isExactDuplicate ? <Ban className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                <span>{isExactDuplicate ? 'Doublon Strict (Même Référence & Montant)' : 'Valider et Enregistrer le Règlement'}</span>
+                <span>
+                  {isExactDuplicate 
+                    ? 'Doublon Strict (Même Réf., Date & Montant)' 
+                    : fileQueue.length > 1 
+                    ? `Valider et Enregistrer (${currentFileIndex + 1}/${fileQueue.length})` 
+                    : 'Valider et Enregistrer le Règlement'}
+                </span>
               </button>
             )}
           </div>
@@ -2309,6 +2512,59 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       Afficher tous les actes ouverts ({allEligibleActs.length})
                     </button>
                   )}
+                </div>
+
+                {/* Quick filter chips */}
+                <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-0.5">
+                  <span className="text-slate-400 font-medium">Filtres rapides :</span>
+                  {(() => {
+                    const firstWord = (activeSearchingRow.nomPrenom || '').trim().split(/\s+/)[0];
+                    const fullName = (activeSearchingRow.nomPrenom || '').trim();
+                    const mat = activeSearchingRow.matricule;
+                    return (
+                      <>
+                        {firstWord && (
+                          <button
+                            type="button"
+                            onClick={() => setActSearchQuery(firstWord)}
+                            className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                              actSearchQuery.trim().toLowerCase() === firstWord.toLowerCase()
+                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                                : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                            }`}
+                          >
+                            Premier nom : {firstWord}
+                          </button>
+                        )}
+                        {fullName && fullName !== firstWord && (
+                          <button
+                            type="button"
+                            onClick={() => setActSearchQuery(fullName)}
+                            className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                              actSearchQuery.trim().toLowerCase() === fullName.toLowerCase()
+                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                            }`}
+                          >
+                            Nom complet : {fullName}
+                          </button>
+                        )}
+                        {mat && mat !== '-' && (
+                          <button
+                            type="button"
+                            onClick={() => setActSearchQuery(mat)}
+                            className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                              actSearchQuery.trim().toLowerCase() === mat.toLowerCase()
+                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                            }`}
+                          >
+                            Matricule : {mat}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 

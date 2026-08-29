@@ -15,7 +15,12 @@ import {
   RotateCcw,
   Building,
   ShieldAlert,
-  Ban
+  Ban,
+  Layers,
+  FastForward,
+  CheckCircle2,
+  Clock,
+  Files
 } from 'lucide-react';
 import { Prestation, LignePrestation, Societe, Personne, Famille, ParsedFactureAssurance } from '../types';
 import { formatMoney, generateId, normalizeDateISO } from '../utils/formatters';
@@ -98,6 +103,13 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
+  
+  // Multi-file queue states for sequential processing
+  const [fileQueue, setFileQueue] = useState<File[]>([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState<number>(0);
+  const [batchHistory, setBatchHistory] = useState<Array<{ fileName: string; count: number; status: 'SUCCESS' | 'SKIPPED' }>>([]);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+
   const [autoCreateMissingSocietes, setAutoCreateMissingSocietes] = useState(true);
   const [autoCreateMissingPersonnes, setAutoCreateMissingPersonnes] = useState(true);
   const [missingSocPrompt, setMissingSocPrompt] = useState<{ socName: string } | null>(null);
@@ -122,6 +134,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     setErrorMessage(null);
     setIsProcessing(false);
     setLastUploadedFile(null);
+    setFileQueue([]);
+    setCurrentFileIndex(0);
+    setBatchHistory([]);
+    setBatchNotice(null);
     if (excelInputRef.current) {
       excelInputRef.current.value = '';
     }
@@ -277,11 +293,45 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     }
   };
 
+  const handleFilesSelected = (files: FileList | File[]) => {
+    const validFiles = Array.from(files).filter(f => 
+      f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.name.endsWith('.csv')
+    );
+
+    if (validFiles.length === 0) {
+      setErrorMessage('Aucun fichier Excel valide (.xlsx, .xls, .csv) sélectionné.');
+      return;
+    }
+
+    setFileQueue(validFiles);
+    setCurrentFileIndex(0);
+    setBatchHistory([]);
+    setBatchNotice(null);
+    processFile(validFiles[0]);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = e.target.files;
     e.target.value = '';
-    if (!file) return;
-    processFile(file);
+    if (!files || files.length === 0) return;
+    handleFilesSelected(files);
+  };
+
+  const handleSkipCurrentFile = () => {
+    const currentName = fileQueue[currentFileIndex]?.name || `Fichier ${currentFileIndex + 1}`;
+    setBatchHistory(prev => [...prev, { fileName: currentName, count: 0, status: 'SKIPPED' }]);
+
+    if (currentFileIndex + 1 < fileQueue.length) {
+      const nextIdx = currentFileIndex + 1;
+      setCurrentFileIndex(nextIdx);
+      setParsedInvoice(null);
+      setSelectedLines({});
+      setBatchNotice(`Fichier "${currentName}" ignoré. Chargement du fichier ${nextIdx + 1}/${fileQueue.length}...`);
+      setTimeout(() => setBatchNotice(null), 3500);
+      processFile(fileQueue[nextIdx]);
+    } else {
+      handleClose();
+    }
   };
 
   const handleRetryLastFile = () => {
@@ -572,8 +622,24 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
     const allPrestationsToPass = [...newPrestations, ...retroUpdatedList];
 
     onImportPrestations(allPrestationsToPass, createdSocietes, createdPersonnes);
-    handleResetAndBack();
-    onClose();
+    
+    // Multi-file sequential processing handling:
+    const currentFileName = fileQueue[currentFileIndex]?.name || parsedInvoice.numeroFacture || `Fichier ${currentFileIndex + 1}`;
+    const updatedHistory = [...batchHistory, { fileName: currentFileName, count: newPrestations.length, status: 'SUCCESS' as const }];
+    setBatchHistory(updatedHistory);
+
+    if (fileQueue.length > 1 && currentFileIndex + 1 < fileQueue.length) {
+      const nextIdx = currentFileIndex + 1;
+      setCurrentFileIndex(nextIdx);
+      setParsedInvoice(null);
+      setSelectedLines({});
+      setBatchNotice(`✅ "${currentFileName}" importé (${newPrestations.length} prestations) ! Chargement du fichier suivant ${nextIdx + 1}/${fileQueue.length}...`);
+      setTimeout(() => setBatchNotice(null), 4000);
+      processFile(fileQueue[nextIdx]);
+    } else {
+      handleResetAndBack();
+      onClose();
+    }
   };
 
   const handleValidateImport = () => {
@@ -642,8 +708,95 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
           </button>
         </div>
 
+        {/* Multi-File Sequential Processing Header */}
+        {fileQueue.length > 1 && (
+          <div className="border-b border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-sky-50/70 to-indigo-50/90 px-6 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white font-black text-xs shadow-xs">
+                  <Files className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-indigo-900">
+                      File d'attente par lot : Fichier {currentFileIndex + 1} / {fileQueue.length}
+                    </span>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-full">
+                      Traitement séquentiel
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium truncate max-w-md">
+                    Fichier en cours : <strong className="text-slate-900 font-bold">{fileQueue[currentFileIndex]?.name}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress Steps / Actions */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleSkipCurrentFile}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-[11px] font-semibold transition shadow-2xs cursor-pointer"
+                  title="Ignorer ce fichier et passer au fichier suivant dans la file"
+                >
+                  <FastForward className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Ignorer ce fichier</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetAndBack}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-[11px] font-semibold transition cursor-pointer"
+                  title="Arrêter l'importation de toute la liste de fichiers"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Arrêter la file</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Queue Files Horizontal Stepper */}
+            <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+              {fileQueue.map((file, idx) => {
+                const isCurrent = idx === currentFileIndex;
+                const isPassed = idx < currentFileIndex;
+                const historyItem = batchHistory.find(h => h.fileName === file.name);
+                const isSkipped = historyItem?.status === 'SKIPPED';
+
+                return (
+                  <div
+                    key={`${file.name}-${idx}`}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium whitespace-nowrap shrink-0 border transition ${
+                      isCurrent
+                        ? 'bg-indigo-600 text-white font-bold border-indigo-700 shadow-xs'
+                        : isPassed
+                        ? isSkipped
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-white/80 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {isCurrent && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
+                    {isPassed && !isSkipped && <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />}
+                    {isPassed && isSkipped && <FastForward className="w-3 h-3 text-amber-600 shrink-0" />}
+                    {!isCurrent && !isPassed && <Clock className="w-3 h-3 text-slate-400 shrink-0" />}
+                    <span className="truncate max-w-[140px]">{idx + 1}. {file.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+          {/* Batch Success Notice */}
+          {batchNotice && (
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-900 font-semibold shadow-2xs flex items-center gap-2 animate-in fade-in">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>{batchNotice}</span>
+            </div>
+          )}
 
           {/* Error Message with Immediate Retry Button */}
           {errorMessage && (
@@ -681,6 +834,16 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                   <Upload className="h-3.5 w-3.5" />
                   <span>Choisir un autre fichier</span>
                 </button>
+                {fileQueue.length > 1 && currentFileIndex + 1 < fileQueue.length && (
+                  <button
+                    type="button"
+                    onClick={handleSkipCurrentFile}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-200 font-semibold transition cursor-pointer"
+                  >
+                    <FastForward className="h-3.5 w-3.5" />
+                    <span>Passer au fichier suivant ({currentFileIndex + 2}/{fileQueue.length})</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setErrorMessage(null)}
@@ -723,9 +886,9 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
                       e.preventDefault();
-                      const file = e.dataTransfer.files?.[0];
-                      if (file) {
-                        processFile(file);
+                      const files = e.dataTransfer.files;
+                      if (files && files.length > 0) {
+                        handleFilesSelected(files);
                       }
                     }}
                     className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
@@ -735,10 +898,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-slate-900">
-                        {isProcessing ? 'Lecture du fichier Excel en cours...' : 'Déposez votre fichier Excel de prestations (.xlsx, .xls, .csv)'}
+                        {isProcessing ? 'Lecture du fichier Excel en cours...' : 'Déposez un ou plusieurs fichiers Excel (.xlsx, .xls, .csv)'}
                       </h4>
                       <p className="text-xs text-slate-500 mt-1 max-w-md">
-                        Importe chaque assuré, extrait la sous-société et découpe automatiquement les actes dans la colonne <strong>Acte médicale / Prix</strong>.
+                        Sélectionnez un ou <strong>plusieurs fichiers Excel</strong> à la fois. L'application les traitera automatiquement et séquentiellement un par un.
                       </p>
                     </div>
                     <input
@@ -746,15 +909,17 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                       ref={excelInputRef}
                       onChange={handleFileUpload}
                       accept=".xlsx,.xls,.csv"
+                      multiple
                       className="hidden"
                     />
                     <button
                       type="button"
                       onClick={() => excelInputRef.current?.click()}
                       disabled={isProcessing}
-                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer"
+                      className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer flex items-center gap-2"
                     >
-                      Parcourir un fichier Excel
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Parcourir des fichiers Excel (Mono ou Multi-fichiers)</span>
                     </button>
                   </div>
                 </div>
@@ -1091,7 +1256,13 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                 title={isDuplicateInvoice ? 'Facture déjà existante dans la base' : undefined}
               >
                 {isDuplicateInvoice ? <Ban className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                <span>{isDuplicateInvoice ? 'Facture déjà existante (Doublon)' : `Enregistrer ${selectedCount} Prestations`}</span>
+                <span>
+                  {isDuplicateInvoice 
+                    ? 'Facture déjà existante (Doublon)' 
+                    : fileQueue.length > 1 
+                    ? `Valider et Importer (${currentFileIndex + 1}/${fileQueue.length})` 
+                    : `Enregistrer ${selectedCount} Prestations`}
+                </span>
               </button>
             )}
           </div>
