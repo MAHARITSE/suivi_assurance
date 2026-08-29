@@ -158,7 +158,8 @@ export function getConfrontationDetails(
   dateSoins: string,
   montantBrut: number,
   netAPayer: number,
-  candidate: MatchCandidate | null
+  candidate: MatchCandidate | null,
+  participation: number = 0
 ): ConfrontationDetails {
   if (!candidate) {
     return {
@@ -181,12 +182,19 @@ export function getConfrontationDetails(
   const isSameDate = Boolean(cleanDateSoins && cleanCandDate && cleanDateSoins === cleanCandDate);
 
   const brut = Number(montantBrut || netAPayer || 0);
+  const tm = Number(participation || 0);
+  const netDecompte = netAPayer || Math.max(0, brut - tm);
+
   const candBrut = Number(candidate.montantInitial || 0);
   const candRemb = Number(candidate.montantARembourser || 0);
   const candReste = Number(candidate.resteAPayer || 0);
 
   const isSameMontantBrut = Math.abs(brut - candBrut) < 2;
-  const isSameMontantNet = Math.abs(netAPayer - candRemb) < 2 || Math.abs(netAPayer - candReste) < 2;
+  const isSameMontantNet = Math.abs(netDecompte - candRemb) < 2 
+    || Math.abs(netDecompte - candReste) < 2 
+    || Math.abs(netDecompte - candBrut) < 2
+    || (tm > 0 && Math.abs((brut - tm) - candBrut) < 2);
+
   const isSameMontant = isSameMontantBrut || isSameMontantNet;
   const diffMontantBrut = brut - candBrut;
 
@@ -198,7 +206,7 @@ export function getConfrontationDetails(
       isSameMontantNet,
       isSameMontant,
       diffMontantBrut,
-      label: 'Même Date & Même Montant',
+      label: isSameMontantBrut ? 'Même Date & Montant Brut' : 'Même Date & Net Conforme',
       badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
       cardBorderClass: 'border-emerald-300 bg-emerald-50/70',
       rowBorderClass: 'border-l-4 border-l-emerald-500 bg-emerald-50/30',
@@ -214,7 +222,7 @@ export function getConfrontationDetails(
       isSameMontantNet,
       isSameMontant,
       diffMontantBrut,
-      label: 'Même Date (Montant différent)',
+      label: 'Même Date (Écart Montant)',
       badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
       cardBorderClass: 'border-sky-300 bg-sky-50/60',
       rowBorderClass: 'border-l-4 border-l-sky-500 bg-sky-50/20',
@@ -245,7 +253,7 @@ export function getConfrontationDetails(
     isSameMontantNet,
     isSameMontant,
     diffMontantBrut,
-    label: 'À vérifier (Date & Montant diffèrent)',
+    label: 'À vérifier (Dates & Montants diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
     cardBorderClass: 'border-amber-300 bg-amber-50/60',
     rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
@@ -1901,7 +1909,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {displayedRows.map((row) => {
                       const matched = row.matchedCandidate;
-                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched);
+                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation);
 
                       return (
                         <tr
@@ -1924,26 +1932,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             <div className="font-mono text-xs font-bold text-slate-800">
                               {formatDate(row.dateSoins)}
                             </div>
-                            {matched && (
-                              <div className="mt-0.5">
-                                {confront.isSameDate ? (
-                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                                    <CalendarCheck className="w-2.5 h-2.5" />
-                                    <span>Date identique</span>
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200" title={`Date prescription: ${formatDate(matched.prestationDate)}`}>
-                                    <AlertTriangle className="w-2.5 h-2.5" />
-                                    <span>Prescr: {formatDate(matched.prestationDate)}</span>
-                                  </span>
-                                )}
-                              </div>
-                            )}
                           </td>
 
                           {/* Adherent / Patient */}
                           <td className="py-2.5 px-3">
-                            <div className="font-semibold text-slate-900">{row.nomPrenom}</div>
+                            <div className="font-bold text-slate-900 text-xs">{row.nomPrenom}</div>
                             <div className="text-[11px] text-slate-600 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
                               {isRealMatricule(row.matricule) ? (
                                 (() => {
@@ -2000,43 +1993,23 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             <div className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[170px]" title={row.actLibelle}>
                               {row.articlesCount && row.articlesCount > 1 ? `Total: ${row.articlesCount} articles` : row.actLibelle}
                             </div>
-                            <div className="text-[10px] text-slate-400">
-                              TM: {formatMoney(row.participation)}
-                            </div>
+                            {row.participation > 0 && (
+                              <div className="text-[10px] text-amber-700 font-medium">
+                                TM: {formatMoney(row.participation)}
+                              </div>
+                            )}
                           </td>
 
                           {/* Matched Prescription Act with Live Comparison & Color Coding */}
-                          <td className="py-2.5 px-3 min-w-[320px]">
+                          <td className="py-2.5 px-3 min-w-[340px]">
                             {matched ? (
                               <div className={`rounded-xl border p-2.5 text-xs space-y-2 shadow-2xs ${confront.cardBorderClass}`}>
-                                {/* 1. Priorité N°1: Nom du Patient en évidence */}
-                                <div className="flex items-center justify-between gap-1.5 bg-white/90 dark:bg-slate-900/60 px-2 py-1.5 rounded-lg border border-slate-200/80 shadow-2xs">
+                                {/* 1. En-tête : Référence Facture & Badge de Statut */}
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 pb-1.5">
                                   <div className="flex items-center gap-1.5 min-w-0">
-                                    <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                    <span className="font-extrabold text-slate-950 text-[12px] truncate uppercase tracking-tight" title={matched.personneNom}>
-                                      {matched.personneNom}
-                                    </span>
-                                    {matched.matricule && matched.matricule !== '-' && (
-                                      <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1 py-0.2 rounded shrink-0">
-                                        Mat: {matched.matricule}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {matched.prestationNum && (
-                                    <span className="text-[9px] text-slate-400 font-mono shrink-0" title={`Réf Facture interne : ${matched.prestationNum}`}>
-                                      N° {matched.prestationNum}
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* 2. Acte Prescrit & Badge de Confrontation */}
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
-                                      {matched.codeActe}
-                                    </span>
-                                    <span className="font-semibold text-slate-700 text-[11px] truncate" title={matched.libelleActe}>
-                                      {matched.libelleActe}
+                                    <FileText className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                    <span className="font-mono font-bold text-slate-900 text-[11px] truncate" title={`Référence Facture : ${matched.prestationNum}`}>
+                                      {matched.prestationNum ? `Facture N° ${matched.prestationNum}` : 'Facture en Base'}
                                     </span>
                                   </div>
                                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border shrink-0 ${confront.badgeClass}`}>
@@ -2048,38 +2021,91 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                   </span>
                                 </div>
 
-                                {/* 3. Comparison Pills: Date & Gross Amount (sans TM) */}
-                                <div className="flex items-center flex-wrap gap-1.5">
-                                  {confront.isSameDate ? (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                      ✓ Même Date ({formatDate(matched.prestationDate)})
+                                {/* 2. Acte & Patient (Alerte si patient différent) */}
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
+                                      {matched.codeActe}
                                     </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                                      ⚠️ Date diff. (Prescr: {formatDate(matched.prestationDate)})
+                                    <span className="font-semibold text-slate-800 text-[11px] truncate" title={matched.libelleActe}>
+                                      {matched.libelleActe}
                                     </span>
-                                  )}
+                                  </div>
 
-                                  {confront.isSameMontantBrut ? (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                      ✓ Même Montant Brut ({formatMoney(matched.montantInitial)})
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-300">
-                                      ⚠️ Écart Brut : {formatMoney(row.montantBrut)} ≠ {formatMoney(matched.montantInitial)}
-                                    </span>
-                                  )}
+                                  {(() => {
+                                    const rowNameNorm = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+                                    const candNameNorm = (matched.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+                                    if (rowNameNorm && candNameNorm && !rowNameNorm.includes(candNameNorm) && !candNameNorm.includes(rowNameNorm)) {
+                                      return (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0" title={`Patient en base : ${matched.personneNom}`}>
+                                          <User className="w-2.5 h-2.5" />
+                                          <span>Base: {matched.personneNom}</span>
+                                        </span>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
 
-                                {/* 4. Footer details: Entreprise & Reste à payer */}
-                                <div className="text-[10px] text-slate-600 flex items-center justify-between border-t border-slate-200/60 pt-1">
-                                  <span className="truncate text-slate-500 font-medium">
-                                    {matched.sousSociete ? `Entreprise : ${matched.sousSociete}` : 'Acte enregistré en base'}
-                                  </span>
-                                  <span className="font-mono font-bold text-emerald-800 shrink-0 ml-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                                    Reste : {formatMoney(matched.resteAPayer)}
-                                  </span>
+                                {/* 3. Encadré comparatif côte-à-côte (Tableau Synthétique Ultra-Clair) */}
+                                <div className="bg-white/95 dark:bg-slate-900/60 p-2 rounded-lg border border-slate-200/80 space-y-1.5 text-[10px]">
+                                  <div className="grid grid-cols-2 gap-2 text-slate-700 border-b border-slate-100 pb-1">
+                                    <div>
+                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block">Décompte Excel</span>
+                                      <div className="font-medium text-slate-900">Date: {formatDate(row.dateSoins)}</div>
+                                      <div className="font-mono text-slate-800">
+                                        Brut: <strong className="text-slate-900">{formatMoney(row.montantBrut)}</strong>
+                                      </div>
+                                      {row.participation > 0 && (
+                                        <div className="font-mono text-amber-700 text-[9.5px]">
+                                          TM: -{formatMoney(row.participation)}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="border-l border-slate-100 pl-2">
+                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block">Facture en Base</span>
+                                      <div className="font-medium text-slate-900">Date: {formatDate(matched.prestationDate)}</div>
+                                      <div className="font-mono text-slate-800">
+                                        Initial: <strong className="text-slate-900">{formatMoney(matched.montantInitial)}</strong>
+                                      </div>
+                                      <div className="font-mono text-emerald-700 text-[9.5px] font-semibold">
+                                        Reste: {formatMoney(matched.resteAPayer)}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Explication Synthétique du Rapprochement */}
+                                  <div className="text-[10px] font-medium leading-tight">
+                                    {confront.isSameDate && confront.isSameMontantBrut ? (
+                                      <span className="text-emerald-700 flex items-center gap-1 font-bold">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                        <span>Montants et dates parfaitement identiques ({formatMoney(row.montantBrut)}).</span>
+                                      </span>
+                                    ) : confront.isSameDate && (row.participation > 0 && Math.abs((row.montantBrut - row.participation) - matched.montantInitial) < 2) ? (
+                                      <span className="text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1 font-bold">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                        <span>Part Net Assurance ({formatMoney(row.montantBrut)} Brut - TM {formatMoney(row.participation)} = {formatMoney(row.montantBrut - row.participation)}) égale à la Facture ({formatMoney(matched.montantInitial)}).</span>
+                                      </span>
+                                    ) : !confront.isSameDate ? (
+                                      <span className="text-amber-800 flex items-center gap-1 font-semibold">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                        <span>Date Décompte ({formatDate(row.dateSoins)}) ≠ Date Facture ({formatDate(matched.prestationDate)}).</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-rose-800 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 flex items-center gap-1 font-bold">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                        <span>Écart de Montant : Décompte ({formatMoney(row.montantBrut)}) ≠ Facture ({formatMoney(matched.montantInitial)}).</span>
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
+
+                                {/* 4. Pied de carte : Société / Entreprise */}
+                                {matched.sousSociete && (
+                                  <div className="text-[10px] text-slate-500 font-medium truncate pt-0.5">
+                                    Entreprise : <span className="text-slate-800 font-semibold">{matched.sousSociete}</span>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               (() => {

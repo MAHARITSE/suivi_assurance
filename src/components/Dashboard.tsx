@@ -7,7 +7,8 @@ import {
   FileText, 
   CheckCircle2, 
   Plus, 
-  ArrowRight
+  ArrowRight,
+  Clock
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -70,12 +71,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
     : paiements.filter(p => p.societeId === selectedSocieteId);
 
   // Compute key indicators
-  const totalReclame = filteredPrestations.reduce((sum, p) => sum + p.totalPrestation, 0);
-  const totalPaye = filteredPaiements.reduce((sum, p) => sum + p.totalPaye, 0);
-  const totalModerateur = filteredPaiements.reduce((sum, p) => sum + p.totalModerateur, 0);
-  const totalExclu = filteredPaiements.reduce((sum, p) => sum + p.totalExclu, 0);
+  const totalReclame = filteredPrestations.reduce((sum, p) => sum + (p.totalPrestation || 0), 0);
 
-  const tauxCouvertureGlobal = totalReclame > 0 ? Math.round((totalPaye / totalReclame) * 100) : 0;
+  // Total Ticket Modérateur (Part assurés)
+  const totalModerateur = filteredPrestations.reduce((sum, p) => {
+    return sum + (p.participation || p.ticketModerateur || 0);
+  }, 0);
+
+  // Total Règlements Effectués par les assurances
+  const totalPaye = filteredPaiements.reduce((sum, p) => sum + (p.totalPaye || 0), 0);
+
+  // Total Exclusions & Rejets
+  const totalExclu = filteredPrestations.reduce((sum, p) => sum + (p.montantExclu || 0), 0)
+    || filteredPaiements.reduce((sum, p) => sum + (p.totalExclu || 0), 0);
+
+  // Total Factures à Recouvrir (Solde restant dû par les assurances = Part Assurance Net - Règlements - Rejets)
+  const totalARecouvrer = filteredPrestations.reduce((sum, p) => {
+    const partAssurance = p.montantARembourser ?? Math.max(0, (p.totalPrestation || 0) - (p.participation || p.ticketModerateur || 0));
+    const paye = p.totalPaye || 0;
+    const exclu = p.montantExclu || 0;
+    const reste = Math.max(0, partAssurance - paye - exclu);
+    return sum + reste;
+  }, 0);
+
+  // Nombre de dossiers non soldés auprès des assurances
+  const dossiersARecouvrer = filteredPrestations.filter(p => {
+    const partAssurance = p.montantARembourser ?? Math.max(0, (p.totalPrestation || 0) - (p.participation || p.ticketModerateur || 0));
+    const paye = p.totalPaye || 0;
+    const exclu = p.montantExclu || 0;
+    const reste = partAssurance - paye - exclu;
+    return reste > 50;
+  }).length;
+
+  const totalPartAssurance = filteredPrestations.reduce((sum, p) => {
+    return sum + (p.montantARembourser ?? Math.max(0, (p.totalPrestation || 0) - (p.participation || p.ticketModerateur || 0)));
+  }, 0);
+
+  const tauxCouvertureGlobal = totalPartAssurance > 0 
+    ? Math.round((totalPaye / totalPartAssurance) * 100) 
+    : (totalReclame > 0 ? Math.round((totalPaye / totalReclame) * 100) : 0);
 
   // Helper getters
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société Inconnue';
@@ -142,8 +176,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* 4 Major Metric KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 5 Major Metric KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* 1. Total Prestations */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Prestations</span>
@@ -157,20 +192,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Règlements Effectués</span>
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-emerald-600">{formatMoney(totalPaye)}</div>
-          <div className="flex items-center text-xs text-emerald-700">
-            <TrendingUp className="w-3.5 h-3.5 mr-1 inline" />
-            <span>Taux de prise en charge effectif : <strong>{tauxCouvertureGlobal}%</strong></span>
-          </div>
-        </div>
-
+        {/* 2. Tickets Modérateurs (Copay) */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tickets Modérateurs (Copay)</span>
@@ -184,9 +206,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
+        {/* 3. Total Règlements Effectués */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Règlements Effectués</span>
+            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-emerald-600">{formatMoney(totalPaye)}</div>
+          <div className="flex items-center text-xs text-emerald-700">
+            <TrendingUp className="w-3.5 h-3.5 mr-1 inline" />
+            <span>Taux de prise en charge : <strong>{tauxCouvertureGlobal}%</strong></span>
+          </div>
+        </div>
+
+        {/* 4. Factures à Recouvrir */}
+        <div 
+          onClick={() => onNavigate('prestations')}
+          className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2 cursor-pointer hover:border-sky-300 hover:shadow-sm transition-all"
+          title="Cliquer pour accéder aux prestations non soldées"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Factures à Recouvrir</span>
+            <div className="p-2 rounded-lg bg-sky-50 text-sky-600">
+              <Clock className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-sky-700">{formatMoney(totalARecouvrer)}</div>
+          <div className="flex items-center text-xs text-slate-500">
+            <span className="font-medium text-slate-700 mr-1">{dossiersARecouvrer}</span> dossier(s) en attente
+          </div>
+        </div>
+
+        {/* 5. Exclusions & Rejets */}
         <div 
           onClick={() => onNavigate('rejets')}
-          className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2 cursor-pointer hover:border-rose-300 transition-colors"
+          className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2 cursor-pointer hover:border-rose-300 hover:shadow-sm transition-all"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Exclusions & Rejets</span>
