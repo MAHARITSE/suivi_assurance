@@ -553,64 +553,9 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     );
   };
 
-  // Status counters for quick badges, scoped to current societe & sub-societe filters
-  const statusCounts = useMemo(() => {
-    let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
-
-    const isSocAll = !filterSocieteId || filterSocieteId === 'ALL';
-    const filterSocLower = (filterSocieteId || '').toLowerCase().trim();
-    const matchedSocObj = societes.find(s => (s.id && s.id.toLowerCase() === filterSocLower) || (s.nom && s.nom.toLowerCase() === filterSocLower));
-
-    const realPrestations = prestations.filter(p => {
-      if (isReglementPrestation(p)) return false;
-
-      // Societe filter
-      const socNameInList = (p.societeNom || '').toLowerCase().trim();
-      const socIdInList = (p.societeId || '').toLowerCase().trim();
-      const matchesSociete = isSocAll || 
-        socIdInList === filterSocLower || 
-        socNameInList === filterSocLower ||
-        (matchedSocObj && (socIdInList === matchedSocObj.id.toLowerCase() || socNameInList === matchedSocObj.nom.toLowerCase()));
-
-      if (!matchesSociete) return false;
-
-      // Sous-societe filter
-      const matchesSousSoc = !filterSousSociete || filterSousSociete === 'ALL' || 
-        (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
-
-      if (!matchesSousSoc) return false;
-
-      return true;
-    });
-
-    realPrestations.forEach(p => {
-      const fin = getPrestationFinancials(p);
-      if (fin.statut === 'Payé') {
-        paye++;
-      } else if (fin.statut === 'Partiellement payé') {
-        partiellementPaye++;
-        enCours++;
-      } else if (fin.statut === 'Rejeté') {
-        rejete++;
-      } else {
-        enAttente++;
-        enCours++;
-      }
-    });
-
-    return {
-      all: realPrestations.length,
-      enCours,
-      enAttente,
-      partiellementPaye,
-      paye,
-      rejete,
-    };
-  }, [prestations, paymentsMap, filterSocieteId, filterSousSociete, societes]);
-
-  // Filtered and Sorted List
-  const filteredAndSortedList = useMemo(() => {
-    const list = prestations.filter(p => {
+  // 1. Base list of non-reglement prestations matching all search and categorical filters except statusFilter
+  const baseFilteredPrestations = useMemo(() => {
+    return prestations.filter(p => {
       // Exclude pure settlement imports
       if (isReglementPrestation(p)) return false;
 
@@ -631,24 +576,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
       // Sous-societe filter
       const matchesSousSoc = filterSousSociete === 'ALL' || (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
-      
-      // Status filter - Tous, En cours, En attente, Partiellement payé, Payé, Rejeté
-      let matchesStatus = true;
-      if (statusFilter !== 'ALL') {
-        if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
-          matchesStatus = fin.statut === 'Payé';
-        } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
-          matchesStatus = fin.statut === 'En attente' || fin.statut === 'Partiellement payé';
-        } else if (statusFilter === 'En attente') {
-          matchesStatus = fin.statut === 'En attente';
-        } else if (statusFilter === 'Partiellement payé') {
-          matchesStatus = fin.statut === 'Partiellement payé';
-        } else if (statusFilter === 'Rejeté') {
-          matchesStatus = fin.statut === 'Rejeté';
-        } else {
-          matchesStatus = fin.statut === statusFilter;
-        }
-      }
 
       // Date range filter
       const matchesDateDebut = !dateDebut || p.date >= dateDebut;
@@ -700,7 +627,73 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         (p.commentaires && p.commentaires.toLowerCase().includes(searchLower)) ||
         (p.lignes || []).some(l => (l.libelle || '').toLowerCase().includes(searchLower) || (l.code || '').toLowerCase().includes(searchLower));
 
-      return matchesSociete && matchesSousSoc && matchesStatus && matchesDateDebut && matchesDateFin && matchesSolde && matchesReconciliation && matchesRetard3Mois && matchesSearch;
+      return matchesSociete && matchesSousSoc && matchesDateDebut && matchesDateFin && matchesSolde && matchesReconciliation && matchesRetard3Mois && matchesSearch;
+    });
+  }, [
+    prestations,
+    filterSocieteId,
+    filterSousSociete,
+    dateDebut,
+    dateFin,
+    soldeFilter,
+    reconciliationFilter,
+    filterRetard3Mois,
+    searchTerm,
+    personnes,
+    societes,
+    paymentsMap
+  ]);
+
+  // 2. Status counters for Dossiers (Vue Détaillée)
+  const dossierStatusCounts = useMemo(() => {
+    let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
+
+    baseFilteredPrestations.forEach(p => {
+      const fin = getPrestationFinancials(p);
+      if (fin.statut === 'Payé') {
+        paye++;
+      } else if (fin.statut === 'Partiellement payé') {
+        partiellementPaye++;
+        enCours++;
+      } else if (fin.statut === 'Rejeté') {
+        rejete++;
+      } else {
+        enAttente++;
+        enCours++;
+      }
+    });
+
+    return {
+      all: baseFilteredPrestations.length,
+      enCours,
+      enAttente,
+      partiellementPaye,
+      paye,
+      rejete,
+    };
+  }, [baseFilteredPrestations, paymentsMap]);
+
+  // 3. Filtered and Sorted Prestations List (for Vue Détaillée / Dossiers)
+  const filteredAndSortedList = useMemo(() => {
+    const list = baseFilteredPrestations.filter(p => {
+      const fin = getPrestationFinancials(p);
+
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
+          return fin.statut === 'Payé';
+        } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
+          return fin.statut === 'En attente' || fin.statut === 'Partiellement payé';
+        } else if (statusFilter === 'En attente') {
+          return fin.statut === 'En attente';
+        } else if (statusFilter === 'Partiellement payé') {
+          return fin.statut === 'Partiellement payé';
+        } else if (statusFilter === 'Rejeté') {
+          return fin.statut === 'Rejeté';
+        } else {
+          return fin.statut === statusFilter;
+        }
+      }
+      return true;
     });
 
     // Sorting
@@ -769,15 +762,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
     return list;
   }, [
-    prestations,
-    filterSocieteId,
-    filterSousSociete,
+    baseFilteredPrestations,
     statusFilter,
-    dateDebut,
-    dateFin,
-    soldeFilter,
-    filterRetard3Mois,
-    searchTerm,
     sortField,
     sortDirection,
     personnes,
@@ -785,7 +771,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     paymentsMap
   ]);
 
-  // Aggregate statistics for the filtered dataset
+  // Aggregate statistics for the filtered dataset (Dossiers)
   const stats = useMemo(() => {
     let count = filteredAndSortedList.length;
     let totalFacture = 0;
@@ -848,8 +834,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     };
   }, [filteredAndSortedList, selectedPrestations, paymentsMap]);
 
-  // Grouped factures aggregation across all filtered prestations
-  const groupedFactures = useMemo(() => {
+  // 4. All Grouped Factures (built from all baseFilteredPrestations so invoices retain complete totals)
+  const allGroupedFactures = useMemo(() => {
     const map = new Map<string, {
       numeroFacture: string;
       societeId: string;
@@ -878,7 +864,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       }>;
     }>();
 
-    filteredAndSortedList.forEach(p => {
+    baseFilteredPrestations.forEach(p => {
       const num = (p.numeroFacture || 'SANS_NUMERO').trim();
       const fin = getPrestationFinancials(p);
       const recInfo = getPrestationReconciliationInfo(p);
@@ -991,6 +977,61 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       };
     });
 
+    return list;
+  }, [baseFilteredPrestations, paymentsMap, societes, personnes]);
+
+  // 5. Status counters for Factures (Vue par Facture)
+  const factureStatusCounts = useMemo(() => {
+    let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
+
+    allGroupedFactures.forEach(f => {
+      if (f.statut === 'Payé') {
+        paye++;
+      } else if (f.statut === 'Partiellement payé') {
+        partiellementPaye++;
+        enCours++;
+      } else if (f.statut === 'Rejeté') {
+        rejete++;
+      } else {
+        enAttente++;
+        enCours++;
+      }
+    });
+
+    return {
+      all: allGroupedFactures.length,
+      enCours,
+      enAttente,
+      partiellementPaye,
+      paye,
+      rejete,
+    };
+  }, [allGroupedFactures]);
+
+  // 6. Active Status counters dynamically adapted to the active view mode
+  const statusCounts = useMemo(() => {
+    return viewMode === 'factures' ? factureStatusCounts : dossierStatusCounts;
+  }, [viewMode, factureStatusCounts, dossierStatusCounts]);
+
+  // 7. Filtered and Sorted Factures List (Vue par Facture)
+  const filteredAndSortedFactures = useMemo(() => {
+    const list = allGroupedFactures.filter(f => {
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
+          return f.statut === 'Payé';
+        } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
+          return f.statut === 'En attente' || f.statut === 'Partiellement payé';
+        } else if (statusFilter === 'En attente') {
+          return f.statut === 'En attente';
+        } else if (statusFilter === 'Partiellement payé') {
+          return f.statut === 'Partiellement payé';
+        } else if (statusFilter === 'Rejeté') {
+          return f.statut === 'Rejeté';
+        }
+      }
+      return true;
+    });
+
     // Sort grouped invoices
     list.sort((a, b) => {
       let valA: any = '';
@@ -1058,9 +1099,12 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     });
 
     return list;
-  }, [filteredAndSortedList, paymentsMap, factureSortField, factureSortDirection, societes, personnes]);
+  }, [allGroupedFactures, statusFilter, factureSortField, factureSortDirection]);
 
-  // Aggregated totals across all grouped factures
+  // Alias groupedFactures to the filtered and sorted list for factures view
+  const groupedFactures = filteredAndSortedFactures;
+
+  // Aggregated totals across all grouped factures displayed
   const groupedFacturesTotals = useMemo(() => {
     return groupedFactures.reduce((acc, f) => {
       acc.totalFacture += f.totalFacture;

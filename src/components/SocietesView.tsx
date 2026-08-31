@@ -38,6 +38,8 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
   const [regroupSociete, setRegroupSociete] = useState<Societe | null>(null);
   const [selectedSubNames, setSelectedSubNames] = useState<string[]>([]);
   const [targetSubName, setTargetSubName] = useState<string>('');
+  const [subSearchTerm, setSubSearchTerm] = useState<string>('');
+  const [subSortOrder, setSubSortOrder] = useState<'alpha-asc' | 'alpha-desc' | 'volume'>('alpha-asc');
   const [editingSingleSub, setEditingSingleSub] = useState<{ oldName: string; newName: string } | null>(null);
   const [isProcessingMerge, setIsProcessingMerge] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
     (s.contact && s.contact.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Calculate unique sub-société statistics for the company being managed
+  // Calculate unique sub-société statistics for the company being managed, sorted alphabetically
   const subSocietesStats = useMemo(() => {
     if (!regroupSociete) return [];
 
@@ -96,8 +98,22 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
       });
     }
 
-    return Array.from(map.values()).sort((a, b) => (b.prestationCount + b.personneCount) - (a.prestationCount + a.personneCount));
-  }, [regroupSociete, prestations, personnes]);
+    // Default alphabetical sorting A-Z for clear and easy grouping
+    const list = Array.from(map.values());
+    if (subSortOrder === 'alpha-asc') {
+      return list.sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base', numeric: true }));
+    } else if (subSortOrder === 'alpha-desc') {
+      return list.sort((a, b) => b.name.localeCompare(a.name, 'fr', { sensitivity: 'base', numeric: true }));
+    } else {
+      return list.sort((a, b) => (b.prestationCount + b.personneCount) - (a.prestationCount + a.personneCount));
+    }
+  }, [regroupSociete, prestations, personnes, subSortOrder]);
+
+  const displayedSubSocietes = useMemo(() => {
+    if (!subSearchTerm.trim()) return subSocietesStats;
+    const term = subSearchTerm.toLowerCase().trim();
+    return subSocietesStats.filter(s => s.name.toLowerCase().includes(term));
+  }, [subSocietesStats, subSearchTerm]);
 
   const handleOpenCreate = () => {
     setEditingSociete(null);
@@ -146,6 +162,8 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
     setRegroupSociete(s);
     setSelectedSubNames([]);
     setTargetSubName('');
+    setSubSearchTerm('');
+    setSubSortOrder('alpha-asc');
     setEditingSingleSub(null);
     setSuccessMsg(null);
   };
@@ -169,13 +187,14 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
   };
 
   const handleSelectAllSubs = () => {
-    if (selectedSubNames.length === subSocietesStats.length) {
+    const currentList = displayedSubSocietes.map(s => s.name);
+    if (selectedSubNames.length === currentList.length) {
       setSelectedSubNames([]);
+      setTargetSubName('');
     } else {
-      const allNames = subSocietesStats.map(s => s.name);
-      setSelectedSubNames(allNames);
-      if (allNames.length > 0 && !targetSubName) {
-        setTargetSubName(allNames[0]);
+      setSelectedSubNames(currentList);
+      if (currentList.length > 0 && !targetSubName) {
+        setTargetSubName(currentList[0]);
       }
     }
   };
@@ -410,17 +429,84 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
 
             {/* List & Controls */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {/* Search & Sort bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={subSearchTerm}
+                    onChange={(e) => setSubSearchTerm(e.target.value)}
+                    placeholder="Filtrer les sous-sociétés..."
+                    className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-medium"
+                  />
+                  {subSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSubSearchTerm('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider hidden sm:inline">Tri :</span>
+                  <button
+                    type="button"
+                    onClick={() => setSubSortOrder('alpha-asc')}
+                    className={`px-2 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      subSortOrder === 'alpha-asc'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                    title="Trier par ordre alphabétique croissant A-Z"
+                  >
+                    A → Z
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubSortOrder('alpha-desc')}
+                    className={`px-2 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      subSortOrder === 'alpha-desc'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                    title="Trier par ordre alphabétique décroissant Z-A"
+                  >
+                    Z → A
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubSortOrder('volume')}
+                    className={`px-2 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      subSortOrder === 'volume'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                    title="Trier par volume d'activité"
+                  >
+                    Par Volume
+                  </button>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between px-1">
                 <span className="text-xs font-bold text-slate-800">
-                  Sous-sociétés recensées ({subSocietesStats.length}) :
+                  {subSearchTerm ? (
+                    <>Sous-sociétés correspondantes ({displayedSubSocietes.length} / {subSocietesStats.length}) :</>
+                  ) : (
+                    <>Sous-sociétés recensées par ordre alphabétique ({subSocietesStats.length}) :</>
+                  )}
                 </span>
-                {subSocietesStats.length > 0 && (
+                {displayedSubSocietes.length > 0 && (
                   <button
                     type="button"
                     onClick={handleSelectAllSubs}
                     className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1 cursor-pointer"
                   >
-                    {selectedSubNames.length === subSocietesStats.length ? (
+                    {selectedSubNames.length === displayedSubSocietes.length ? (
                       <>
                         <CheckSquare className="w-3.5 h-3.5" />
                         <span>Tout désélectionner</span>
@@ -435,13 +521,15 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                 )}
               </div>
 
-              {subSocietesStats.length === 0 ? (
+              {displayedSubSocietes.length === 0 ? (
                 <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs">
-                  Aucune sous-société répertoriée pour le moment pour {regroupSociete.nom}.
+                  {subSearchTerm
+                    ? `Aucune sous-société trouvée pour "${subSearchTerm}".`
+                    : `Aucune sous-société répertoriée pour le moment pour ${regroupSociete.nom}.`}
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {subSocietesStats.map((item) => {
+                  {displayedSubSocietes.map((item) => {
                     const isSelected = selectedSubNames.includes(item.name);
                     const isEditing = editingSingleSub?.oldName === item.name;
 
