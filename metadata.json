@@ -1,6 +1,0 @@
-{
-  "name": "Suivi Assurance SALFA",
-  "description": "Application SALFA de gestion et suivi des assurances santé : sociétés, adhérents/personnes, prestations médicales, bordereaux de règlement/paiements, importation automatisée de factures PDF et fichiers Excel, et rapprochement comptable.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
