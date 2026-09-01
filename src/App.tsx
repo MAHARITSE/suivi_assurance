@@ -30,8 +30,8 @@ export function App() {
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
   const [selectedSubSocieteId, setSelectedSubSocieteId] = useState<string>('ALL');
 
-  // Mode de stockage : 'local' (LocalStorage par défaut) ou 'server' (WAMP MySQL)
-  const [storageMode, setStorageMode] = useState<StorageMode>(() => getStoredStorageMode());
+  // Mode de stockage verrouillé sur 'server' (MySQL WAMP) pour la version wamp_deploy
+  const [storageMode] = useState<StorageMode>('server');
 
   // Entête personnalisée
   const [enteteConfig, setEnteteConfig] = useState<EnteteConfig>(() => {
@@ -216,17 +216,6 @@ export function App() {
       window.removeEventListener('focus', handleFocus);
     };
   }, [storageMode, dbStatus, checkAndLoadWampData]);
-
-  // Mode Switcher Handler
-  const handleToggleStorageMode = (newMode: StorageMode) => {
-    setStorageMode(newMode);
-    setStoredStorageMode(newMode);
-    if (newMode === 'local') {
-      loadFromLocalStorage();
-    } else {
-      checkAndLoadWampData(false);
-    }
-  };
 
   // Handlers for Prestations
   const handleSavePrestation = async (prestation: Prestation) => {
@@ -793,28 +782,19 @@ export function App() {
             <div className="space-y-2 text-xs text-slate-700">
               <h4 className="font-bold text-slate-900">Que faire ?</h4>
               <p className="text-slate-600 leading-relaxed">
-                Vérifiez que WAMP Server est démarré (icône verte) et que MySQL est accessible. Vous pouvez réessayer ou basculer en <strong>Mode Local</strong> pour continuer à travailler immédiatement avec vos données locales.
+                Vérifiez que WAMP Server est démarré (icône verte) et que MySQL est accessible, puis cliquez sur Réessayer.
               </p>
             </div>
 
-            <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => checkAndLoadWampData(false)}
                 disabled={isRetryingDb}
-                className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${isRetryingDb ? 'animate-spin' : ''}`} />
                 <span>{isRetryingDb ? 'Vérification...' : 'Réessayer MySQL'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleToggleStorageMode('local')}
-                className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition cursor-pointer"
-              >
-                <Laptop className="h-4 w-4" />
-                <span>Basculer en Mode Local</span>
               </button>
             </div>
           </div>
@@ -843,13 +823,11 @@ export function App() {
         selectedSocieteId={selectedSocieteId}
         onSelectSociete={setSelectedSocieteId}
         onExportBackup={handleExportBackup}
-        onRefreshData={() => (storageMode === 'server' ? checkAndLoadWampData(true) : loadFromLocalStorage())}
+        onRefreshData={() => checkAndLoadWampData(true)}
         isRefreshing={isRefreshing}
         lastSyncTime={lastSyncTime}
         dbConnected={dbStatus === 'connected'}
         logoUrl={enteteConfig.logoUrl}
-        storageMode={storageMode}
-        onToggleStorageMode={() => handleToggleStorageMode(storageMode === 'local' ? 'server' : 'local')}
       />
 
       {/* BANDEAU DU FILTRE AVANCÉ : SOCIÉTÉ / GARANT (TRANSPARENT, ANCRÉ À GAUCHE) */}

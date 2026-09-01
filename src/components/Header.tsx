@@ -1,7 +1,6 @@
 import React from 'react';
-import { ShieldCheck, Database, RefreshCw, Server, Laptop } from 'lucide-react';
+import { ShieldCheck, Database, RefreshCw, Server } from 'lucide-react';
 import { Societe } from '../types';
-import { StorageMode } from '../utils/localPersistence';
 
 interface HeaderProps {
   societes?: Societe[];
@@ -13,8 +12,6 @@ interface HeaderProps {
   lastSyncTime?: Date | null;
   dbConnected?: boolean;
   logoUrl?: string;
-  storageMode?: StorageMode;
-  onToggleStorageMode?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,8 +21,6 @@ export const Header: React.FC<HeaderProps> = ({
   lastSyncTime,
   dbConnected = true,
   logoUrl,
-  storageMode = 'local',
-  onToggleStorageMode,
 }) => {
   return (
     <header
@@ -54,60 +49,23 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5">
-          {/* Statut & Sélecteur de Mode (Local vs Serveur WAMP MySQL) */}
-          {storageMode === 'local' ? (
-            <div
-              id="local-mode-indicator"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/90 text-indigo-900 text-xs font-semibold shadow-2xs"
-              title="Mode Local actif : Les données sont enregistrées et persistées directement dans votre navigateur"
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600"></span>
-              </span>
-              <Laptop className="h-3.5 w-3.5 text-indigo-600" />
-              <span>Mode Local</span>
-            </div>
-          ) : (
-            <div
-              id="mysql-status-indicator"
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold shadow-2xs ${
-                dbConnected
-                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                  : 'bg-rose-50/70 border-rose-200 text-rose-900'
-              }`}
-              title={dbConnected ? 'Connecté à la base MySQL WAMP' : 'Déconnecté de la base MySQL WAMP'}
-            >
-              <span className="relative flex h-2 w-2">
-                {dbConnected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${dbConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-              </span>
-              <Server className="h-3.5 w-3.5 text-emerald-600" />
-              <span>MySQL WAMP</span>
-            </div>
-          )}
-
-          {onToggleStorageMode && (
-            <button
-              type="button"
-              id="btn-toggle-storage-mode"
-              onClick={onToggleStorageMode}
-              title={`Basculer vers le ${storageMode === 'local' ? 'Serveur MySQL WAMP' : 'Mode Local'}`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition cursor-pointer shadow-xs active:scale-95"
-            >
-              {storageMode === 'local' ? (
-                <>
-                  <Server className="h-3.5 w-3.5 text-emerald-600" />
-                  <span className="hidden sm:inline">Passer en WAMP MySQL</span>
-                </>
-              ) : (
-                <>
-                  <Laptop className="h-3.5 w-3.5 text-indigo-600" />
-                  <span className="hidden sm:inline">Passer en Mode Local</span>
-                </>
-              )}
-            </button>
-          )}
+          {/* Statut MySQL WAMP (Mode unique pour wamp_deploy) */}
+          <div
+            id="mysql-status-indicator"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold shadow-2xs ${
+              dbConnected
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                : 'bg-rose-50/70 border-rose-200 text-rose-900'
+            }`}
+            title={dbConnected ? 'Connecté à la base MySQL WAMP' : 'Déconnecté de la base MySQL WAMP'}
+          >
+            <span className="relative flex h-2 w-2">
+              {dbConnected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${dbConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+            </span>
+            <Server className="h-3.5 w-3.5 text-emerald-600" />
+            <span>MySQL WAMP</span>
+          </div>
 
           {lastSyncTime && (
             <span className="hidden xl:inline text-[11px] text-slate-500 px-2 py-1 bg-slate-100 rounded-lg border border-slate-200">
