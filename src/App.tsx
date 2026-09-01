@@ -319,72 +319,65 @@ export function App() {
       setPaiements(remainingPaiements);
       saveLocalTable('paiements', remainingPaiements);
 
-      // Recompute payment states
-      const remainingPaidMap = new Map<string, { totalPaye: number; totalExclu: number; bordereaux: string[]; latestDate: string }>();
-      const remainingLinePaidMap = new Map<string, { totalPaye: number; totalExclu: number }>();
-
-      remainingPaiements.forEach(pm => {
-        (pm.lignes || []).forEach(lp => {
-          const net = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
-          const exclu = Number(lp.montantExclu || 0);
-          const pId = lp.prestationId;
-          const lId = lp.lignePrestationId;
-
-          if (pId) {
-            const current = remainingPaidMap.get(pId) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
-            current.totalPaye += net;
-            current.totalExclu += exclu;
-            if (pm.numeroBordereau && !current.bordereaux.includes(pm.numeroBordereau)) {
-              current.bordereaux.push(pm.numeroBordereau);
-            }
-            if (pm.datePaiement && (!current.latestDate || pm.datePaiement > current.latestDate)) {
-              current.latestDate = pm.datePaiement;
-            }
-            remainingPaidMap.set(pId, current);
-          }
-
-          if (lId) {
-            const lCurrent = remainingLinePaidMap.get(lId) || { totalPaye: 0, totalExclu: 0 };
-            lCurrent.totalPaye += net;
-            lCurrent.totalExclu += exclu;
-            remainingLinePaidMap.set(lId, lCurrent);
-          }
-        });
-      });
-
       const updatedPrestationsToSave: Prestation[] = [];
       setPrestations(prev => {
         const updated = prev.map(p => {
-          const pPaidData = remainingPaidMap.get(p.id) || { totalPaye: 0, totalExclu: 0, bordereaux: [], latestDate: '' };
-          let linesTotalPaye = 0;
-          let linesTotalExclu = 0;
+          let pTotalPaye = 0;
+          let pTotalExclu = 0;
+          let latestDate = '';
 
           const updatedLignes = (p.lignes || []).map(l => {
-            const lPaidData = remainingLinePaidMap.get(l.id) || { totalPaye: 0, totalExclu: 0 };
+            let lTotalPaye = 0;
+            let lTotalExclu = 0;
+
+            remainingPaiements.forEach(pm => {
+              (pm.lignes || []).forEach(lp => {
+                const matchPrest = (lp.prestationId && lp.prestationId === p.id) || 
+                                   (lp.lignePrestationId && lp.lignePrestationId === l.id) ||
+                                   (lp.prestationNumero && p.numeroFacture && lp.prestationNumero.trim().toLowerCase() === p.numeroFacture.trim().toLowerCase());
+                
+                if (matchPrest) {
+                  const net = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
+                  const exclu = Number(lp.montantExclu || 0);
+                  
+                  if (lp.lignePrestationId === l.id || (!lp.lignePrestationId && p.lignes?.length === 1)) {
+                    lTotalPaye += net;
+                    lTotalExclu += exclu;
+                  }
+                  
+                  pTotalPaye += net;
+                  pTotalExclu += exclu;
+
+                  if (pm.datePaiement && (!latestDate || pm.datePaiement > latestDate)) {
+                    latestDate = pm.datePaiement;
+                  }
+                }
+              });
+            });
+
             const lTot = (l as any).montantTotal ?? l.totalPrestation ?? 0;
             const lMod = l.ticketModerateur ?? 0;
             const lRemb = l.montantARembourser ?? Math.max(0, lTot - lMod);
-            const lReste = Math.max(0, lRemb - lPaidData.totalPaye - lPaidData.totalExclu);
-            const isLPaid = (lPaidData.totalPaye >= lRemb && lRemb > 0) || (lReste <= 0 && lPaidData.totalPaye > 0);
-            const isLPart = lPaidData.totalPaye > 0 && !isLPaid && lReste > 0;
-            const isLExcluded = lPaidData.totalExclu >= lRemb && lRemb > 0 && lPaidData.totalPaye === 0;
+            const lReste = Math.max(0, lRemb - lTotalPaye - lTotalExclu);
+            const isLPaid = (lTotalPaye >= lRemb && lRemb > 0) || (lReste <= 0 && lTotalPaye > 0);
+            const isLPart = lTotalPaye > 0 && !isLPaid && lReste > 0;
+            const isLExcluded = lTotalExclu >= lRemb && lRemb > 0 && lTotalPaye === 0;
 
             const lStatut = isLExcluded ? 'Rejeté' : isLPaid ? 'Payé' : isLPart ? 'Partiellement payé' : 'En attente';
-            linesTotalPaye += lPaidData.totalPaye;
-            linesTotalExclu += lPaidData.totalExclu;
 
             return {
               ...l,
-              totalPaye: lPaidData.totalPaye,
+              totalPaye: lTotalPaye,
+              montantExclu: lTotalExclu > 0 ? lTotalExclu : l.montantExclu,
               statut: lStatut as any,
             };
           });
 
-          const totalPaye = Math.max(pPaidData.totalPaye, linesTotalPaye);
-          const totalExclu = Math.max(pPaidData.totalExclu, linesTotalExclu);
           const tot = p.montantTotal ?? p.totalPrestation ?? 0;
           const mod = p.ticketModerateur ?? p.participation ?? 0;
           const remb = p.montantARembourser ?? Math.max(0, tot - mod);
+          const totalPaye = pTotalPaye;
+          const totalExclu = pTotalExclu;
           const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
 
           const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
@@ -397,7 +390,7 @@ export function App() {
             resteAPayer,
             lignes: updatedLignes,
             statut: isExcluded ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
-            datePaiement: pPaidData.latestDate || undefined,
+            datePaiement: latestDate || undefined,
           };
 
           updatedPrestationsToSave.push(updatedP);

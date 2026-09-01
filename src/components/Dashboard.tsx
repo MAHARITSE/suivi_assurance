@@ -305,25 +305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <p className="mt-0.5 text-sm text-slate-500">Les indicateurs essentiels de votre activité.</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            id="btn-quick-new-prestation"
-            onClick={onOpenNewPrestation}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Prestations</span>
-          </button>
 
-          <button
-            id="btn-quick-new-paiement"
-            onClick={onOpenNewPaiement}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            <Receipt className="h-4 w-4" />
-            <span>Règlements</span>
-          </button>
-        </div>
       </div>
 
       {/* 5 Major Metric KPI Cards */}

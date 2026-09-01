@@ -553,68 +553,11 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     );
   };
 
-  // Status counters for quick badges, scoped to current societe & sub-societe filters
-  const statusCounts = useMemo(() => {
-    let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
-
-    const isSocAll = !filterSocieteId || filterSocieteId === 'ALL';
-    const filterSocLower = (filterSocieteId || '').toLowerCase().trim();
-    const matchedSocObj = societes.find(s => (s.id && s.id.toLowerCase() === filterSocLower) || (s.nom && s.nom.toLowerCase() === filterSocLower));
-
-    const realPrestations = prestations.filter(p => {
+  // Base filtered prestations (all filters except statusFilter)
+  const baseFilteredPrestations = useMemo(() => {
+    return prestations.filter(p => {
       if (isReglementPrestation(p)) return false;
 
-      // Societe filter
-      const socNameInList = (p.societeNom || '').toLowerCase().trim();
-      const socIdInList = (p.societeId || '').toLowerCase().trim();
-      const matchesSociete = isSocAll || 
-        socIdInList === filterSocLower || 
-        socNameInList === filterSocLower ||
-        (matchedSocObj && (socIdInList === matchedSocObj.id.toLowerCase() || socNameInList === matchedSocObj.nom.toLowerCase()));
-
-      if (!matchesSociete) return false;
-
-      // Sous-societe filter
-      const matchesSousSoc = !filterSousSociete || filterSousSociete === 'ALL' || 
-        (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
-
-      if (!matchesSousSoc) return false;
-
-      return true;
-    });
-
-    realPrestations.forEach(p => {
-      const fin = getPrestationFinancials(p);
-      if (fin.statut === 'Payé') {
-        paye++;
-      } else if (fin.statut === 'Partiellement payé') {
-        partiellementPaye++;
-        enCours++;
-      } else if (fin.statut === 'Rejeté') {
-        rejete++;
-      } else {
-        enAttente++;
-        enCours++;
-      }
-    });
-
-    return {
-      all: realPrestations.length,
-      enCours,
-      enAttente,
-      partiellementPaye,
-      paye,
-      rejete,
-    };
-  }, [prestations, paymentsMap, filterSocieteId, filterSousSociete, societes]);
-
-  // Filtered and Sorted List
-  const filteredAndSortedList = useMemo(() => {
-    const list = prestations.filter(p => {
-      // Exclude pure settlement imports
-      if (isReglementPrestation(p)) return false;
-
-      // Financials
       const fin = getPrestationFinancials(p);
 
       // Societe filter
@@ -631,24 +574,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
       // Sous-societe filter
       const matchesSousSoc = filterSousSociete === 'ALL' || (p.sousSociete && p.sousSociete.trim().toLowerCase() === filterSousSociete.toLowerCase());
-      
-      // Status filter - Tous, En cours, En attente, Partiellement payé, Payé, Rejeté
-      let matchesStatus = true;
-      if (statusFilter !== 'ALL') {
-        if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
-          matchesStatus = fin.statut === 'Payé';
-        } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
-          matchesStatus = fin.statut === 'En attente' || fin.statut === 'Partiellement payé';
-        } else if (statusFilter === 'En attente') {
-          matchesStatus = fin.statut === 'En attente';
-        } else if (statusFilter === 'Partiellement payé') {
-          matchesStatus = fin.statut === 'Partiellement payé';
-        } else if (statusFilter === 'Rejeté') {
-          matchesStatus = fin.statut === 'Rejeté';
-        } else {
-          matchesStatus = fin.statut === statusFilter;
-        }
-      }
 
       // Date range filter
       const matchesDateDebut = !dateDebut || p.date >= dateDebut;
@@ -700,7 +625,121 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         (p.commentaires && p.commentaires.toLowerCase().includes(searchLower)) ||
         (p.lignes || []).some(l => (l.libelle || '').toLowerCase().includes(searchLower) || (l.code || '').toLowerCase().includes(searchLower));
 
-      return matchesSociete && matchesSousSoc && matchesStatus && matchesDateDebut && matchesDateFin && matchesSolde && matchesReconciliation && matchesRetard3Mois && matchesSearch;
+      return matchesSociete && matchesSousSoc && matchesDateDebut && matchesDateFin && matchesSolde && matchesReconciliation && matchesRetard3Mois && matchesSearch;
+    });
+  }, [
+    prestations,
+    filterSocieteId,
+    filterSousSociete,
+    dateDebut,
+    dateFin,
+    soldeFilter,
+    reconciliationFilter,
+    filterRetard3Mois,
+    searchTerm,
+    personnes,
+    societes,
+    paymentsMap
+  ]);
+
+  // Status counters for quick badges, dynamically updated per viewMode (factures vs detaillee) and all active filters
+  const statusCounts = useMemo(() => {
+    let paye = 0, enAttente = 0, partiellementPaye = 0, rejete = 0, enCours = 0;
+
+    if (viewMode === 'detaillee') {
+      baseFilteredPrestations.forEach(p => {
+        const fin = getPrestationFinancials(p);
+        if (fin.statut === 'Payé') {
+          paye++;
+        } else if (fin.statut === 'Partiellement payé') {
+          partiellementPaye++;
+          enCours++;
+        } else if (fin.statut === 'Rejeté') {
+          rejete++;
+        } else {
+          enAttente++;
+          enCours++;
+        }
+      });
+      return {
+        all: baseFilteredPrestations.length,
+        enCours,
+        enAttente,
+        partiellementPaye,
+        paye,
+        rejete,
+      };
+    } else {
+      // viewMode === 'factures'
+      const map = new Map<string, { prestations: Prestation[] }>();
+      baseFilteredPrestations.forEach(p => {
+        const num = (p.numeroFacture || 'SANS_NUMERO').trim();
+        if (!map.has(num)) {
+          map.set(num, { prestations: [p] });
+        } else {
+          map.get(num)!.prestations.push(p);
+        }
+      });
+
+      let allCount = map.size;
+      map.forEach((grp) => {
+        const isAllRejete = grp.prestations.length > 0 && grp.prestations.every(p => {
+          const fin = getPrestationFinancials(p);
+          return fin.statut === 'Rejeté';
+        });
+        const totalARembourser = grp.prestations.reduce((sum, p) => sum + getPrestationFinancials(p).remb, 0);
+        const totalPaye = grp.prestations.reduce((sum, p) => sum + getPrestationFinancials(p).totalPaye, 0);
+        const resteAReclamer = grp.prestations.reduce((sum, p) => sum + getPrestationFinancials(p).resteAPayer, 0);
+
+        const isFullyPaid = (totalPaye >= totalARembourser && totalARembourser > 0) || (resteAReclamer <= 0 && totalPaye > 0);
+        const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAReclamer > 0;
+        const statut = isAllRejete ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente';
+
+        if (statut === 'Payé') {
+          paye++;
+        } else if (statut === 'Partiellement payé') {
+          partiellementPaye++;
+          enCours++;
+        } else if (statut === 'Rejeté') {
+          rejete++;
+        } else {
+          enAttente++;
+          enCours++;
+        }
+      });
+
+      return {
+        all: allCount,
+        enCours,
+        enAttente,
+        partiellementPaye,
+        paye,
+        rejete,
+      };
+    }
+  }, [baseFilteredPrestations, viewMode, paymentsMap]);
+
+  // Filtered and Sorted List (with statusFilter applied)
+  const filteredAndSortedList = useMemo(() => {
+    const list = baseFilteredPrestations.filter(p => {
+      const fin = getPrestationFinancials(p);
+      let matchesStatus = true;
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'Payé' || statusFilter === 'Totalement payé') {
+          matchesStatus = fin.statut === 'Payé';
+        } else if (statusFilter === 'EN_COURS' || statusFilter === 'Encour' || statusFilter === 'En cours') {
+          matchesStatus = fin.statut === 'En attente' || fin.statut === 'Partiellement payé';
+        } else if (statusFilter === 'En attente') {
+          matchesStatus = fin.statut === 'En attente';
+        } else if (statusFilter === 'Partiellement payé') {
+          matchesStatus = fin.statut === 'Partiellement payé';
+        } else if (statusFilter === 'Rejeté') {
+          matchesStatus = fin.statut === 'Rejeté';
+        } else {
+          matchesStatus = fin.statut === statusFilter;
+        }
+      }
+      return matchesStatus;
     });
 
     // Sorting

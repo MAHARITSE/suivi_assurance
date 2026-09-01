@@ -81,10 +81,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
   onSavePaiement,
 }) => {
   // Bordereau Header State
-  const [societeId, setSocieteId] = useState<string>(() => {
-    if (selectedSocieteId && selectedSocieteId !== 'ALL') return selectedSocieteId;
-    return societes[0]?.id || '';
-  });
+  const [societeId, setSocieteId] = useState<string>('');
   const [numeroBordereau, setNumeroBordereau] = useState<string>(() => {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const rand = Math.floor(100 + Math.random() * 900);
@@ -117,13 +114,20 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
   const [manualMontantExclu, setManualMontantExclu] = useState<number>(0);
   const [manualMotifExclu, setManualMotifExclu] = useState<string>('');
 
+  // Thousand separator helpers for inputs
+  const formatInputVal = (n: number) => (n === 0 ? '' : n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '));
+  const parseInputVal = (s: string) => {
+    const raw = s.replace(/\s/g, '');
+    return raw === '' ? 0 : Number(raw) || 0;
+  };
+
   // Reset or initialize on open
   useEffect(() => {
     if (isOpen) {
       if (selectedSocieteId && selectedSocieteId !== 'ALL') {
         setSocieteId(selectedSocieteId);
-      } else if (!societeId && societes.length > 0) {
-        setSocieteId(societes[0].id);
+      } else {
+        setSocieteId('');
       }
       if (bordereauLines.length === 0) {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -131,7 +135,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
         setNumeroBordereau(`BORD-${today}-${rand}`);
       }
     }
-  }, [isOpen, selectedSocieteId, societes]);
+  }, [isOpen, selectedSocieteId]);
 
   // Flattened searchable list of all existing acts across prestations
   const searchableActs = useMemo(() => {
@@ -263,29 +267,23 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     });
   }, [searchableActs, searchQuery, filterSocieteOnly, filterUnpaidOnly, societeId]);
 
-  // Check if an act is already added to the bordereau lines
+  // Check if an act is already added to the bordereau lines (now allowed to be repeated multiple times)
   const isActStaged = (prestationId: string, lignePrestationId: string) => {
-    return bordereauLines.some(l => l.prestationId === prestationId && l.lignePrestationId === lignePrestationId);
+    return false; // Permettre la répétition multiple du même acte dans le règlement
   };
 
-  // Add an act from search results into the bordereau table
+  // Add an act from search results into the bordereau table (allowing multiple repetitions with memory amount reduction)
   const handleAddActToBordereau = (act: typeof searchableActs[0]) => {
-    // If already staged, close dropdown and focus the existing line
-    const existing = bordereauLines.find(l => l.prestationId === act.prestationId && l.lignePrestationId === act.lignePrestationId);
-    if (existing) {
-      setSearchQuery('');
-      setTimeout(() => {
-        const inputEl = document.getElementById(`input-paye-${existing.id}`) as HTMLInputElement | null;
-        inputEl?.focus();
-        inputEl?.select();
-      }, 50);
-      return;
-    }
+    // Calculate how much has already been allocated (paye + tm + exclu) for this act in current bordereau lines
+    const alreadyAllocated = bordereauLines
+      .filter(l => l.prestationId === act.prestationId && l.lignePrestationId === act.lignePrestationId)
+      .reduce((sum, l) => sum + (Number(l.montantPaye) || 0) + (Number(l.ticketModerateur) || 0) + (Number(l.montantExclu) || 0), 0);
 
     const totalFacture = act.montantBrut || act.montantARembourser;
-    const defaultPaye = act.resteAPayer > 0 ? act.resteAPayer : (totalFacture - (act.ticketModerateur || 0));
-    const calculatedTM = act.ticketModerateur || Math.max(0, totalFacture - defaultPaye);
-    const calculatedExclu = Math.max(0, totalFacture - (defaultPaye + calculatedTM));
+    const defaultRemaining = Math.max(0, totalFacture - alreadyAllocated);
+    const defaultPaye = defaultRemaining;
+    const calculatedTM = 0;
+    const calculatedExclu = 0;
 
     const newId = generateId('line_bord');
     const newLine: StagedBordereauLine = {
@@ -300,8 +298,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
       sousSociete: act.sousSociete,
       codeActe: act.codeActe,
       libelleActe: act.libelleActe,
-      montantInitial: totalFacture, // Total Facture Part Demandée
-      montantReclame: totalFacture, // Part Demandée
+      montantInitial: defaultRemaining, // Reste de la part demandée
+      montantReclame: defaultRemaining, // Reste de la part demandée
       montantPaye: defaultPaye,
       ticketModerateur: calculatedTM,
       montantExclu: calculatedExclu,
@@ -330,10 +328,14 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     }
 
     const newLines: StagedBordereauLine[] = toAdd.map(act => {
+      const alreadyAllocated = bordereauLines
+        .filter(l => l.prestationId === act.prestationId && l.lignePrestationId === act.lignePrestationId)
+        .reduce((sum, l) => sum + (Number(l.montantPaye) || 0) + (Number(l.ticketModerateur) || 0) + (Number(l.montantExclu) || 0), 0);
       const totalFacture = act.montantBrut || act.montantARembourser;
-      const defaultPaye = act.resteAPayer > 0 ? act.resteAPayer : (totalFacture - (act.ticketModerateur || 0));
-      const calculatedTM = act.ticketModerateur || Math.max(0, totalFacture - defaultPaye);
-      const calculatedExclu = Math.max(0, totalFacture - (defaultPaye + calculatedTM));
+      const defaultRemaining = Math.max(0, totalFacture - alreadyAllocated);
+      const defaultPaye = defaultRemaining;
+      const calculatedTM = 0;
+      const calculatedExclu = 0;
 
       return {
         id: generateId('line_bord'),
@@ -347,8 +349,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
         sousSociete: act.sousSociete,
         codeActe: act.codeActe,
         libelleActe: act.libelleActe,
-        montantInitial: totalFacture,
-        montantReclame: totalFacture,
+        montantInitial: defaultRemaining,
+        montantReclame: defaultRemaining,
         montantPaye: defaultPaye,
         ticketModerateur: calculatedTM,
         montantExclu: calculatedExclu,
@@ -404,60 +406,11 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     }, 60);
   };
 
-  // Update a single cell in the staged table with automatic auto-calculation
+  // Update a single cell in the staged table (no automatic calculation rule)
   const handleUpdateLine = (id: string, field: keyof StagedBordereauLine, value: any) => {
     setBordereauLines(prev => prev.map(line => {
       if (line.id !== id) return line;
-
-      const totalFacture = Number(line.montantInitial) || Number(line.montantReclame) || 0;
-      let updated = { ...line, [field]: value };
-
-      if (field === 'montantPaye') {
-        const paye = Math.max(0, Number(value) || 0);
-        // Règle : quand je remplis le montant réglé, cela calcule directement le ticket modérateur
-        const tm = Math.max(0, totalFacture - paye);
-        const exclu = Math.max(0, totalFacture - (paye + tm));
-        updated = {
-          ...updated,
-          montantPaye: paye,
-          ticketModerateur: tm,
-          montantExclu: exclu,
-        };
-      } else if (field === 'ticketModerateur') {
-        const tm = Math.max(0, Number(value) || 0);
-        const paye = Number(line.montantPaye) || 0;
-        // Règle : si j'ajoute ticket modérateur et que montant réglé + ticket modérateur est différent du montant de l'acte, alors le reste est exclu
-        const diff = totalFacture - (paye + tm);
-        const exclu = Math.max(0, diff);
-        updated = {
-          ...updated,
-          ticketModerateur: tm,
-          montantExclu: exclu,
-        };
-      } else if (field === 'montantExclu') {
-        const exclu = Math.max(0, Number(value) || 0);
-        const paye = Number(line.montantPaye) || 0;
-        const tm = Math.max(0, totalFacture - paye - exclu);
-        updated = {
-          ...updated,
-          montantExclu: exclu,
-          ticketModerateur: tm,
-        };
-      } else if (field === 'montantInitial' || field === 'montantReclame') {
-        const newTotal = Math.max(0, Number(value) || 0);
-        const paye = Number(line.montantPaye) || 0;
-        const tm = Math.max(0, newTotal - paye);
-        const exclu = Math.max(0, newTotal - (paye + tm));
-        updated = {
-          ...updated,
-          montantInitial: newTotal,
-          montantReclame: newTotal,
-          ticketModerateur: tm,
-          montantExclu: exclu,
-        };
-      }
-
-      return updated;
+      return { ...line, [field]: value };
     }));
   };
 
@@ -481,6 +434,11 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
   // Submit and Save the entire Bordereau
   const handleSubmitBordereau = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!societeId) {
+      alert('Veuillez sélectionner une société / un garant avant de valider le bordereau.');
+      return;
+    }
 
     if (bordereauLines.length === 0) {
       alert('Veuillez ajouter au moins une ligne / acte dans le tableau du bordereau.');
@@ -685,6 +643,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   onChange={(e) => setSocieteId(e.target.value)}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
+                  <option value="">-- Sélectionner une société --</option>
                   {societes.map(s => (
                     <option key={s.id} value={s.id}>
                       {s.nom} ({s.code}) - {s.tauxCouvertureDefaut}%
@@ -1056,17 +1015,9 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   <div>
                     <label className="block text-slate-700 font-semibold mb-1">Part Demandée / Total (Ar) *</label>
                     <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={manualMontantReclame}
-                      onChange={(e) => {
-                        const val = Math.max(0, Number(e.target.value) || 0);
-                        setManualMontantReclame(val);
-                        const tm = Math.max(0, val - manualMontantPaye);
-                        setManualTicketMod(tm);
-                        setManualMontantExclu(Math.max(0, val - (manualMontantPaye + tm)));
-                      }}
+                      type="text"
+                      value={formatInputVal(manualMontantReclame)}
+                      onChange={(e) => setManualMontantReclame(parseInputVal(e.target.value))}
                       className="w-full p-1.5 border border-slate-300 rounded-lg bg-white text-right font-medium"
                     />
                   </div>
@@ -1074,17 +1025,9 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   <div>
                     <label className="block text-emerald-800 font-bold mb-1">Montant Réglé / Payé (Ar) *</label>
                     <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={manualMontantPaye}
-                      onChange={(e) => {
-                        const paye = Math.max(0, Number(e.target.value) || 0);
-                        setManualMontantPaye(paye);
-                        const tm = Math.max(0, manualMontantReclame - paye);
-                        setManualTicketMod(tm);
-                        setManualMontantExclu(Math.max(0, manualMontantReclame - (paye + tm)));
-                      }}
+                      type="text"
+                      value={formatInputVal(manualMontantPaye)}
+                      onChange={(e) => setManualMontantPaye(parseInputVal(e.target.value))}
                       className="w-full p-1.5 border border-emerald-400 rounded-lg bg-white text-right font-bold text-emerald-700"
                     />
                   </div>
@@ -1092,16 +1035,9 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   <div>
                     <label className="block text-amber-800 font-semibold mb-1">Ticket Modérateur (Ar)</label>
                     <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={manualTicketMod}
-                      onChange={(e) => {
-                        const tm = Math.max(0, Number(e.target.value) || 0);
-                        setManualTicketMod(tm);
-                        const diff = manualMontantReclame - (manualMontantPaye + tm);
-                        setManualMontantExclu(Math.max(0, diff));
-                      }}
+                      type="text"
+                      value={formatInputVal(manualTicketMod)}
+                      onChange={(e) => setManualTicketMod(parseInputVal(e.target.value))}
                       className="w-full p-1.5 border border-amber-300 rounded-lg bg-white text-right font-semibold text-amber-700"
                     />
                   </div>
@@ -1109,15 +1045,9 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   <div>
                     <label className="block text-rose-700 font-semibold mb-1">Montant Exclu / Rejet (Ar)</label>
                     <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={manualMontantExclu}
-                      onChange={(e) => {
-                        const exclu = Math.max(0, Number(e.target.value) || 0);
-                        setManualMontantExclu(exclu);
-                        setManualTicketMod(Math.max(0, manualMontantReclame - manualMontantPaye - exclu));
-                      }}
+                      type="text"
+                      value={formatInputVal(manualMontantExclu)}
+                      onChange={(e) => setManualMontantExclu(parseInputVal(e.target.value))}
                       className="w-full p-1.5 border border-rose-300 rounded-lg bg-white text-right font-semibold text-rose-600"
                     />
                   </div>
@@ -1233,33 +1163,27 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                         <td className="p-2 text-right bg-emerald-50/30">
                           <input
                             id={`input-paye-${line.id}`}
-                            type="number"
-                            min="0"
-                            step="100"
-                            value={line.montantPaye}
-                            onChange={(e) => handleUpdateLine(line.id, 'montantPaye', Number(e.target.value) || 0)}
+                            type="text"
+                            value={formatInputVal(line.montantPaye)}
+                            onChange={(e) => handleUpdateLine(line.id, 'montantPaye', parseInputVal(e.target.value))}
                             className="w-full p-1 border border-emerald-400 rounded text-right font-bold text-emerald-700 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                           />
                         </td>
                         <td className="p-2 text-right">
                           <input
                             id={`input-tm-${line.id}`}
-                            type="number"
-                            min="0"
-                            step="100"
-                            value={line.ticketModerateur}
-                            onChange={(e) => handleUpdateLine(line.id, 'ticketModerateur', Number(e.target.value) || 0)}
+                            type="text"
+                            value={formatInputVal(line.ticketModerateur)}
+                            onChange={(e) => handleUpdateLine(line.id, 'ticketModerateur', parseInputVal(e.target.value))}
                             className="w-full p-1 border border-slate-300 rounded text-right font-medium text-amber-700 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                           />
                         </td>
                         <td className="p-2 text-right">
                           <input
                             id={`input-exclu-${line.id}`}
-                            type="number"
-                            min="0"
-                            step="100"
-                            value={line.montantExclu}
-                            onChange={(e) => handleUpdateLine(line.id, 'montantExclu', Number(e.target.value) || 0)}
+                            type="text"
+                            value={formatInputVal(line.montantExclu)}
+                            onChange={(e) => handleUpdateLine(line.id, 'montantExclu', parseInputVal(e.target.value))}
                             className={`w-full p-1 border rounded text-right font-semibold focus:ring-2 focus:ring-rose-500 focus:outline-none ${
                               line.montantExclu > 0
                                 ? 'bg-rose-50 border-rose-400 text-rose-700 font-bold'
