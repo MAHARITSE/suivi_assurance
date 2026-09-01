@@ -1727,15 +1727,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
               </>
             )}
           </div>
-
-          <button
-            id="btn-new-prestation"
-            onClick={handleOpenCreate}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nouvelle Facture</span>
-          </button>
         </div>
       </div>
 

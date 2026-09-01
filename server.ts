@@ -1062,6 +1062,22 @@ Décompose rigoureusement chaque acte médical, les matricules, les montants ré
         return res.json({ success: true, data: devDb[action] });
       }
       if (req.method === 'POST') {
+        const isBulk = String(req.query.bulk || '') === '1' || Array.isArray(req.body) || (req.body && Array.isArray(req.body.items));
+        if (isBulk) {
+          const items: any[] = Array.isArray(req.body) ? req.body : (req.body?.items || []);
+          items.forEach((item: any) => {
+            if (item && item.id) {
+              const idx = devDb[action].findIndex(x => x.id === item.id);
+              if (idx >= 0) {
+                devDb[action][idx] = item;
+              } else {
+                devDb[action].unshift(item);
+              }
+            }
+          });
+          return res.json({ success: true, data: { processed: items.length } });
+        }
+
         const item = req.body;
         if (!item || !item.id) {
           return res.status(400).json({ success: false, error: 'Données manquantes ou id non fourni' });

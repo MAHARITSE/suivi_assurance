@@ -22,7 +22,7 @@ import {
   saveLocalTable,
   backupServerDataToLocalStorage,
 } from './utils/localPersistence';
-import { ServerOff, RefreshCw, AlertTriangle, Database, HardDrive, ArrowLeftRight, Building2, Filter, Layers, RotateCcw } from 'lucide-react';
+import { ServerOff, RefreshCw, AlertTriangle, Database, Laptop, Building2, Filter, RotateCcw } from 'lucide-react';
 
 export function App() {
   // Navigation & selection states
@@ -30,7 +30,7 @@ export function App() {
   const [selectedSocieteId, setSelectedSocieteId] = useState<string>('ALL');
   const [selectedSubSocieteId, setSelectedSubSocieteId] = useState<string>('ALL');
 
-  // Storage Mode State: 'server' (MySQL WAMP) vs 'local' (LocalStorage)
+  // Mode de stockage : 'local' (LocalStorage par défaut) ou 'server' (WAMP MySQL)
   const [storageMode, setStorageMode] = useState<StorageMode>(() => getStoredStorageMode());
 
   // Entête personnalisée
@@ -98,7 +98,7 @@ export function App() {
   // Tracking if initial load completed
   const initialLoadRef = useRef(false);
 
-  // Load from LocalStorage
+  // Charger depuis le LocalStorage
   const loadFromLocalStorage = useCallback(() => {
     const local = loadLocalDataset();
     setSocietes(local.societes);
@@ -107,6 +107,7 @@ export function App() {
     setPrestations(local.prestations);
     setPaiements(local.paiements);
     setDbStatus('connected');
+    setDbError(null);
     setLastSyncTime(new Date());
   }, []);
 
@@ -158,7 +159,7 @@ export function App() {
       setPrestations(prArr);
       setPaiements(paArr);
 
-      // Backup into LocalStorage in background
+      // Mirror to LocalStorage in background
       backupServerDataToLocalStorage({
         societes: sArr,
         personnes: pArr,
@@ -225,54 +226,6 @@ export function App() {
     } else {
       checkAndLoadWampData(false);
     }
-  };
-
-  // Sync Local data to Server (MySQL)
-  const handleSyncLocalToServer = async () => {
-    const local = loadLocalDataset();
-    const count = local.prestations.length + local.societes.length + local.personnes.length + local.paiements.length;
-    if (count === 0) {
-      alert('Aucune donnée locale à transférer vers MySQL.');
-      return;
-    }
-
-    const confirmTransfer = window.confirm(
-      `Voulez-vous transférer toutes les données locales vers le serveur MySQL ?\n` +
-      `- ${local.societes.length} société(s)\n` +
-      `- ${local.personnes.length} adhérent(s)\n` +
-      `- ${local.prestations.length} prestation(s)\n` +
-      `- ${local.paiements.length} règlement(s)`
-    );
-
-    if (!confirmTransfer) return;
-
-    try {
-      setIsRefreshing(true);
-      if (local.societes.length > 0) await saveWampDataBulk('societes', local.societes);
-      if (local.familles.length > 0) await saveWampDataBulk('familles', local.familles);
-      if (local.personnes.length > 0) await saveWampDataBulk('personnes', local.personnes);
-      if (local.prestations.length > 0) await saveWampDataBulk('prestations', local.prestations);
-      if (local.paiements.length > 0) await saveWampDataBulk('paiements', local.paiements);
-
-      alert('Synchronisation vers le serveur MySQL WAMP réussie !');
-      handleToggleStorageMode('server');
-    } catch (err: any) {
-      alert(`Erreur lors du transfert vers MySQL : ${err.message || err}`);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Copy Server (MySQL) data to LocalStorage
-  const handleSyncServerToLocal = () => {
-    backupServerDataToLocalStorage({
-      societes,
-      personnes,
-      familles,
-      prestations,
-      paiements,
-    });
-    alert(`Copie locale mise à jour avec succès (${prestations.length} prestations, ${paiements.length} paiements).`);
   };
 
   // Handlers for Prestations
@@ -589,9 +542,9 @@ export function App() {
       }
       if (updatedSociete) {
         setSocietes(prev => {
-          const next = prev.map(s => s.id === societeId ? updatedSociete! : s);
-          saveLocalTable('societes', next);
-          return next;
+          const updated = prev.map(s => s.id === societeId ? updatedSociete! : s);
+          saveLocalTable('societes', updated);
+          return updated;
         });
       }
 
@@ -822,7 +775,7 @@ export function App() {
             </div>
             <div>
               <h2 className="text-lg font-bold">Base MySQL Inaccessible</h2>
-              <p className="text-xs text-rose-100">Mode Serveur WAMP Multi-Poste actif</p>
+              <p className="text-xs text-rose-100">Serveur WAMP MySQL Multi-Poste</p>
             </div>
           </div>
 
@@ -840,19 +793,28 @@ export function App() {
             <div className="space-y-2 text-xs text-slate-700">
               <h4 className="font-bold text-slate-900">Que faire ?</h4>
               <p className="text-slate-600 leading-relaxed">
-                Vérifiez que l'icône de WAMP Server dans la barre des tâches est <strong>Verte</strong> et que le service MySQL est bien démarré, puis cliquez sur le bouton ci-dessous.
+                Vérifiez que WAMP Server est démarré (icône verte) et que MySQL est accessible. Vous pouvez réessayer ou basculer en <strong>Mode Local</strong> pour continuer à travailler immédiatement avec vos données locales.
               </p>
             </div>
 
-            <div className="pt-2 flex">
+            <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => checkAndLoadWampData(false)}
                 disabled={isRetryingDb}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+                className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${isRetryingDb ? 'animate-spin' : ''}`} />
-                <span>{isRetryingDb ? 'Vérification en cours...' : 'Réessayer connexion MySQL WAMP'}</span>
+                <span>{isRetryingDb ? 'Vérification...' : 'Réessayer MySQL'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleToggleStorageMode('local')}
+                className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition cursor-pointer"
+              >
+                <Laptop className="h-4 w-4" />
+                <span>Basculer en Mode Local</span>
               </button>
             </div>
           </div>
@@ -881,11 +843,13 @@ export function App() {
         selectedSocieteId={selectedSocieteId}
         onSelectSociete={setSelectedSocieteId}
         onExportBackup={handleExportBackup}
-        onRefreshData={() => checkAndLoadWampData(true)}
+        onRefreshData={() => (storageMode === 'server' ? checkAndLoadWampData(true) : loadFromLocalStorage())}
         isRefreshing={isRefreshing}
         lastSyncTime={lastSyncTime}
         dbConnected={dbStatus === 'connected'}
         logoUrl={enteteConfig.logoUrl}
+        storageMode={storageMode}
+        onToggleStorageMode={() => handleToggleStorageMode(storageMode === 'local' ? 'server' : 'local')}
       />
 
       {/* BANDEAU DU FILTRE AVANCÉ : SOCIÉTÉ / GARANT (TRANSPARENT, ANCRÉ À GAUCHE) */}

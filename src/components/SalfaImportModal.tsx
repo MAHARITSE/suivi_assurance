@@ -14,6 +14,7 @@ import {
   Check,
   RotateCcw,
   Building,
+  Building2,
   ShieldAlert,
   Ban,
   Layers,
@@ -98,7 +99,7 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   defaultSocieteId,
   onImportPrestations,
 }) => {
-  const [targetSocietyName, setTargetSocietyName] = useState<string>(societes[0]?.nom || 'MCI CARE');
+  const [targetSocietyName, setTargetSocietyName] = useState<string>('');
   const [parsedInvoice, setParsedInvoice] = useState<ParsedFactureAssurance | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -119,12 +120,14 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
 
   React.useEffect(() => {
     if (isOpen) {
-      const found = societes.find(s => s.id === defaultSocieteId);
-      if (found) {
-        setTargetSocietyName(found.nom);
-      } else if (societes.length > 0) {
-        setTargetSocietyName(societes[0].nom);
+      if (defaultSocieteId) {
+        const found = societes.find(s => s.id === defaultSocieteId);
+        if (found) {
+          setTargetSocietyName(found.nom);
+          return;
+        }
       }
+      setTargetSocietyName(''); // Mode détection automatique par défaut
     }
   }, [isOpen, defaultSocieteId, societes]);
 
@@ -172,8 +175,42 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             throw new Error('Le fichier Excel est vide ou ne contient aucune ligne.');
           }
 
+          // Détection automatique intelligente de la société / organisme
+          let detectedSocName = targetSocietyName;
+          if (!detectedSocName) {
+            // 1. Détection depuis le nom de fichier (ex: FACTURE_MCI.xlsx, BORDEREAU_ASCOMA.xlsx, NY_HAVANA.xlsx)
+            const fromFilename = findBestMatchingSociete(file.name, societes);
+            if (fromFilename) {
+              detectedSocName = fromFilename.nom;
+            }
+
+            // 2. Détection depuis les noms des onglets du classeur Excel
+            if (!detectedSocName) {
+              for (const sName of workbook.SheetNames) {
+                const fromSheet = findBestMatchingSociete(sName, societes);
+                if (fromSheet) {
+                  detectedSocName = fromSheet.nom;
+                  break;
+                }
+              }
+            }
+
+            // 3. Détection depuis le texte brut d'en-tête de la première feuille
+            if (!detectedSocName) {
+              try {
+                const rawSheetText = XLSX.utils.sheet_to_txt(firstSheet).substring(0, 2500);
+                const fromRawText = findBestMatchingSociete(rawSheetText, societes);
+                if (fromRawText) {
+                  detectedSocName = fromRawText.nom;
+                }
+              } catch (e) {
+                // Ignore text conversion error
+              }
+            }
+          }
+
           let inferredFactureNum = '';
-          let inferredClient = targetSocietyName || societes[0]?.nom || 'MCI CARE';
+          let inferredClient = detectedSocName || '';
 
           const lignes = jsonRows.map((row, idx) => {
             const getVal = (keys: string[]) => {
@@ -229,8 +266,22 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
             const montantBrut = Number(getVal(['Montant_Total_Brut', 'Montant Total Brut', 'Montant Brut', 'Montant Total', 'Total Prestation', 'Montant Facture', 'Fr. Réels'])) || 0;
             const participation = Number(getVal(['Ticket_Moderateur', 'Ticket Moderateur', 'Ticket Modérateur', 'Part Assuré', 'Participation', 'Franchise'])) || 0;
             const netAPayer = Number(getVal(['Prise_En_Charge_Net', 'Net A Payer', 'Net Payé', 'Montant Remboursé', 'Prise En Charge', 'Montant Réglé'])) || (montantBrut - participation);
-            const socName = String(getVal(['Societe', 'Société', 'Organisme', 'Client']) || targetSocietyName).trim();
-            if (socName) inferredClient = socName;
+            
+            // 4. Détection depuis les colonnes du tableau
+            const rawSoc = String(getVal(['Societe', 'Société', 'Organisme', 'Client', 'Assureur', 'Assurance', 'Affiliation']) || '').trim();
+            let socName = detectedSocName || rawSoc;
+            if (rawSoc && !detectedSocName) {
+              const matched = findBestMatchingSociete(rawSoc, societes);
+              if (matched) {
+                socName = matched.nom;
+                if (!inferredClient) inferredClient = matched.nom;
+              } else {
+                socName = rawSoc;
+                if (!inferredClient) inferredClient = rawSoc;
+              }
+            } else if (!socName && detectedSocName) {
+              socName = detectedSocName;
+            }
 
             const actesRaw = String(getVal(['Acte_Medicale_Prix', 'Acte médicale/Prix', 'Acte médicale / Prix', 'Acte medicale/Prix', 'Actes Médicaux', 'Actes', 'Prestations', 'Detail Actes Medicaux']) || 'CONS : ' + montantBrut);
             let observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif']) || 'Import Excel').trim();
@@ -256,6 +307,26 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
               netAPayer,
               observations
             };
+          });
+
+          // 5. Détection depuis le numéro de facture si toujours indéterminé
+          if (!inferredClient && inferredFactureNum) {
+            const fromFactureNum = findBestMatchingSociete(inferredFactureNum, societes);
+            if (fromFactureNum) {
+              inferredClient = fromFactureNum.nom;
+            }
+          }
+
+          // Fallback sur la première société ou MCI CARE si rien n'a pu être détecté
+          if (!inferredClient) {
+            inferredClient = societes[0]?.nom || 'MCI CARE';
+          }
+
+          // Mise à jour de toutes les lignes avec la société déduite si elles étaient vides
+          lignes.forEach(l => {
+            if (!l.societeAffiliee) {
+              l.societeAffiliee = inferredClient;
+            }
           });
 
           const totalBrut = lignes.reduce((s, l) => s + l.montantBrut, 0);
@@ -311,9 +382,9 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+    if (!e.target.files || e.target.files.length === 0) return;
+    const files = Array.from(e.target.files);
     e.target.value = '';
-    if (!files || files.length === 0) return;
     handleFilesSelected(files);
   };
 
@@ -891,7 +962,12 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                         handleFilesSelected(files);
                       }
                     }}
-                    className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
+                    onClick={() => {
+                      if (!isProcessing) {
+                        excelInputRef.current?.click();
+                      }
+                    }}
+                    className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50 cursor-pointer"
                   >
                     <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
                       {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
@@ -901,10 +977,11 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                         {isProcessing ? 'Lecture du fichier Excel en cours...' : 'Déposez un ou plusieurs fichiers Excel (.xlsx, .xls, .csv)'}
                       </h4>
                       <p className="text-xs text-slate-500 mt-1 max-w-md">
-                        Sélectionnez un ou <strong>plusieurs fichiers Excel</strong> à la fois. L'application les traitera automatiquement et séquentiellement un par un.
+                        Cliquez ou glissez-déposez vos fichiers Excel. Vous pouvez en sélectionner un ou <strong>plusieurs à la fois</strong>.
                       </p>
                     </div>
                     <input
+                      id="excel-salfa-file-input"
                       type="file"
                       ref={excelInputRef}
                       onChange={handleFileUpload}
@@ -914,7 +991,10 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                     />
                     <button
                       type="button"
-                      onClick={() => excelInputRef.current?.click()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        excelInputRef.current?.click();
+                      }}
                       disabled={isProcessing}
                       className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600 shadow-xs cursor-pointer flex items-center gap-2"
                     >
@@ -1031,15 +1111,28 @@ export const SalfaImportModal: React.FC<SalfaImportModalProps> = ({
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      Organisme / Client
+                      Organisme / Client <span className="text-red-500">*</span>
                     </label>
-                    <input
-                      type="text"
-                      value={parsedInvoice.clientDoit || ''}
+                    <select
+                      value={
+                        societes.find(s => s.nom.toLowerCase() === (parsedInvoice.clientDoit || '').toLowerCase())?.nom || 
+                        parsedInvoice.clientDoit || ''
+                      }
                       onChange={(e) => setParsedInvoice({ ...parsedInvoice, clientDoit: e.target.value })}
-                      placeholder="ex: MCI CARE"
-                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs text-slate-800 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
-                    />
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-900 focus:border-indigo-500 focus:bg-white focus:outline-hidden cursor-pointer"
+                    >
+                      <option value="">-- Sélectionner l'organisme payeur --</option>
+                      {societes.map((s) => (
+                        <option key={s.id} value={s.nom}>
+                          {s.nom} ({s.code})
+                        </option>
+                      ))}
+                      {parsedInvoice.clientDoit && !societes.some(s => s.nom.toLowerCase() === parsedInvoice.clientDoit.toLowerCase()) && (
+                        <option value={parsedInvoice.clientDoit}>
+                          {parsedInvoice.clientDoit} (Détecté dans fichier)
+                        </option>
+                      )}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">

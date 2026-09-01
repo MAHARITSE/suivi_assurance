@@ -964,16 +964,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+    if (!e.target.files || e.target.files.length === 0) return;
+    const filesArray = Array.from(e.target.files);
     e.target.value = '';
-    if (!files || files.length === 0) return;
-    if (files.length === 1) {
-      setFileQueue([files[0]]);
+    if (filesArray.length === 1) {
+      setFileQueue([filesArray[0]]);
       setCurrentFileIndex(0);
       setBatchHistory([]);
-      processFile(files[0]);
+      processFile(filesArray[0]);
     } else {
-      handleFilesSelected(files);
+      handleFilesSelected(filesArray);
     }
   };
 
@@ -1706,7 +1706,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     handleFilesSelected(files);
                   }
                 }}
-                className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50"
+                onClick={() => {
+                  if (!isProcessing) {
+                    excelInputRef.current?.click();
+                  }
+                }}
+                className="flex min-h-52 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-8 text-center transition hover:border-emerald-500 hover:bg-emerald-50/50 cursor-pointer"
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-xs text-emerald-600 border border-emerald-100">
                   {isProcessing ? <RefreshCw className="h-6 w-6 animate-spin" /> : <FileSpreadsheet className="h-6 w-6" />}
@@ -1716,10 +1721,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     {isProcessing ? 'Confrontation des actes en cours...' : 'Déposez un ou plusieurs fichiers Excel (.xlsx, .xls, .csv)'}
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 max-w-md">
-                    Sélectionnez un ou plusieurs bordereaux Excel. Ils seront traités séquentiellement un par un avec rapprochement automatique.
+                    Cliquez ou glissez-déposez vos décomptes/bordereaux. Vous pouvez en sélectionner <strong>plusieurs à la fois</strong>.
                   </p>
                 </div>
                 <input
+                  id="excel-decompte-file-input"
                   type="file"
                   ref={excelInputRef}
                   onChange={handleFileUpload}
@@ -1729,7 +1735,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     excelInputRef.current?.click();
                   }}
                   disabled={isProcessing}
@@ -1795,10 +1802,34 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               )}
 
               {/* Document Overview Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
                 <div>
-                  <span className="text-slate-500 block">Organisme / Garant</span>
-                  <strong className="text-slate-900 font-bold text-sm">{parsedDoc.clientDoit}</strong>
+                  <span className="text-slate-500 block mb-1">Organisme / Garant</span>
+                  <select
+                    value={
+                      activeSocietesList.find(s => s.nom.toLowerCase() === (parsedDoc.clientDoit || '').toLowerCase())?.id || 
+                      selectedInsurance || ''
+                    }
+                    onChange={(e) => {
+                      const newSocId = e.target.value;
+                      setSelectedInsurance(newSocId);
+                      const targetSoc = societes.find(s => s.id === newSocId);
+                      if (targetSoc && parsedDoc) {
+                        const updatedDoc = { ...parsedDoc, clientDoit: targetSoc.nom };
+                        processLoadedDocument(updatedDoc, groupOnImport, newSocId);
+                      }
+                    }}
+                    className="w-full bg-white text-xs font-bold text-slate-900 rounded-lg p-1.5 border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    {activeSocietesList.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nom} ({s.code})
+                      </option>
+                    ))}
+                    {!activeSocietesList.some(s => s.nom.toLowerCase() === (parsedDoc.clientDoit || '').toLowerCase()) && (
+                      <option value="">{parsedDoc.clientDoit || 'Autre Organisme'}</option>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Réf Bordereau</span>

@@ -38,6 +38,7 @@ import { formatMoney, formatDate, generateId } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
 import { RelierPaiementModal } from './paiements/RelierPaiementModal';
+import { SaisieReglementModal } from './paiements/SaisieReglementModal';
 import * as XLSX from 'xlsx';
 
 type PaiementSortField = 'datePaiement' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
@@ -1215,13 +1216,15 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             )}
           </div>
 
+          {/* Bouton Saisie Manuelle Règlement (Placé en dernier) */}
           <button
-            id="btn-new-paiement"
-            onClick={handleOpenCreateModal}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
+            id="btn-saisie-manuelle-reglement"
+            onClick={() => setIsCreateModalOpen(true)}
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
+            title="Saisie manuelle d'un bordereau de règlement avec recherche d'actes par nom ou immatriculation"
           >
-            <Plus className="w-4 h-4" />
-            <span>Nouveau Règlement</span>
+            <FileCheck2 className="w-4 h-4" />
+            <span>Saisie Manuelle Règlement</span>
           </button>
         </div>
       </div>
@@ -2546,272 +2549,20 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Saisie de Règlement (FEN_Saisie_Paiement) */}
-      {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-5xl w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center space-x-2">
-                <FileCheck2 className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-bold text-slate-900 text-base">Saisie et Lettrage d'un Bordereau de Règlement Assurance</h3>
-              </div>
-              <button
-                onClick={() => setIsCreateModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitPaiement} className="space-y-4">
-              {/* Header Fields */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Société Assureur *</label>
-                  <select
-                    value={targetSocieteId}
-                    onChange={(e) => {
-                      setTargetSocieteId(e.target.value);
-                      loadLinesForSociete(e.target.value);
-                    }}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    {societes.map(s => (
-                      <option key={s.id} value={s.id}>{s.nom} (Taux: {s.tauxCouvertureDefaut}%)</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">N° Bordereau de Paiement *</label>
-                  <input
-                    type="text"
-                    required
-                    value={bordereauRef}
-                    onChange={(e) => setBordereauRef(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-indigo-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Date du Règlement *</label>
-                  <input
-                    type="date"
-                    required
-                    value={datePaiementInput}
-                    onChange={(e) => setDatePaiementInput(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Mode de Paiement</label>
-                  <select
-                    value={modePaiement}
-                    onChange={(e) => setModePaiement(e.target.value as any)}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    <option value="Virement bancaire">Virement bancaire</option>
-                    <option value="Chèque">Chèque</option>
-                    <option value="Espèces">Espèces</option>
-                    <option value="Mobile Money">Mobile Money</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Réf. Transaction / Chèque N°</label>
-                  <input
-                    type="text"
-                    value={referenceTransaction}
-                    onChange={(e) => setReferenceTransaction(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    placeholder="Ex: VIR-BNI-202501"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Remise / Déduction Globale (Ar)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
-                    value={remiseAmount}
-                    onChange={(e) => setRemiseAmount(Number(e.target.value) || 0)}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-700 font-semibold mb-1">Notes / Motif du Règlement</label>
-                  <input
-                    type="text"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    placeholder="Ex: Rapprochement quinzaine assurance santé..."
-                  />
-                </div>
-              </div>
-
-              {/* Table of Unsettled Lines to Match */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">
-                    Prestations en Attente de Règlement pour {getSocieteNom(targetSocieteId)} ({stagedLines.length} actes disponibles)
-                  </h4>
-                  <div className="space-x-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setStagedLines(prev => prev.map(l => ({ ...l, selected: true })))}
-                      className="text-indigo-600 hover:underline font-medium"
-                    >
-                      Tout cocher
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setStagedLines(prev => prev.map(l => ({ ...l, selected: false })))}
-                      className="text-slate-500 hover:underline font-medium"
-                    >
-                      Tout décocher
-                    </button>
-                  </div>
-                </div>
-
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 text-[11px]">
-                      <tr>
-                        <th className="p-2 w-8 text-center"></th>
-                        <th className="p-2 text-left">Facture & Assuré</th>
-                        <th className="p-2 text-left">Acte</th>
-                        <th className="p-2 text-right">Reste à Payer</th>
-                        <th className="p-2 text-right w-28">Part Réglée (Ar)</th>
-                        <th className="p-2 text-right w-28">Ticket Modérateur</th>
-                        <th className="p-2 text-right w-24">Exclusion / Rejet</th>
-                        <th className="p-2 text-left">Remarque / Motif</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {stagedLines.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} className="p-6 text-center text-slate-400">
-                            Aucune prestation en attente pour cette société d'assurance.
-                          </td>
-                        </tr>
-                      ) : (
-                        stagedLines.map((line, idx) => (
-                          <tr key={`${line.prestationId}-${line.lignePrestationId}`} className={line.selected ? 'bg-indigo-50/30' : 'bg-white opacity-60'}>
-                            <td className="p-2 text-center">
-                              <input
-                                type="checkbox"
-                                checked={line.selected}
-                                onChange={() => handleToggleSelectLine(idx)}
-                                className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
-                              />
-                            </td>
-                            <td className="p-2">
-                              <div className="font-bold text-indigo-700">{line.factureNum}</div>
-                              <div className="text-[10px] text-slate-600">{line.personneNom} ({line.matricule})</div>
-                            </td>
-                            <td className="p-2">
-                              <span className="font-mono font-bold text-slate-700 mr-1">{line.codeActe}:</span>
-                              <span className="text-slate-600">{line.libelleActe}</span>
-                            </td>
-                            <td className="p-2 text-right font-medium text-slate-700">
-                              {formatMoney(line.resteAPayer)}
-                            </td>
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                min="0"
-                                disabled={!line.selected}
-                                value={line.totalPaye}
-                                onChange={(e) => handleUpdateStagedLine(idx, 'totalPaye', Number(e.target.value) || 0)}
-                                className="w-full p-1 border border-slate-300 rounded text-right font-bold text-emerald-700 bg-white"
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                min="0"
-                                disabled={!line.selected}
-                                value={line.ticketModerateur}
-                                onChange={(e) => handleUpdateStagedLine(idx, 'ticketModerateur', Number(e.target.value) || 0)}
-                                className="w-full p-1 border border-slate-300 rounded text-right font-medium text-amber-700 bg-white"
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                min="0"
-                                max={line.montantFacture || undefined}
-                                disabled={!line.selected}
-                                value={line.montantExclu}
-                                onChange={(e) => handleUpdateStagedLine(idx, 'montantExclu', Number(e.target.value) || 0)}
-                                className="w-full p-1 border border-slate-300 rounded text-right font-medium text-rose-600 bg-white"
-                                title={`Montant exclu (Max: ${formatMoney(line.montantFacture)})`}
-                              />
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="text"
-                                disabled={!line.selected}
-                                value={line.commentaire}
-                                onChange={(e) => handleUpdateStagedLine(idx, 'commentaire', e.target.value)}
-                                placeholder="Commentaire..."
-                                className="w-full p-1 border border-slate-300 rounded text-[11px] bg-white"
-                              />
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Summary Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-emerald-50/70 p-4 rounded-xl border border-emerald-200 text-xs">
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Total Réclamé Sélectionné</span>
-                  <span className="text-sm font-bold text-slate-800">{formatMoney(calculatedTotalReclame)}</span>
-                </div>
-                <div>
-                  <span className="text-emerald-700 block text-[10px] font-semibold">Montant Net Réglé (Payé)</span>
-                  <span className="text-base font-extrabold text-emerald-800">{formatMoney(calculatedTotalPaye - remiseAmount)}</span>
-                </div>
-                <div>
-                  <span className="text-amber-700 block text-[10px]">Tickets Modérateurs</span>
-                  <span className="text-sm font-bold text-amber-800">{formatMoney(calculatedTotalModerateur)}</span>
-                </div>
-                <div>
-                  <span className="text-rose-700 block text-[10px]">Total Exclu / Rejets</span>
-                  <span className="text-sm font-bold text-rose-800">{formatMoney(calculatedTotalExclu)}</span>
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 hover:bg-slate-100"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={selectedStaged.length === 0}
-                  className="px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-sm flex items-center space-x-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Valider et Enregistrer le Bordereau</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Modal: Saisie Manuelle de Règlement (FEN_Saisie_Paiement avec multi-personnes & recherche d'actes) */}
+      <SaisieReglementModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        societes={societes}
+        personnes={personnes}
+        prestations={prestations}
+        familles={familles}
+        selectedSocieteId={selectedSocieteId}
+        onSavePaiement={(newPaiement, updatedPrestations) => {
+          onSavePaiement(newPaiement, updatedPrestations);
+          setIsCreateModalOpen(false);
+        }}
+      />
 
       {/* Decompte Import Modal */}
       <DecompteImportModal
