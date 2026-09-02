@@ -187,6 +187,9 @@ export function sanitizeImportedPersonName(raw?: string | null, fallback?: strin
     if (firstLine) v = firstLine;
   }
 
+  // Retire un éventuel n° de règlement en tête de cellule (« 1089322-22 FRASIE ... »)
+  v = v.replace(/^\s*\d{3,}\s*[-/]\s*\d+\s+/, '').trim();
+
   // Coupe tout ce qui suit le nom : section ADHESION, n° de règlement « 1089322-22 »,
   // « Client: ... », date de soin ou montant « 80 000,00 ».
   const cutAt = (re: RegExp) => {
@@ -199,6 +202,12 @@ export function sanitizeImportedPersonName(raw?: string | null, fallback?: strin
   cutAt(/\s+\d{2}\/\d{2}\/\d{4}/);
   cutAt(/\s+\d{1,3}(?:[\s .]\d{3})+,\d{2}(?=\s|$)/);
   v = v.replace(/\s+/g, ' ').trim();
+
+  // Cellule qui commence directement par « ADHESION: ... » (pas de nom de patient avant) :
+  // on garde uniquement le titulaire de l'adhésion, sans le préfixe.
+  if (/^ADH[EÈÉE]SION\s*:/i.test(v)) {
+    v = extractAdhesionHolder(v) || extractAdhesionHolder(raw) || (fallback || '').trim();
+  }
 
   // Si la cellule commençait directement par le n° de règlement (pas de nom de patient),
   // on retombe sur le titulaire de l'adhésion.
