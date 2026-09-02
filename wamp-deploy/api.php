@@ -17,6 +17,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/config.php';
 
+/**
+ * Rafraîchit la connexion PDO pour résoudre l'erreur MySQL 1615
+ * "Prepared statement needs to be re-prepared" causée par des ALTER TABLE
+ * qui invalidant les métadonnées du serveur.
+ */
+function refreshConnection($pdo) {
+    // Force MySQL à recharger les métadonnées en exécutant une requête simple
+    try {
+        $pdo->query("SELECT 1");
+    } catch (Exception $e) {
+        // Si la requête échoue, ne rien faire
+    }
+}
+
 $action = isset($_GET['action']) ? trim($_GET['action']) : '';
 
 function sendJson($success, $data = null, $error = null, $code = 200) {
@@ -913,12 +927,23 @@ try {
                 }
                 $lastException = $e;
 
+                // Code d'erreur MySQL 1615: Prepared statement needs to be re-prepared
+                // Cette erreur se produit quand les métadonnées de table changent (ALTER TABLE)
+                // ou quand le cache des prepared statements est plein
+                $isReprepareNeeded = (isset($e->errorInfo[1]) && $e->errorInfo[1] == 1615)
+                    || stripos($e->getMessage(), 'needs to be re-prepared') !== false;
+
+                // Deadlock MySQL 1213 ou Lock Wait Timeout 1205
                 $isDeadlock = ($e->getCode() == '40001')
                     || (isset($e->errorInfo[1]) && in_array($e->errorInfo[1], [1213, 1205]))
                     || stripos($e->getMessage(), 'Deadlock') !== false
                     || stripos($e->getMessage(), 'Lock wait timeout') !== false;
 
-                if ($isDeadlock && $attempt < $maxRetries) {
+                if (($isDeadlock || $isReprepareNeeded) && $attempt < $maxRetries) {
+                    // Rafraîchir la connexion pour résoudre l'erreur 1615
+                    if ($isReprepareNeeded) {
+                        $pdo = createPdoConnection();
+                    }
                     // Délai aléatoire (50ms - 150ms * tentative) pour désynchroniser les verrous concurrents
                     usleep(rand(50000, 150000) * $attempt);
                     continue;
@@ -971,7 +996,23 @@ try {
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    sendJson(false, null, 'Erreur MySQL: ' . $e->getMessage(), 500);
+    
+    // Détection spécifique de l'erreur MySQL 1615
+    $errorCode = isset($e->errorInfo[1]) ? $e->errorInfo[1] : 0;
+    $isReprepareError = ($errorCode == 1615)
+        || stripos($e->getMessage(), 'needs to be re-prepared') !== false;
+    
+    $errorMessage = $e->getMessage();
+    
+    // Message plus explicite pour l'erreur 1615
+    if ($isReprepareError) {
+        $errorMessage = "Erreur de synchronisation avec la base de données. "
+            . "Les métadonnées ont été modifiées (structure de table). "
+            . "L'opération va être réessayée automatiquement. "
+            . "Si le problème persiste, redémarrez le serveur MySQL. (Code: 1615)";
+    }
+    
+    sendJson(false, null, 'Erreur MySQL: ' . $errorMessage, 500);
 } catch (Exception $e) {
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
