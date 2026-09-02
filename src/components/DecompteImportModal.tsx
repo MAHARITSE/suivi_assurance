@@ -51,6 +51,7 @@ import {
 import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import { findBestMatchingSociete } from '../utils/societyMatcher';
+import { hasSimilarPersonName, normalizePersonName } from '../utils/nameMatcher';
 import * as XLSX from 'xlsx';
 
 interface DecompteImportModalProps {
@@ -467,7 +468,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     if (allEligibleActs.length === 0) return null;
 
     const cleanMatricule = (matricule || '').replace(/\s+/g, '').toLowerCase();
-    const cleanNom = (nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const cleanNom = normalizePersonName(nomPrenom);
     const cleanCode = normalizeActFamilyCode(actCode);
     const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
     const isoDateSoins = normalizeDateISO(dateSoins);
@@ -480,7 +481,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     allEligibleActs.forEach(cand => {
       let score = 0;
       const candMatricule = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
-      const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const candNom = normalizePersonName(cand.personneNom);
       const candDate = (cand.prestationDate || '').trim().substring(0, 10);
       const isoCandDate = normalizeDateISO(cand.prestationDate);
       const monthCand = isoCandDate ? isoCandDate.substring(0, 7) : '';
@@ -498,7 +499,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       // 2. Patient matching
       const exactMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && cleanMatricule === candMatricule;
       const partialMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && (cleanMatricule.includes(candMatricule) || candMatricule.includes(cleanMatricule));
-      const nameMatch = cleanNom && candNom && (candNom.includes(cleanNom) || cleanNom.includes(candNom));
+      const bothNamesPresent = Boolean(cleanNom && candNom);
+      const nameMatch = bothNamesPresent && hasSimilarPersonName(cleanNom, candNom);
+
+      // Le matricule seul ne suffit pas : les fichiers contiennent parfois un
+      // matricule réutilisé ou décalé. Si les deux noms sont renseignés, ils
+      // doivent être réellement proches avant toute liaison automatique.
+      // Ainsi RANAISOA BLANDINE ne peut pas être lié à FOMARINTSOA FITAHIA FRAZERINAT
+      // uniquement parce que la date et le montant sont identiques.
+      if (bothNamesPresent && !nameMatch) return;
 
       if (exactMat) score += 100;
       else if (partialMat) score += 80;
@@ -1049,7 +1058,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
   // Helper to find top candidate suggestions for a settlement row (strictly in the same month & year)
   const getRowSuggestions = (row: SettlementRowItem): MatchCandidate[] => {
-    const normNom = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const normNom = normalizePersonName(row.nomPrenom);
     const cleanMat = (row.matricule || '').replace(/\s+/g, '').toLowerCase();
 
     if (!normNom && (!cleanMat || cleanMat === '-')) return [];
@@ -1070,12 +1079,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       }
 
       const candMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
-      const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const candNom = normalizePersonName(cand.personneNom);
 
       const matMatch = Boolean(cleanMat && cleanMat !== '-' && candMat && candMat !== '-' && (cleanMat === candMat || candMat.includes(cleanMat) || cleanMat.includes(candMat)));
-      const nameMatch = Boolean(normNom && candNom && (candNom.includes(normNom) || normNom.includes(candNom)));
+      const bothNamesPresent = Boolean(normNom && candNom);
+      const nameMatch = bothNamesPresent && hasSimilarPersonName(normNom, candNom);
 
-      return matMatch || nameMatch;
+      // Une suggestion qui sera ensuite reliée automatiquement doit respecter
+      // la même règle que le rapprochement principal : un matricule ne peut
+      // pas valider deux noms clairement différents.
+      return (bothNamesPresent ? nameMatch : matMatch) || (!bothNamesPresent && nameMatch);
     }).slice(0, 3);
   };
 
