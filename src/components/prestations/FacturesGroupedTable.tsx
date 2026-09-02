@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { GroupedFacture, FactureSortField } from '../PrestationsView';
 import { formatDate, formatMoney } from '../../utils/formatters';
-import { Personne } from '../../types';
+import { Personne, Prestation } from '../../types';
 
 interface FacturesGroupedTableProps {
   factures: GroupedFacture[];
@@ -31,6 +31,7 @@ interface FacturesGroupedTableProps {
   onViewFacture: (facture: GroupedFacture) => void;
   onDeleteFacture?: (facture: GroupedFacture) => void;
   getPersonne: (id?: string) => Personne | undefined;
+  getPrestationFinancials?: (p: Prestation) => { tot: number; mod: number; remb: number; totalPaye: number; totalExclu: number; resteAPayer: number; statut: string };
 }
 
 export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
@@ -43,6 +44,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
   onViewFacture,
   onDeleteFacture,
   getPersonne,
+  getPrestationFinancials,
 }) => {
   const renderSortIcon = (field: FactureSortField) => {
     if (factureSortField !== field) {
@@ -405,22 +407,23 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
                                     const pers = getPersonne(p.personneId);
                                     const pNom = p.nomAgent || pers?.nomPrenom || p.matricule || 'Assuré';
                                     const pMat = pers?.matricule || p.matricule || '-';
-                                    const pTot = p.totalPrestation || 0;
-                                    const pPart = p.participation || 0;
-                                    const pRemb = Math.max(0, pTot - pPart);
-                                    const pPaye = p.totalPaye || 0;
-                                    const pExclu = p.montantExclu || 0;
-                                    const pReste = Math.max(0, pRemb - pPaye - pExclu);
-                                    const isFullyPaid = (pPaye >= pRemb && pRemb > 0) || (pReste <= 0 && pPaye > 0);
-                                    const isPartiallyPaid = pPaye > 0 && !isFullyPaid && pReste > 0;
-                                    const isExcluded = pExclu >= pRemb && pRemb > 0 && pPaye === 0;
-                                    const pStatut = isExcluded
-                                      ? 'Rejeté'
-                                      : isFullyPaid
-                                      ? 'Payé'
-                                      : isPartiallyPaid
-                                      ? 'Partiellement payé'
-                                      : 'En attente';
+                                    
+                                    const fin = getPrestationFinancials ? getPrestationFinancials(p) : {
+                                      tot: p.montantTotal ?? p.totalPrestation ?? 0,
+                                      mod: p.ticketModerateur ?? p.participation ?? 0,
+                                      remb: p.montantARembourser ?? Math.max(0, (p.montantTotal ?? p.totalPrestation ?? 0) - (p.ticketModerateur ?? p.participation ?? 0)),
+                                      totalPaye: p.totalPaye ?? 0,
+                                      totalExclu: p.montantExclu ?? 0,
+                                      resteAPayer: p.resteAPayer ?? Math.max(0, (p.montantARembourser ?? Math.max(0, (p.montantTotal ?? p.totalPrestation ?? 0) - (p.ticketModerateur ?? p.participation ?? 0))) - (p.totalPaye ?? 0) - (p.montantExclu ?? 0)),
+                                      statut: p.statut || 'En attente'
+                                    };
+
+                                    const pTot = fin.tot;
+                                    const pPart = fin.mod;
+                                    const pRemb = fin.remb;
+                                    const pPaye = fin.totalPaye;
+                                    const pReste = fin.resteAPayer;
+                                    const pStatut = fin.statut;
 
                                     return (
                                       <tr key={p.id || pIdx} className="hover:bg-slate-50/80">

@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS `personnes` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_personnes_matricule` (`matricule`),
-  KEY `idx_personnes_societe` (`societe_id`)
+  KEY `idx_personnes_societe` (`societe_id`),
+  CONSTRAINT `fk_personnes_societe` FOREIGN KEY (`societe_id`) REFERENCES `societes` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -108,7 +109,10 @@ CREATE TABLE IF NOT EXISTS `prestations` (
   PRIMARY KEY (`id`),
   KEY `idx_prestations_facture` (`numero_facture`),
   KEY `idx_prestations_societe` (`societe_id`),
-  KEY `idx_prestations_statut` (`statut`)
+  KEY `idx_prestations_statut` (`statut`),
+  KEY `idx_prestations_personne` (`personne_id`),
+  CONSTRAINT `fk_prestations_societe` FOREIGN KEY (`societe_id`) REFERENCES `societes` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_prestations_personne` FOREIGN KEY (`personne_id`) REFERENCES `personnes` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -130,7 +134,8 @@ CREATE TABLE IF NOT EXISTS `lignes_prestation` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_lp_prestation` (`prestation_id`)
+  KEY `idx_lp_prestation` (`prestation_id`),
+  CONSTRAINT `fk_lignes_prestation_prestation` FOREIGN KEY (`prestation_id`) REFERENCES `prestations` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -163,7 +168,10 @@ CREATE TABLE IF NOT EXISTS `paiements` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_paiements_bordereau` (`numero_bordereau`),
-  KEY `idx_paiements_societe` (`societe_id`)
+  KEY `idx_paiements_societe` (`societe_id`),
+  KEY `idx_paiements_prestation` (`prestation_id`),
+  CONSTRAINT `fk_paiements_societe` FOREIGN KEY (`societe_id`) REFERENCES `societes` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_paiements_prestation` FOREIGN KEY (`prestation_id`) REFERENCES `prestations` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -192,7 +200,11 @@ CREATE TABLE IF NOT EXISTS `lignes_paiement` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_lp_paiement` (`paiement_id`),
-  KEY `idx_lp_prestation_ref` (`prestation_id`)
+  KEY `idx_lp_prestation_ref` (`prestation_id`),
+  KEY `idx_lp_ligne_prestation_ref` (`ligne_prestation_id`),
+  CONSTRAINT `fk_lignes_paiement_paiement` FOREIGN KEY (`paiement_id`) REFERENCES `paiements` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_lignes_paiement_prestation` FOREIGN KEY (`prestation_id`) REFERENCES `prestations` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_lignes_paiement_ligne_prestation` FOREIGN KEY (`ligne_prestation_id`) REFERENCES `lignes_prestation` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------

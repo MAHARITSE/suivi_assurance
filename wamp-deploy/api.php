@@ -43,27 +43,61 @@ function cleanAmount($val, $default = 0.0) {
 }
 
 /**
- * Auto-migration douce du schéma MySQL (Élargit les colonnes sans perte de données si nécessaire)
+ * Auto-migration douce du schéma MySQL (Élargit les colonnes sans perte de données et installe les clés étrangères en cascade)
  */
 function ensureSchemaIntegrity($pdo) {
     try {
         // Élargissement sécurisé des colonnes sensibles pour éviter les erreurs "Data too long"
         $alterQueries = [
+            "ALTER TABLE `societes` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `societes` MODIFY `code` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `personnes` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `personnes` MODIFY `societe_id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `familles` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `familles` MODIFY `code` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `prestations` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `prestations` MODIFY `societe_id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `prestations` MODIFY `personne_id` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `prestations` MODIFY `date` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `prestations` MODIFY `date_creation` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `prestations` MODIFY `date_paiement` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `prestations` MODIFY `numero_facture` VARCHAR(255) NOT NULL",
             "ALTER TABLE `prestations` MODIFY `statut` VARCHAR(100) DEFAULT 'En attente'",
+            "ALTER TABLE `paiements` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `paiements` MODIFY `societe_id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `paiements` MODIFY `prestation_id` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `paiements` MODIFY `date_paiement` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `paiements` MODIFY `date_soins` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `paiements` MODIFY `date_saisie` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `paiements` MODIFY `numero_bordereau` VARCHAR(255) NOT NULL",
             "ALTER TABLE `paiements` MODIFY `statut` VARCHAR(100) DEFAULT 'Validé'",
+            "ALTER TABLE `lignes_prestation` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `lignes_prestation` MODIFY `prestation_id` VARCHAR(100) NOT NULL",
             "ALTER TABLE `lignes_prestation` MODIFY `code` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `lignes_paiement` MODIFY `id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `lignes_paiement` MODIFY `paiement_id` VARCHAR(100) NOT NULL",
+            "ALTER TABLE `lignes_paiement` MODIFY `prestation_id` VARCHAR(100) DEFAULT NULL",
+            "ALTER TABLE `lignes_paiement` MODIFY `ligne_prestation_id` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `lignes_paiement` MODIFY `date_soins` VARCHAR(100) DEFAULT NULL"
         ];
         foreach ($alterQueries as $q) {
             try { $pdo->exec($q); } catch (Exception $e) { /* ignore if already modified */ }
+        }
+
+        // Ajout des contraintes de clés étrangères avec CASCADE si absentes
+        $fkQueries = [
+            "ALTER TABLE `personnes` ADD CONSTRAINT `fk_personnes_societe` FOREIGN KEY (`societe_id`) REFERENCES `societes`(`id`) ON DELETE CASCADE ON UPDATE CASCADE",
+            "ALTER TABLE `prestations` ADD CONSTRAINT `fk_prestations_societe` FOREIGN KEY (`societe_id`) REFERENCES `societes`(`id`) ON DELETE CASCADE ON UPDATE CASCADE",
+            "ALTER TABLE `prestations` ADD CONSTRAINT `fk_prestations_personne` FOREIGN KEY (`personne_id`) REFERENCES `personnes`(`id`) ON DELETE SET NULL ON UPDATE CASCADE",
+            "ALTER TABLE `lignes_prestation` ADD CONSTRAINT `fk_lignes_prestation_prestation` FOREIGN KEY (`prestation_id`) REFERENCES `prestations`(`id`) ON DELETE CASCADE ON UPDATE CASCADE",
+            "ALTER TABLE `paiements` ADD CONSTRAINT `fk_paiements_societe` FOREIGN KEY (`societe_id`) REFERENCES `societes`(`id`) ON DELETE CASCADE ON UPDATE CASCADE",
+            "ALTER TABLE `paiements` ADD CONSTRAINT `fk_paiements_prestation` FOREIGN KEY (`prestation_id`) REFERENCES `prestations`(`id`) ON DELETE SET NULL ON UPDATE CASCADE",
+            "ALTER TABLE `lignes_paiement` ADD CONSTRAINT `fk_lignes_paiement_paiement` FOREIGN KEY (`paiement_id`) REFERENCES `paiements`(`id`) ON DELETE CASCADE ON UPDATE CASCADE",
+            "ALTER TABLE `lignes_paiement` ADD CONSTRAINT `fk_lignes_paiement_prestation` FOREIGN KEY (`prestation_id`) REFERENCES `prestations`(`id`) ON DELETE SET NULL ON UPDATE CASCADE",
+            "ALTER TABLE `lignes_paiement` ADD CONSTRAINT `fk_lignes_paiement_ligne_prestation` FOREIGN KEY (`ligne_prestation_id`) REFERENCES `lignes_prestation`(`id`) ON DELETE SET NULL ON UPDATE CASCADE"
+        ];
+        foreach ($fkQueries as $fk) {
+            try { $pdo->exec($fk); } catch (Exception $e) { /* ignore if constraint already exists */ }
         }
     } catch (Exception $e) {
         // Silent fail on schema integrity check

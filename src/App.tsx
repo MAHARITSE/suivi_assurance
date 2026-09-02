@@ -98,18 +98,125 @@ export function App() {
   // Tracking if initial load completed
   const initialLoadRef = useRef(false);
 
+  // Reconcile prestations strictly with active paiements list
+  const reconcilePrestationsWithPaiements = useCallback((rawPrestations: Prestation[], currentPaiements: Paiement[]): Prestation[] => {
+    return (rawPrestations || []).map(p => {
+      const matchingLinesWithPayment: { lp: any; pm: Paiement }[] = [];
+      const matchingBordereaux = new Set<string>();
+      let latestDate = '';
+
+      (currentPaiements || []).forEach(pm => {
+        (pm.lignes || []).forEach(lp => {
+          const matchByPrestId = Boolean(lp.prestationId && lp.prestationId === p.id);
+          const matchByFacture = Boolean(
+            lp.prestationNumero &&
+            p.numeroFacture &&
+            lp.prestationNumero.trim().toLowerCase() === p.numeroFacture.trim().toLowerCase()
+          );
+          const matchByLigneId = Boolean(
+            lp.lignePrestationId && p.lignes?.some(l => l.id === lp.lignePrestationId)
+          );
+
+          if (matchByPrestId || matchByFacture || matchByLigneId) {
+            matchingLinesWithPayment.push({ lp, pm });
+            if (pm.numeroBordereau) {
+              matchingBordereaux.add(pm.numeroBordereau);
+            }
+            if (pm.datePaiement && (!latestDate || pm.datePaiement > latestDate)) {
+              latestDate = pm.datePaiement;
+            }
+          }
+        });
+      });
+
+      const hasLignes = p.lignes && p.lignes.length > 0;
+      let pTotalPaye = 0;
+      let pTotalExclu = 0;
+
+      const updatedLignes = (p.lignes || []).map(l => {
+        let lTotalPaye = 0;
+        let lTotalExclu = 0;
+
+        matchingLinesWithPayment.forEach(({ lp }) => {
+          const matchThisLine = (lp.lignePrestationId && lp.lignePrestationId === l.id) ||
+            (!lp.lignePrestationId && p.lignes?.length === 1);
+
+          if (matchThisLine) {
+            const net = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
+            const exclu = Number(lp.montantExclu || 0);
+            lTotalPaye += net;
+            lTotalExclu += exclu;
+          }
+        });
+
+        const lTot = (l as any).montantTotal ?? l.totalPrestation ?? 0;
+        const lMod = l.ticketModerateur ?? 0;
+        const lRemb = l.montantARembourser ?? Math.max(0, lTot - lMod);
+        const lReste = Math.max(0, lRemb - lTotalPaye - lTotalExclu);
+        const isLPaid = (lTotalPaye >= lRemb && lRemb > 0) || (lReste <= 0 && lTotalPaye > 0);
+        const isLPart = lTotalPaye > 0 && !isLPaid && lReste > 0;
+        const isLExcluded = lTotalExclu >= lRemb && lRemb > 0 && lTotalPaye === 0;
+
+        const lStatut = isLExcluded ? 'Rejeté' : isLPaid ? 'Payé' : isLPart ? 'Partiellement payé' : 'En attente';
+
+        pTotalPaye += lTotalPaye;
+        pTotalExclu += lTotalExclu;
+
+        return {
+          ...l,
+          totalPaye: lTotalPaye,
+          montantExclu: lTotalExclu,
+          resteAPayer: lReste,
+          statut: lStatut as any,
+        };
+      });
+
+      if (!hasLignes) {
+        matchingLinesWithPayment.forEach(({ lp }) => {
+          pTotalPaye += Number(lp.totalPaye ?? lp.montantPaye ?? 0);
+          pTotalExclu += Number(lp.montantExclu || 0);
+        });
+      }
+
+      const tot = p.montantTotal ?? p.totalPrestation ?? 0;
+      const mod = p.ticketModerateur ?? p.participation ?? 0;
+      const remb = p.montantARembourser ?? Math.max(0, tot - mod);
+      const totalPaye = pTotalPaye;
+      const totalExclu = pTotalExclu;
+      const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
+
+      const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
+      const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
+      const isExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
+
+      const newNumeroBordereau = Array.from(matchingBordereaux).join(', ');
+
+      return {
+        ...p,
+        totalPaye,
+        montantExclu: totalExclu,
+        resteAPayer,
+        lignes: hasLignes ? updatedLignes : p.lignes,
+        statut: isExcluded ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
+        datePaiement: latestDate || undefined,
+        numeroBordereau: newNumeroBordereau || undefined,
+      };
+    });
+  }, []);
+
   // Charger depuis le LocalStorage
   const loadFromLocalStorage = useCallback(() => {
     const local = loadLocalDataset();
+    const reconciledPr = reconcilePrestationsWithPaiements(local.prestations, local.paiements);
     setSocietes(local.societes);
     setPersonnes(local.personnes);
     setFamilles(local.familles);
-    setPrestations(local.prestations);
+    setPrestations(reconciledPr);
     setPaiements(local.paiements);
     setDbStatus('connected');
     setDbError(null);
     setLastSyncTime(new Date());
-  }, []);
+  }, [reconcilePrestationsWithPaiements]);
 
   // Check database connection and load WAMP data directly from MySQL
   const checkAndLoadWampData = useCallback(async (silent: boolean = false) => {
@@ -153,10 +260,12 @@ export function App() {
       const prArr = Array.isArray(prData) ? prData : [];
       const paArr = Array.isArray(paData) ? paData : [];
 
+      const reconciledPr = reconcilePrestationsWithPaiements(prArr, paArr);
+
       setSocietes(sArr);
       setPersonnes(pArr);
       setFamilles(fArr);
-      setPrestations(prArr);
+      setPrestations(reconciledPr);
       setPaiements(paArr);
 
       // Mirror to LocalStorage in background
@@ -164,7 +273,7 @@ export function App() {
         societes: sArr,
         personnes: pArr,
         familles: fArr,
-        prestations: prArr,
+        prestations: reconciledPr,
         paiements: paArr,
       });
 
@@ -319,90 +428,12 @@ export function App() {
       setPaiements(remainingPaiements);
       saveLocalTable('paiements', remainingPaiements);
 
-      const updatedPrestationsToSave: Prestation[] = [];
-      setPrestations(prev => {
-        const updated = prev.map(p => {
-          let pTotalPaye = 0;
-          let pTotalExclu = 0;
-          let latestDate = '';
+      const reconciled = reconcilePrestationsWithPaiements(prestations, remainingPaiements);
+      setPrestations(reconciled);
+      saveLocalTable('prestations', reconciled);
 
-          const updatedLignes = (p.lignes || []).map(l => {
-            let lTotalPaye = 0;
-            let lTotalExclu = 0;
-
-            remainingPaiements.forEach(pm => {
-              (pm.lignes || []).forEach(lp => {
-                const matchPrest = (lp.prestationId && lp.prestationId === p.id) || 
-                                   (lp.lignePrestationId && lp.lignePrestationId === l.id) ||
-                                   (lp.prestationNumero && p.numeroFacture && lp.prestationNumero.trim().toLowerCase() === p.numeroFacture.trim().toLowerCase());
-                
-                if (matchPrest) {
-                  const net = Number(lp.totalPaye ?? lp.montantPaye ?? 0);
-                  const exclu = Number(lp.montantExclu || 0);
-                  
-                  if (lp.lignePrestationId === l.id || (!lp.lignePrestationId && p.lignes?.length === 1)) {
-                    lTotalPaye += net;
-                    lTotalExclu += exclu;
-                  }
-                  
-                  pTotalPaye += net;
-                  pTotalExclu += exclu;
-
-                  if (pm.datePaiement && (!latestDate || pm.datePaiement > latestDate)) {
-                    latestDate = pm.datePaiement;
-                  }
-                }
-              });
-            });
-
-            const lTot = (l as any).montantTotal ?? l.totalPrestation ?? 0;
-            const lMod = l.ticketModerateur ?? 0;
-            const lRemb = l.montantARembourser ?? Math.max(0, lTot - lMod);
-            const lReste = Math.max(0, lRemb - lTotalPaye - lTotalExclu);
-            const isLPaid = (lTotalPaye >= lRemb && lRemb > 0) || (lReste <= 0 && lTotalPaye > 0);
-            const isLPart = lTotalPaye > 0 && !isLPaid && lReste > 0;
-            const isLExcluded = lTotalExclu >= lRemb && lRemb > 0 && lTotalPaye === 0;
-
-            const lStatut = isLExcluded ? 'Rejeté' : isLPaid ? 'Payé' : isLPart ? 'Partiellement payé' : 'En attente';
-
-            return {
-              ...l,
-              totalPaye: lTotalPaye,
-              montantExclu: lTotalExclu > 0 ? lTotalExclu : l.montantExclu,
-              statut: lStatut as any,
-            };
-          });
-
-          const tot = p.montantTotal ?? p.totalPrestation ?? 0;
-          const mod = p.ticketModerateur ?? p.participation ?? 0;
-          const remb = p.montantARembourser ?? Math.max(0, tot - mod);
-          const totalPaye = pTotalPaye;
-          const totalExclu = pTotalExclu;
-          const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
-
-          const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
-          const isPartiallyPaid = totalPaye > 0 && !isFullyPaid && resteAPayer > 0;
-          const isExcluded = totalExclu >= remb && remb > 0 && totalPaye === 0;
-
-          const updatedP: Prestation = {
-            ...p,
-            totalPaye,
-            resteAPayer,
-            lignes: updatedLignes,
-            statut: isExcluded ? 'Rejeté' : isFullyPaid ? 'Payé' : isPartiallyPaid ? 'Partiellement payé' : 'En attente',
-            datePaiement: latestDate || undefined,
-          };
-
-          updatedPrestationsToSave.push(updatedP);
-          return updatedP;
-        });
-
-        saveLocalTable('prestations', updated);
-        return updated;
-      });
-
-      if (storageMode === 'server' && updatedPrestationsToSave.length > 0) {
-        await Promise.all(updatedPrestationsToSave.map(up => saveWampData('prestations', up)));
+      if (storageMode === 'server' && reconciled.length > 0) {
+        await Promise.all(reconciled.map(up => saveWampData('prestations', up)));
       }
       setLastSyncTime(new Date());
     } catch (err: any) {

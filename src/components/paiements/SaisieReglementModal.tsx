@@ -94,11 +94,43 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterSocieteOnly, setFilterSocieteOnly] = useState<boolean>(true);
   const [filterUnpaidOnly, setFilterUnpaidOnly] = useState<boolean>(true);
 
   // Table Lines State (Lines in this settlement slip)
   const [bordereauLines, setBordereauLines] = useState<StagedBordereauLine[]>([]);
+
+  // Alert Modal for Search / Action without selecting a Societe
+  const [showSocieteAlertModal, setShowSocieteAlertModal] = useState<boolean>(false);
+  const alertTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const triggerSocieteAlert = () => {
+    if (alertTimerRef.current) {
+      clearTimeout(alertTimerRef.current);
+    }
+    setShowSocieteAlertModal(true);
+    // Persiste au moins 2 secondes (2.6 secondes pour confort visuel)
+    alertTimerRef.current = setTimeout(() => {
+      setShowSocieteAlertModal(false);
+    }, 2600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    };
+  }, []);
+
+  const focusSocieteSelect = () => {
+    setShowSocieteAlertModal(false);
+    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    setTimeout(() => {
+      const el = document.getElementById('select-societe-bordereau') as HTMLSelectElement | null;
+      if (el) {
+        el.focus();
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
 
   // Manual Direct Line entry drawer / form toggle
   const [showManualForm, setShowManualForm] = useState<boolean>(false);
@@ -121,21 +153,25 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     return raw === '' ? 0 : Number(raw) || 0;
   };
 
-  // Reset or initialize on open
+  // Reset or initialize on open - Activer Société / Assureur * -- Sélectionner une société --
   useEffect(() => {
     if (isOpen) {
-      if (selectedSocieteId && selectedSocieteId !== 'ALL') {
-        setSocieteId(selectedSocieteId);
-      } else {
-        setSocieteId('');
-      }
+      setSocieteId('');
+      setSearchQuery('');
       if (bordereauLines.length === 0) {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const rand = Math.floor(100 + Math.random() * 900);
         setNumeroBordereau(`BORD-${today}-${rand}`);
       }
+      const timer = setTimeout(() => {
+        const selectEl = document.getElementById('select-societe-bordereau') as HTMLSelectElement | null;
+        if (selectEl) {
+          selectEl.focus();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
     }
-  }, [isOpen, selectedSocieteId]);
+  }, [isOpen]);
 
   // Flattened searchable list of all existing acts across prestations
   const searchableActs = useMemo(() => {
@@ -241,8 +277,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     const q = searchQuery.trim().toLowerCase();
 
     return searchableActs.filter(act => {
-      // Filter by selected society if enabled
-      if (filterSocieteOnly && societeId && act.societeId !== societeId) {
+      // Filter by selected society if chosen
+      if (societeId && act.societeId !== societeId) {
         return false;
       }
 
@@ -265,7 +301,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
 
       return matchNom || matchMatricule || matchFacture深入 || matchCodeActe || matchDate;
     });
-  }, [searchableActs, searchQuery, filterSocieteOnly, filterUnpaidOnly, societeId]);
+  }, [searchableActs, searchQuery, filterUnpaidOnly, societeId]);
 
   // Check if an act is already added to the bordereau lines (now allowed to be repeated multiple times)
   const isActStaged = (prestationId: string, lignePrestationId: string) => {
@@ -274,6 +310,10 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
 
   // Add an act from search results into the bordereau table (allowing multiple repetitions with memory amount reduction)
   const handleAddActToBordereau = (act: typeof searchableActs[0]) => {
+    if (!societeId) {
+      triggerSocieteAlert();
+      return;
+    }
     // Calculate how much has already been allocated (paye + tm + exclu) for this act in current bordereau lines
     const alreadyAllocated = bordereauLines
       .filter(l => l.prestationId === act.prestationId && l.lignePrestationId === act.lignePrestationId)
@@ -321,9 +361,12 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
 
   // Add all visible search results
   const handleAddAllSearchResults = () => {
+    if (!societeId) {
+      triggerSocieteAlert();
+      return;
+    }
     const toAdd = searchResults.filter(act => !isActStaged(act.prestationId, act.lignePrestationId));
     if (toAdd.length === 0) {
-      alert('Tous les actes affichés sont déjà dans le bordereau.');
       return;
     }
 
@@ -366,8 +409,11 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
   // Add a manual line (for an unlisted person or act)
   const handleAddManualLine = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!societeId) {
+      triggerSocieteAlert();
+      return;
+    }
     if (!manualNom.trim()) {
-      alert("Veuillez saisir le nom de l'adhérent / patient.");
       return;
     }
 
@@ -639,6 +685,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   Société / Assureur *
                 </label>
                 <select
+                  id="select-societe-bordereau"
+                  autoFocus
                   value={societeId}
                   onChange={(e) => setSocieteId(e.target.value)}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
@@ -740,7 +788,12 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
               <div className="flex items-center gap-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => setShowManualForm(!showManualForm)}
+                  onClick={() => {
+                    if (!showManualForm && !societeId) {
+                      triggerSocieteAlert();
+                    }
+                    setShowManualForm(!showManualForm);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 font-semibold transition cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -759,9 +812,19 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                     type="text"
                     placeholder="Tapez pour rechercher (Nom de l'adhérent, N° Immatriculation, Facture, Acte)..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onFocus={() => {
+                      if (!societeId) {
+                        triggerSocieteAlert();
+                      }
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.trim() !== '' && !societeId) {
+                        triggerSocieteAlert();
+                      }
+                      setSearchQuery(val);
+                    }}
                     className="w-full pl-9 pr-24 py-2.5 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none font-medium shadow-2xs"
-                    autoFocus
                   />
 
                   <div className="absolute right-2 top-2 flex items-center gap-1.5">
@@ -783,19 +846,6 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
 
                 {/* Filter Toggles */}
                 <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setFilterSocieteOnly(!filterSocieteOnly)}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium border text-[11px] transition cursor-pointer ${
-                      filterSocieteOnly
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span>Société : {societes.find(s => s.id === societeId)?.nom || 'Garant'}</span>
-                    <span className={`w-1.5 h-1.5 rounded-full ${filterSocieteOnly ? 'bg-indigo-600' : 'bg-slate-300'}`}></span>
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => setFilterUnpaidOnly(!filterUnpaidOnly)}
@@ -840,16 +890,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                           Aucun acte ne correspond à « {searchQuery} »
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          {filterSocieteOnly && (
-                            <button
-                              type="button"
-                              onClick={() => setFilterSocieteOnly(false)}
-                              className="text-indigo-600 hover:underline font-semibold mr-2 cursor-pointer"
-                            >
-                              Élargir à tous les organismes
-                            </button>
-                          )}
-                          ou utilisez le bouton « + Saisie libre d'un acte » pour l'ajouter manuellement.
+                          Utilisez le bouton « + Saisie libre d'un acte non listé » pour l'ajouter directement au bordereau.
                         </div>
                       </div>
                     ) : (
@@ -1313,6 +1354,72 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
         </div>
 
       </div>
+
+      {/* Centered Modal Alert: Choix Société Obligatoire (affiche au moins 2 secondes) */}
+      {showSocieteAlertModal && (
+        <div
+          id="modal-alert-societe-requise"
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={() => setShowSocieteAlertModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border-2 border-amber-400 relative overflow-hidden transform transition-all animate-in zoom-in-95 duration-200 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top Auto-Dismiss Progress Indicator Bar */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-amber-100 overflow-hidden">
+              <div 
+                className="h-full bg-amber-500 animate-[progress_2600ms_linear_forwards]"
+                style={{
+                  width: '100%',
+                  animation: 'shrink 2.6s linear forwards'
+                }}
+              />
+            </div>
+
+            {/* Icon */}
+            <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mb-4 ring-8 ring-amber-50 shadow-inner">
+              <AlertTriangle className="w-9 h-9 stroke-[2.2] animate-bounce" />
+            </div>
+
+            {/* Title */}
+            <h3 className="text-base font-extrabold text-slate-900 mb-2">
+              Sélection d'une Société Requise
+            </h3>
+
+            {/* Description / Message */}
+            <p className="text-xs text-slate-600 leading-relaxed mb-6">
+              Lors de la saisie d'un bordereau de règlement, vous devez obligatoirement sélectionner au préalable une <strong className="text-slate-900 font-bold">Société / Assureur</strong> dans l'en-tête avant de pouvoir rechercher ou ajouter des actes de soins.
+            </p>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row gap-2.5 justify-center">
+              <button
+                type="button"
+                id="btn-alert-focus-societe"
+                onClick={focusSocieteSelect}
+                className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md shadow-amber-600/20 transition cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Choisir la Société maintenant</span>
+              </button>
+              <button
+                type="button"
+                id="btn-alert-dismiss"
+                onClick={() => setShowSocieteAlertModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition cursor-pointer active:scale-95"
+              >
+                Compris
+              </button>
+            </div>
+
+            {/* Countdown notice */}
+            <p className="text-[11px] text-slate-400 mt-4 flex items-center justify-center gap-1.5">
+              <span>Fermeture automatique dans 2 secondes...</span>
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

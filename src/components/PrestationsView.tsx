@@ -439,17 +439,18 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const paidFromPaiements = paymentsMap.prestPaidMap[p.id] || 0;
     const excluFromPaiements = paymentsMap.prestExcluMap[p.id] || 0;
 
-    const paidFromLines = (p.lignes || []).reduce((sum, l) => {
-      const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
-      return sum + Math.max(lPaidFromP, l.totalPaye || 0);
-    }, 0);
-    const excluFromLines = (p.lignes || []).reduce((sum, l) => {
-      const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
-      return sum + Math.max(lExcluFromP, l.montantExclu || 0);
-    }, 0);
+    let paidFromLines = 0;
+    let excluFromLines = 0;
 
-    const totalPaye = Math.max(paidFromPaiements, paidFromLines, p.totalPaye || 0);
-    const totalExclu = Math.max(excluFromPaiements, excluFromLines, p.montantExclu || 0);
+    if (p.lignes && p.lignes.length > 0) {
+      p.lignes.forEach(l => {
+        paidFromLines += (paymentsMap.linePaidMap[l.id] || 0);
+        excluFromLines += (paymentsMap.lineExcluMap[l.id] || 0);
+      });
+    }
+
+    const totalPaye = Math.max(paidFromPaiements, paidFromLines);
+    const totalExclu = Math.max(excluFromPaiements, excluFromLines);
     const resteAPayer = Math.max(0, remb - totalPaye - totalExclu);
 
     const isFullyPaid = (totalPaye >= remb && remb > 0) || (resteAPayer <= 0 && totalPaye > 0);
@@ -515,10 +516,10 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
     const lBrut = l.totalPrestation || 0;
     const lPart = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes?.length || 1));
     const lARemb = l.montantARembourser ?? Math.max(0, lBrut - lPart);
-    const lPaidFromP = paymentsMap.linePaidMap[l.id] || 0;
-    const lExcluFromP = paymentsMap.lineExcluMap[l.id] || 0;
-    const lTotalPaye = Math.max(lPaidFromP, l.totalPaye || 0);
-    const lExclu = Math.max(lExcluFromP, l.montantExclu || 0);
+    const lPaidFromP = paymentsMap.linePaidMap[l.id] || (p.lignes?.length === 1 ? (paymentsMap.prestPaidMap[p.id] || 0) : 0);
+    const lExcluFromP = paymentsMap.lineExcluMap[l.id] || (p.lignes?.length === 1 ? (paymentsMap.prestExcluMap[p.id] || 0) : 0);
+    const lTotalPaye = lPaidFromP;
+    const lExclu = lExcluFromP;
     // Deduct exclusions from Reste à Payer since they are rejected
     const lReste = Math.max(0, lARemb - lTotalPaye - lExclu);
     const isFullyPaid = (lTotalPaye >= lARemb && lARemb > 0) || (lReste <= 0 && lTotalPaye > 0);
@@ -1980,6 +1981,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           onViewFacture={(f) => setViewingFacture(f)}
           onDeleteFacture={handleRequestDeleteFacture}
           getPersonne={getPersonne}
+          getPrestationFinancials={getPrestationFinancials}
         />
       ) : (
         /* Detailed Dossiers Table */
@@ -2530,14 +2532,6 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         </div>
       </div>
       )}
-
-      {/* Modal: View Grouped Facture Details */}
-      <FactureDetailModal
-        facture={viewingFacture}
-        onClose={() => setViewingFacture(null)}
-        getPersonne={getPersonne}
-        getSocieteNom={getSocieteNom}
-      />
 
       {/* Modal: View Prestation (FEN_Vision_Prestation) */}
       {viewingPrestation && (
@@ -3176,6 +3170,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
           getPersonne={getPersonne}
           getSocieteNom={getSocieteNom}
           onChangeLiaison={(p, l) => setChangerLiaisonContext({ prestation: p, lignePrestation: l })}
+          getPrestationFinancials={getPrestationFinancials}
+          getLineFinancials={getLineFinancials}
         />
       )}
 

@@ -25,6 +25,8 @@ interface FactureDetailModalProps {
   getPersonne: (id?: string) => Personne | undefined;
   getSocieteNom: (id?: string) => string;
   onChangeLiaison?: (prestation: Prestation, ligne: LignePrestation) => void;
+  getPrestationFinancials?: (p: Prestation) => { tot: number; mod: number; remb: number; totalPaye: number; totalExclu: number; resteAPayer: number; statut: string };
+  getLineFinancials?: (l: LignePrestation, p: Prestation) => { lBrut: number; lPart: number; lARemb: number; lTotalPaye: number; lExclu: number; lReste: number; statut: string };
 }
 
 export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
@@ -34,6 +36,8 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
   getPersonne,
   getSocieteNom,
   onChangeLiaison,
+  getPrestationFinancials,
+  getLineFinancials,
 }) => {
   if (!facture) return null;
 
@@ -203,11 +207,22 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
               const pers = getPersonne(p.personneId);
               const pNom = p.nomAgent || pers?.nomPrenom || p.matricule || 'Assuré';
               const pMat = pers?.matricule || p.matricule || '-';
-              const pTot = p.totalPrestation || 0;
-              const pPart = p.participation || 0;
-              const pRemb = Math.max(0, pTot - pPart);
-              const pPaye = p.totalPaye || 0;
-              const pReste = Math.max(0, pRemb - pPaye);
+
+              const fin = getPrestationFinancials ? getPrestationFinancials(p) : {
+                tot: p.montantTotal ?? p.totalPrestation ?? 0,
+                mod: p.ticketModerateur ?? p.participation ?? 0,
+                remb: p.montantARembourser ?? Math.max(0, (p.montantTotal ?? p.totalPrestation ?? 0) - (p.ticketModerateur ?? p.participation ?? 0)),
+                totalPaye: p.totalPaye ?? 0,
+                totalExclu: p.montantExclu ?? 0,
+                resteAPayer: p.resteAPayer ?? Math.max(0, (p.montantARembourser ?? Math.max(0, (p.montantTotal ?? p.totalPrestation ?? 0) - (p.ticketModerateur ?? p.participation ?? 0))) - (p.totalPaye ?? 0) - (p.montantExclu ?? 0)),
+                statut: p.statut || 'En attente'
+              };
+
+              const pTot = fin.tot;
+              const pPart = fin.mod;
+              const pRemb = fin.remb;
+              const pPaye = fin.totalPaye;
+              const pReste = fin.resteAPayer;
 
               return (
                 <div key={p.id || pIdx} className="bg-slate-50/80 rounded-xl border border-slate-200 p-3 text-xs space-y-2">
@@ -248,12 +263,22 @@ export const FactureDetailModal: React.FC<FactureDetailModalProps> = ({
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
                           {p.lignes.map((l, lIdx) => {
-                            const lBrut = l.totalPrestation || 0;
-                            const lPart = l.ticketModerateur || 0;
-                            const lRemb = Math.max(0, lBrut - lPart);
-                            const lPaye = l.totalPaye || 0;
-                            const lExclu = l.montantExclu || 0;
-                            const lReste = Math.max(0, lRemb - lPaye - lExclu);
+                            const lFin = getLineFinancials ? getLineFinancials(l, p) : {
+                              lBrut: l.totalPrestation || 0,
+                              lPart: l.ticketModerateur || 0,
+                              lARemb: Math.max(0, (l.totalPrestation || 0) - (l.ticketModerateur || 0)),
+                              lTotalPaye: l.totalPaye || 0,
+                              lExclu: l.montantExclu || 0,
+                              lReste: Math.max(0, (l.totalPrestation || 0) - (l.ticketModerateur || 0) - (l.totalPaye || 0) - (l.montantExclu || 0)),
+                              statut: l.statut || 'En attente'
+                            };
+
+                            const lBrut = lFin.lBrut;
+                            const lPart = lFin.lPart;
+                            const lRemb = lFin.lARemb;
+                            const lPaye = lFin.lTotalPaye;
+                            const lExclu = lFin.lExclu;
+                            const lReste = lFin.lReste;
 
                             return (
                               <tr key={l.id || lIdx}>
