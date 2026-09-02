@@ -158,6 +158,56 @@ export function normalizePersonName(name?: string | null): string {
     .replace(/\s+/g, ' ');
 }
 
+/**
+ * Extrait le nom du titulaire de l'adhésion depuis une cellule de relevé groupé
+ * (format « ... N°Règlement ADHESION: TITULAIRE CODE_ACTE Client: ... »).
+ */
+export function extractAdhesionHolder(raw?: string | null): string {
+  const v = (raw || '');
+  if (!/ADH[EÈÉE]SION\s*:/i.test(v)) return '';
+  const m = v.match(/ADH[EÈÉE]SION\s*:\s*(.+?)(?:\s(?:CONS|CG|CGPR|PH|SI|EB|MEDIC|MED|LABO|ECHO|RADIO|HOSP|CHIR|DENT|SOINS|STOCK|ACTE|AMI|CS|DC|DK)\b|\s+Client\s*:|\s+\d{2}\/\d{2}\/\d{4}|\n|$)/i);
+  return m && m[1] ? m[1].replace(/\s+/g, ' ').trim() : '';
+}
+
+/**
+ * Nettoie le nom d'une personne importée depuis les relevés « groupés » où la
+ * cellule du nom contient aussi le détail de tous les règlements, ex. :
+ * « FRASIE DELFIA MARCELLINE 1089322-22 ADHESION: RAVELOMANJAKA AIME JACQUIS PH
+ *   Client: SIPEM (...) 22/04/2026 ... 80 000,00 ... AIME JACQUIS ».
+ * Sans ce nettoyage, toute la ligne s'affiche à la place du nom (colonne
+ * « Adhérent & Matricule ») et fausse le rapprochement des actes.
+ */
+export function sanitizeImportedPersonName(raw?: string | null, fallback?: string): string {
+  let v = (raw || '').replace(/\r/g, '').trim();
+  if (!v) return (fallback || '').trim();
+
+  // Cellule multi-lignes (relevé groupé) : le nom du patient est sur la première ligne significative
+  if (v.includes('\n')) {
+    const firstLine = v.split('\n').map(s => s.trim()).find(s => /[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(s));
+    if (firstLine) v = firstLine;
+  }
+
+  // Coupe tout ce qui suit le nom : section ADHESION, n° de règlement « 1089322-22 »,
+  // « Client: ... », date de soin ou montant « 80 000,00 ».
+  const cutAt = (re: RegExp) => {
+    const m = v.match(re);
+    if (m && m.index !== undefined && m.index > 0) v = v.slice(0, m.index);
+  };
+  cutAt(/\s+ADH[EÈÉE]SION\s*:/i);
+  cutAt(/\s+\d{3,}\s*[-/]\s*\d+(?=\s|$)/);
+  cutAt(/\s+Client\s*:/i);
+  cutAt(/\s+\d{2}\/\d{2}\/\d{4}/);
+  cutAt(/\s+\d{1,3}(?:[\s .]\d{3})+,\d{2}(?=\s|$)/);
+  v = v.replace(/\s+/g, ' ').trim();
+
+  // Si la cellule commençait directement par le n° de règlement (pas de nom de patient),
+  // on retombe sur le titulaire de l'adhésion.
+  if (!/[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(v)) {
+    v = extractAdhesionHolder(raw) || (fallback || '').trim();
+  }
+  return v || (fallback || '').trim();
+}
+
 export interface PersonNameComparison {
   source: string;
   candidate: string;
@@ -684,7 +734,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
     doc.lignes.forEach((l, idx) => {
       // For BSA and healthcare statements: the true patient is the person aligned with the date of care
-      const effectiveNom = (l.ayantDroit && l.ayantDroit.trim()) ? l.ayantDroit.trim() : l.nomPrenom;
+      // (filet de sécurité : nettoie aussi les noms issus de cellules « groupées » des relevés)
+      const effectiveNom = (l.ayantDroit && l.ayantDroit.trim())
+        ? sanitizeImportedPersonName(l.ayantDroit.trim(), l.nomPrenom)
+        : sanitizeImportedPersonName(l.nomPrenom);
 
       // If line has multiple acts
       if (l.actes && l.actes.length > 0) {
@@ -963,6 +1016,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
               // Règle BSA : Pour BSA et relevés de soins, le vrai nom de la personne à importer est TOUJOURS celui aligné à la date du soin (Patient / Ayant-droit / Soigné) et non celui de l'adhésion
               let rawNom = nomPatientSoin || (nomAdherent && !nomGeneral ? nomAdherent : nomGeneral) || nomAdherent || `Patient ${idx + 1}`;
+              // Les relevés « groupés » mettent parfois tout le détail des règlements dans la cellule du nom
+              // (ex. « FRASIE DELFIA MARCELLINE 1089322-22 ADHESION: RAVELOMANJAKA AIME JACQUIS PH Client: SIPEM ... ») :
+              // on ne garde que le nom de la personne pour l'affichage, le regroupement et le rapprochement.
+              const adhesionDansNom = extractAdhesionHolder(rawNom);
+              const nomAdherentEffectif = nomAdherent || adhesionDansNom;
+              rawNom = sanitizeImportedPersonName(rawNom, adhesionDansNom || nomAdherent);
               let sousSoc = String(getVal(['Sous_Societe', 'Sous-Société', 'Sous Societe', 'Département', 'Section', 'Service']) || '').trim();
 
               const parenMatch = rawNom.match(/^([^(]+)\s*\(([^)]+)\)$/);
@@ -1004,8 +1063,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
               const actCode = String(getVal(['Code_Acte', 'Code Acte', 'Acte', 'Code']) || 'CONS').trim().toUpperCase();
               const actLibelle = String(getVal(['Libelle_Acte', 'Libellé Acte', 'Acte médicale/Prix', 'Actes Médicaux', 'Prestation', 'Libellé']) || actCode).trim();
               let observations = String(getVal(['Observations', 'Remarques', 'Commentaires', 'Motif', 'Motif_Observation']) || 'Import Excel').trim();
-              if (nomAdherent && nomAdherent.toLowerCase() !== rawNom.toLowerCase() && !observations.toLowerCase().includes(nomAdherent.toLowerCase())) {
-                observations = observations && observations !== 'Import Excel' ? `${observations} (Adhérent: ${nomAdherent})` : `Adhérent: ${nomAdherent}`;
+              if (nomAdherentEffectif && nomAdherentEffectif.toLowerCase() !== rawNom.toLowerCase() && !observations.toLowerCase().includes(nomAdherentEffectif.toLowerCase())) {
+                observations = observations && observations !== 'Import Excel' ? `${observations} (Adhérent: ${nomAdherentEffectif})` : `Adhérent: ${nomAdherentEffectif}`;
               }
 
               return {
