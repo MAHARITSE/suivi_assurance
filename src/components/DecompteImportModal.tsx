@@ -143,12 +143,69 @@ export function isRealMatricule(mat?: string | null): boolean {
 
 export type ConfrontationType = 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED';
 
+/**
+ * Normalise un nom pour la comparaison sans modifier le nom affiché à l'écran.
+ * Les espaces, accents et différences de casse ne doivent pas déclencher une
+ * fausse alerte sur l'identité de l'assuré.
+ */
+export function normalizePersonName(name?: string | null): string {
+  return (name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export interface PersonNameComparison {
+  source: string;
+  candidate: string;
+  isSame: boolean;
+  isPartial: boolean;
+  isDifferent: boolean;
+}
+
+/**
+ * Une correspondance partielle est utile pour les fichiers qui ne contiennent
+ * qu'un seul élément du nom complet (ex. « HASINTSOA » contre
+ * « HASINTSOA TSARAVINTANA »), ou qui inversent l'ordre des éléments.
+ */
+export function comparePersonNames(sourceName?: string | null, candidateName?: string | null): PersonNameComparison {
+  const source = normalizePersonName(sourceName);
+  const candidate = normalizePersonName(candidateName);
+
+  if (!source || !candidate) {
+    return { source, candidate, isSame: false, isPartial: false, isDifferent: false };
+  }
+
+  if (source === candidate) {
+    return { source, candidate, isSame: true, isPartial: false, isDifferent: false };
+  }
+
+  const sourceTokens = source.split(' ').filter(token => token.length > 1);
+  const candidateTokens = candidate.split(' ').filter(token => token.length > 1);
+  const sharesToken = sourceTokens.some(token => candidateTokens.includes(token));
+  const isPartial = source.includes(candidate) || candidate.includes(source) || sharesToken;
+
+  return {
+    source,
+    candidate,
+    isSame: false,
+    isPartial,
+    isDifferent: !isPartial,
+  };
+}
+
 export interface ConfrontationDetails {
   type: ConfrontationType;
   isSameDate: boolean;
   isSameMontantBrut: boolean;
   isSameMontantNet: boolean;
   isSameMontant: boolean;
+  isSameName: boolean;
+  isPartialName: boolean;
+  isDifferentName: boolean;
   diffMontantBrut: number;
   label: string;
   badgeClass: string;
@@ -162,7 +219,8 @@ export function getConfrontationDetails(
   montantBrut: number,
   netAPayer: number,
   candidate: MatchCandidate | null,
-  participation: number = 0
+  participation: number = 0,
+  sourceName: string = ''
 ): ConfrontationDetails {
   if (!candidate) {
     return {
@@ -171,6 +229,9 @@ export function getConfrontationDetails(
       isSameMontantBrut: false,
       isSameMontantNet: false,
       isSameMontant: false,
+      isSameName: false,
+      isPartialName: false,
+      isDifferentName: false,
       diffMontantBrut: 0,
       label: 'Non rattaché (Créer)',
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
@@ -200,6 +261,32 @@ export function getConfrontationDetails(
 
   const isSameMontant = isSameMontantBrut || isSameMontantNet;
   const diffMontantBrut = brut - candBrut;
+  const comparedNames = comparePersonNames(sourceName, candidate.personneNom);
+  const isSameName = comparedNames.isSame;
+  const isPartialName = comparedNames.isPartial;
+  const isDifferentName = comparedNames.isDifferent;
+  const hasNameMismatch = isPartialName || isDifferentName;
+
+  // Même avec une date et un montant identiques, une identité partielle doit
+  // rester à vérifier avant de valider le rapprochement.
+  if (hasNameMismatch) {
+    return {
+      type: 'VERIFY',
+      isSameDate,
+      isSameMontantBrut,
+      isSameMontantNet,
+      isSameMontant,
+      isSameName,
+      isPartialName,
+      isDifferentName,
+      diffMontantBrut,
+      label: isPartialName ? 'À vérifier (Nom partiellement similaire)' : 'À vérifier (Nom différent)',
+      badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+      cardBorderClass: 'border-amber-300 bg-amber-50/60',
+      rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
+      tagColor: 'amber'
+    };
+  }
 
   if (isSameDate && isSameMontant) {
     return {
@@ -208,6 +295,9 @@ export function getConfrontationDetails(
       isSameMontantBrut,
       isSameMontantNet,
       isSameMontant,
+      isSameName,
+      isPartialName,
+      isDifferentName,
       diffMontantBrut,
       label: isSameMontantBrut ? 'Même Date & Montant Brut' : 'Même Date & Net Conforme',
       badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
@@ -224,6 +314,9 @@ export function getConfrontationDetails(
       isSameMontantBrut,
       isSameMontantNet,
       isSameMontant,
+      isSameName,
+      isPartialName,
+      isDifferentName,
       diffMontantBrut,
       label: 'Même Date (Écart Montant)',
       badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
@@ -240,6 +333,9 @@ export function getConfrontationDetails(
       isSameMontantBrut,
       isSameMontantNet,
       isSameMontant,
+      isSameName,
+      isPartialName,
+      isDifferentName,
       diffMontantBrut,
       label: 'Même Montant (Date différente)',
       badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
@@ -255,6 +351,9 @@ export function getConfrontationDetails(
     isSameMontantBrut,
     isSameMontantNet,
     isSameMontant,
+    isSameName,
+    isPartialName,
+    isDifferentName,
     diffMontantBrut,
     label: 'À vérifier (Dates & Montants diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
@@ -467,7 +566,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     if (allEligibleActs.length === 0) return null;
 
     const cleanMatricule = (matricule || '').replace(/\s+/g, '').toLowerCase();
-    const cleanNom = (nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const cleanCode = normalizeActFamilyCode(actCode);
     const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
     const isoDateSoins = normalizeDateISO(dateSoins);
@@ -480,7 +578,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     allEligibleActs.forEach(cand => {
       let score = 0;
       const candMatricule = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
-      const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       const candDate = (cand.prestationDate || '').trim().substring(0, 10);
       const isoCandDate = normalizeDateISO(cand.prestationDate);
       const monthCand = isoCandDate ? isoCandDate.substring(0, 7) : '';
@@ -498,11 +595,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       // 2. Patient matching
       const exactMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && cleanMatricule === candMatricule;
       const partialMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && (cleanMatricule.includes(candMatricule) || candMatricule.includes(cleanMatricule));
-      const nameMatch = cleanNom && candNom && (candNom.includes(cleanNom) || cleanNom.includes(candNom));
+      const nameMatch = comparePersonNames(nomPrenom, cand.personneNom);
+      const hasNameMatch = nameMatch.isSame || nameMatch.isPartial;
 
       if (exactMat) score += 100;
       else if (partialMat) score += 80;
-      else if (nameMatch) score += 75;
+      else if (hasNameMatch) score += nameMatch.isSame ? 75 : 70;
       else {
         // Skip candidate if no patient relation
         return;
@@ -1032,8 +1130,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
     // Sort so candidates with same date and same amount appear first
     return [...list].sort((a, b) => {
-      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a);
-      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b);
+      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, 0, activeSearchingRow.nomPrenom);
+      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b, 0, activeSearchingRow.nomPrenom);
 
       const scoreMap: Record<ConfrontationType, number> = {
         PERFECT: 100,
@@ -1049,10 +1147,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
   // Helper to find top candidate suggestions for a settlement row (strictly in the same month & year)
   const getRowSuggestions = (row: SettlementRowItem): MatchCandidate[] => {
-    const normNom = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const cleanMat = (row.matricule || '').replace(/\s+/g, '').toLowerCase();
 
-    if (!normNom && (!cleanMat || cleanMat === '-')) return [];
+    if (!cleanMat || cleanMat === '-') {
+      const normalizedRowName = normalizePersonName(row.nomPrenom);
+      if (!normalizedRowName) return [];
+    }
 
     const isoDateSoins = normalizeDateISO(row.dateSoins);
     const monthSoins = isoDateSoins ? isoDateSoins.substring(0, 7) : '';
@@ -1070,10 +1170,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       }
 
       const candMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
-      const candNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
       const matMatch = Boolean(cleanMat && cleanMat !== '-' && candMat && candMat !== '-' && (cleanMat === candMat || candMat.includes(cleanMat) || cleanMat.includes(candMat)));
-      const nameMatch = Boolean(normNom && candNom && (candNom.includes(normNom) || normNom.includes(candNom)));
+      const nameComparison = comparePersonNames(row.nomPrenom, cand.personneNom);
+      const nameMatch = nameComparison.isSame || nameComparison.isPartial;
 
       return matMatch || nameMatch;
     }).slice(0, 3);
@@ -1101,7 +1201,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // Select rows by specific status category
   const handleSelectByStatus = (statusType: 'PERFECT' | 'LINKED' | 'UNLINKED' | 'VERIFY' | 'ALL') => {
     setRows(prev => prev.map(r => {
-      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate, r.participation, r.nomPrenom);
       let selectIt = false;
       if (statusType === 'ALL') selectIt = true;
       else if (statusType === 'PERFECT') selectIt = details.type === 'PERFECT';
@@ -1121,7 +1221,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     let unlinked = 0;
 
     rows.forEach(r => {
-      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate, r.participation, r.nomPrenom);
       if (details.type === 'PERFECT') perfect++;
       else if (details.type === 'SAME_DATE') sameDate++;
       else if (details.type === 'SAME_AMOUNT') sameAmount++;
@@ -1168,7 +1268,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     // 1. Filter by confrontation category chip
     if (confrontFilter !== 'ALL') {
       list = list.filter(r => {
-        const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+        const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate, r.participation, r.nomPrenom);
         return details.type === confrontFilter;
       });
     }
@@ -1217,8 +1317,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             SAME_DATE: 4,
             PERFECT: 5,
           };
-          const detA = getConfrontationDetails(a.dateSoins, a.montantBrut, a.netAPayer, a.matchedCandidate);
-          const detB = getConfrontationDetails(b.dateSoins, b.montantBrut, b.netAPayer, b.matchedCandidate);
+          const detA = getConfrontationDetails(a.dateSoins, a.montantBrut, a.netAPayer, a.matchedCandidate, a.participation, a.nomPrenom);
+          const detB = getConfrontationDetails(b.dateSoins, b.montantBrut, b.netAPayer, b.matchedCandidate, b.participation, b.nomPrenom);
           valA = scoreMap[detA.type] || 0;
           valB = scoreMap[detB.type] || 0;
         }
@@ -2136,7 +2236,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {displayedRows.map((row) => {
                       const matched = row.matchedCandidate;
-                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation);
+                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation, row.nomPrenom);
+                      const nameNeedsReview = confront.isPartialName || confront.isDifferentName;
+                      const baseNameClass = confront.isSameName
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        : confront.isPartialName
+                        ? 'bg-amber-200 text-amber-950 border-amber-400 ring-2 ring-amber-100'
+                        : 'bg-rose-100 text-rose-900 border-rose-300';
 
                       return (
                         <tr
@@ -2248,8 +2354,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                   </span>
                                 </div>
 
-                                {/* 2. Acte & Patient (Alerte si patient différent) */}
-                                <div className="flex items-center justify-between gap-2">
+                                {/* 2. Acte & nom de l'assuré dans la facture en base */}
+                                <div className="space-y-1.5">
                                   <div className="flex items-center gap-1.5 min-w-0">
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
                                       {matched.codeActe}
@@ -2259,19 +2365,30 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                     </span>
                                   </div>
 
-                                  {(() => {
-                                    const rowNameNorm = (row.nomPrenom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-                                    const candNameNorm = (matched.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-                                    if (rowNameNorm && candNameNorm && !rowNameNorm.includes(candNameNorm) && !candNameNorm.includes(rowNameNorm)) {
-                                      return (
-                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0" title={`Patient en base : ${matched.personneNom}`}>
-                                          <User className="w-2.5 h-2.5" />
-                                          <span>Base: {matched.personneNom}</span>
+                                  <div className={`rounded-lg border px-2 py-1.5 ${nameNeedsReview ? 'bg-amber-50/90 border-amber-300' : 'bg-white/80 border-slate-200'}`}>
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">
+                                        Nom dans la facture en base
+                                      </span>
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-extrabold ${baseNameClass}`}
+                                        title={`Nom enregistré dans la facture : ${matched.personneNom}`}
+                                      >
+                                        <User className="w-3 h-3" />
+                                        {matched.personneNom}
+                                      </span>
+                                    </div>
+                                    {nameNeedsReview && (
+                                      <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px]">
+                                        <span className="text-slate-600 font-medium">Nom du décompte :</span>
+                                        <strong className="text-slate-900">{row.nomPrenom}</strong>
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 border border-amber-400 font-bold">
+                                          <AlertTriangle className="w-3 h-3" />
+                                          {confront.isPartialName ? 'Nom partiellement similaire' : 'Nom différent'}
                                         </span>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {/* 3. Encadré comparatif côte-à-côte (Tableau Synthétique Ultra-Clair) */}
@@ -2302,7 +2419,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                   </div>
 
                                   {/* Explication Synthétique du Rapprochement */}
-                                  <div className="text-[10px] font-medium leading-tight">
+                                  <div className="space-y-1">
+                                    {nameNeedsReview && (
+                                      <div className="rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-[10px] text-amber-950 flex items-center gap-1 font-bold">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                        <span>{confront.isPartialName ? 'À vérifier : nom partiellement similaire.' : 'À vérifier : nom différent.'}</span>
+                                      </div>
+                                    )}
+                                    <div className="text-[10px] font-medium leading-tight">
                                     {confront.isSameDate && confront.isSameMontantBrut ? (
                                       <span className="text-emerald-700 flex items-center gap-1 font-bold">
                                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -2324,6 +2448,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                         <span>Écart de Montant : Décompte ({formatMoney(row.montantBrut)}) ≠ Facture ({formatMoney(matched.montantInitial)}).</span>
                                       </span>
                                     )}
+                                    </div>
                                   </div>
                                 </div>
 
@@ -2591,7 +2716,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   </div>
                 ) : (
                   filteredSearchCandidates.map((cand) => {
-                    const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand);
+                    const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
 
                     return (
                       <div
