@@ -13,11 +13,15 @@ define('DB_PASS', '');
  * Crée une nouvelle connexion PDO avec les options optimales pour éviter l'erreur 1615
  */
 function createPdoConnection() {
+    // NOTE : ne pas utiliser PDO::MYSQL_ATTR_INIT_COMMAND pour régler des
+    // variables GLOBALES comme table_definition_cache / prepared_stmt_cache_size.
+    // Ce sont des variables de portée GLOBAL uniquement : "SET SESSION ..." renvoie
+    // l'erreur MySQL 1229 et fait échouer l'ouverture de la connexion, rendant la
+    // base inaccessible. Le charset est déjà défini via le DSN (charset=utf8mb4).
     $options = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false, // Utiliser les true prepared statements de MySQL
-        PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION table_definition_cache = 1400, prepared_stmt_cache_size = 256",
+        PDO::ATTR_EMULATE_PREPARES => false, // Utiliser les vrais prepared statements de MySQL
     ];
     
     $dsn = "mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";charset=utf8mb4";
