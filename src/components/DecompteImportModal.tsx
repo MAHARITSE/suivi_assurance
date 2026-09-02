@@ -51,7 +51,7 @@ import {
 import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import { findBestMatchingSociete } from '../utils/societyMatcher';
-import { hasSimilarPersonName, normalizePersonName } from '../utils/nameMatcher';
+import { areEquivalentPersonNames, hasSimilarPersonName, normalizePersonName } from '../utils/nameMatcher';
 import * as XLSX from 'xlsx';
 
 interface DecompteImportModalProps {
@@ -163,7 +163,8 @@ export function getConfrontationDetails(
   montantBrut: number,
   netAPayer: number,
   candidate: MatchCandidate | null,
-  participation: number = 0
+  participation: number = 0,
+  patientName: string = ''
 ): ConfrontationDetails {
   if (!candidate) {
     return {
@@ -201,8 +202,12 @@ export function getConfrontationDetails(
 
   const isSameMontant = isSameMontantBrut || isSameMontantNet;
   const diffMontantBrut = brut - candBrut;
+  const namesNeedVerification = Boolean(patientName && candidate.personneNom)
+    && !areEquivalentPersonNames(patientName, candidate.personneNom);
 
-  if (isSameDate && isSameMontant) {
+  // Une liaison par un seul prénom ou un seul nom est conservée pour permettre
+  // la vérification, mais elle ne doit pas être présentée comme parfaite.
+  if (isSameDate && isSameMontant && !namesNeedVerification) {
     return {
       type: 'PERFECT',
       isSameDate,
@@ -218,7 +223,7 @@ export function getConfrontationDetails(
     };
   }
 
-  if (isSameDate && !isSameMontant) {
+  if (isSameDate && !isSameMontant && !namesNeedVerification) {
     return {
       type: 'SAME_DATE',
       isSameDate,
@@ -234,7 +239,7 @@ export function getConfrontationDetails(
     };
   }
 
-  if (!isSameDate && isSameMontant) {
+  if (!isSameDate && isSameMontant && !namesNeedVerification) {
     return {
       type: 'SAME_AMOUNT',
       isSameDate,
@@ -257,7 +262,9 @@ export function getConfrontationDetails(
     isSameMontantNet,
     isSameMontant,
     diffMontantBrut,
-    label: 'À vérifier (Dates & Montants diffèrent)',
+    label: namesNeedVerification
+      ? 'À vérifier (Nom partiellement similaire)'
+      : 'À vérifier (Dates & Montants diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
     cardBorderClass: 'border-amber-300 bg-amber-50/60',
     rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
@@ -1041,7 +1048,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
     // Sort so candidates with same date and same amount appear first
     return [...list].sort((a, b) => {
-      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a);
+      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, 0, activeSearchingRow.nomPrenom);
       const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b);
 
       const scoreMap: Record<ConfrontationType, number> = {
@@ -1114,7 +1121,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // Select rows by specific status category
   const handleSelectByStatus = (statusType: 'PERFECT' | 'LINKED' | 'UNLINKED' | 'VERIFY' | 'ALL') => {
     setRows(prev => prev.map(r => {
-      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate, 0, r.nomPrenom);
       let selectIt = false;
       if (statusType === 'ALL') selectIt = true;
       else if (statusType === 'PERFECT') selectIt = details.type === 'PERFECT';
@@ -1134,7 +1141,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     let unlinked = 0;
 
     rows.forEach(r => {
-      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+      const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate, 0, r.nomPrenom);
       if (details.type === 'PERFECT') perfect++;
       else if (details.type === 'SAME_DATE') sameDate++;
       else if (details.type === 'SAME_AMOUNT') sameAmount++;
@@ -1181,7 +1188,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     // 1. Filter by confrontation category chip
     if (confrontFilter !== 'ALL') {
       list = list.filter(r => {
-        const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate);
+        const details = getConfrontationDetails(r.dateSoins, r.montantBrut, r.netAPayer, r.matchedCandidate, 0, r.nomPrenom);
         return details.type === confrontFilter;
       });
     }
@@ -2149,7 +2156,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {displayedRows.map((row) => {
                       const matched = row.matchedCandidate;
-                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation);
+                      const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation, row.nomPrenom);
 
                       return (
                         <tr
@@ -2604,7 +2611,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   </div>
                 ) : (
                   filteredSearchCandidates.map((cand) => {
-                    const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand);
+                    const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand, 0, activeSearchingRow.nomPrenom);
 
                     return (
                       <div

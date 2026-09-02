@@ -79,3 +79,11 @@ export function hasSimilarPersonName(left: string | null | undefined, right: str
   const b = normalizePersonName(right);
   return Boolean(a && b && personNameSimilarity(a, b) >= 0.5);
 }
+
+/** Vrai quand les mêmes mots composent le nom, quel que soit leur ordre. */
+export function areEquivalentPersonNames(left: string | null | undefined, right: string | null | undefined): boolean {
+  const a = normalizePersonName(left);
+  const b = normalizePersonName(right);
+  if (!a || !b) return false;
+  return a.split(' ').sort().join(' ') === b.split(' ').sort().join(' ');
+}
