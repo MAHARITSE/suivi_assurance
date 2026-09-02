@@ -2549,50 +2549,23 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-0.5">
                   <span className="text-slate-400 font-medium">Filtres rapides :</span>
                   {(() => {
-                    const firstWord = (activeSearchingRow.nomPrenom || '').trim().split(/\s+/)[0];
-                    const fullName = (activeSearchingRow.nomPrenom || '').trim();
-                    const mat = activeSearchingRow.matricule;
+                    const nameParts = (activeSearchingRow.nomPrenom || '').trim().split(/\s+/).filter(Boolean);
                     return (
                       <>
-                        {firstWord && (
+                        {nameParts.map((part, idx) => (
                           <button
+                            key={`${part}-${idx}`}
                             type="button"
-                            onClick={() => setActSearchQuery(firstWord)}
+                            onClick={() => setActSearchQuery(part)}
                             className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
-                              actSearchQuery.trim().toLowerCase() === firstWord.toLowerCase()
+                              actSearchQuery.trim().toLowerCase() === part.toLowerCase()
                                 ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
                                 : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
                             }`}
                           >
-                            Premier nom : {firstWord}
+                            {part}
                           </button>
-                        )}
-                        {fullName && fullName !== firstWord && (
-                          <button
-                            type="button"
-                            onClick={() => setActSearchQuery(fullName)}
-                            className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
-                              actSearchQuery.trim().toLowerCase() === fullName.toLowerCase()
-                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
-                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                            }`}
-                          >
-                            Nom complet : {fullName}
-                          </button>
-                        )}
-                        {mat && mat !== '-' && (
-                          <button
-                            type="button"
-                            onClick={() => setActSearchQuery(mat)}
-                            className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
-                              actSearchQuery.trim().toLowerCase() === mat.toLowerCase()
-                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
-                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                            }`}
-                          >
-                            Matricule : {mat}
-                          </button>
-                        )}
+                        ))}
                       </>
                     );
                   })()}
