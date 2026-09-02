@@ -43,6 +43,195 @@ function cleanAmount($val, $default = 0.0) {
 }
 
 /**
+ * Recalcule integralement les montants payes / exclus / restes et statuts
+ * des prestations et de leurs lignes a partir des lignes de paiement reellement
+ * presentes en base. Appele a CHAQUE modification des paiements (ajout,
+ * modification, suppression d'une ligne ou d'un reglement complet).
+ *
+ * @param PDO $pdo
+ * @param array $prestationIds Liste d'ids de prestations a recalculer (vide = aucune)
+ */
+function recalcPrestations($pdo, $prestationIds) {
+    $ids = array_values(array_unique(array_filter(array_map('strval', (array)$prestationIds), function ($v) {
+        return $v !== '';
+    })));
+    if (empty($ids)) {
+        return;
+    }
+
+    $place = implode(',', array_fill(0, count($ids), '?'));
+
+    // 1. Charger les prestations concernees
+    $stmtP = $pdo->prepare("SELECT * FROM `prestations` WHERE `id` IN ($place)");
+    $stmtP->execute($ids);
+    $prestations = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+    if (empty($prestations)) {
+        return;
+    }
+
+    // 2. Charger les lignes de prestation
+    $stmtL = $pdo->prepare("SELECT * FROM `lignes_prestation` WHERE `prestation_id` IN ($place) ORDER BY `created_at` ASC");
+    $stmtL->execute($ids);
+    $lignesByPrest = [];
+    foreach ($stmtL->fetchAll(PDO::FETCH_ASSOC) as $l) {
+        $lignesByPrest[$l['prestation_id']][] = $l;
+    }
+
+    // 3. Charger les lignes de reglement rattachees (par prestation_id ou via ligne_prestation_id)
+    $stmtR = $pdo->prepare(
+        "SELECT lp.*, pa.`numero_bordereau` AS bordereau, pa.`date_paiement` AS date_pai
+         FROM `lignes_paiement` lp
+         INNER JOIN `paiements` pa ON pa.`id` = lp.`paiement_id`
+         LEFT JOIN `lignes_prestation` lpr ON lpr.`id` = lp.`ligne_prestation_id`
+         WHERE lp.`prestation_id` IN ($place) OR lpr.`prestation_id` IN ($place)"
+    );
+    $stmtR->execute(array_merge($ids, $ids));
+    $reglementsByPrest = [];
+    foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $pid = $r['prestation_id'];
+        if (empty($pid) && !empty($r['ligne_prestation_id'])) {
+            foreach ($lignesByPrest as $k => $ls) {
+                foreach ($ls as $l) {
+                    if ($l['id'] === $r['ligne_prestation_id']) { $pid = $k; break 2; }
+                }
+            }
+        }
+        if (!empty($pid)) {
+            $reglementsByPrest[$pid][] = $r;
+        }
+    }
+
+    $updLigne = $pdo->prepare("UPDATE `lignes_prestation` SET `total_paye` = ?, `montant_exclu` = ?, `statut` = ?, `data` = ? WHERE `id` = ?");
+    $updPrest = $pdo->prepare("UPDATE `prestations` SET `total_paye` = ?, `montant_exclu` = ?, `reste_a_payer` = ?, `statut` = ?, `date_paiement` = ?, `numero_bordereau` = ?, `data` = ? WHERE `id` = ?");
+
+    foreach ($prestations as $p) {
+        $pid = $p['id'];
+        $lignes = $lignesByPrest[$pid] ?? [];
+        $reglements = $reglementsByPrest[$pid] ?? [];
+
+        $bordereaux = [];
+        $lastDate = null;
+        foreach ($reglements as $r) {
+            if (!empty($r['bordereau'])) { $bordereaux[$r['bordereau']] = true; }
+            if (!empty($r['date_pai']) && ($lastDate === null || $r['date_pai'] > $lastDate)) {
+                $lastDate = $r['date_pai'];
+            }
+        }
+
+        $totalPaye = 0.0;
+        $totalExclu = 0.0;
+
+        $prestData = !empty($p['data']) ? json_decode($p['data'], true) : [];
+        if (!is_array($prestData)) { $prestData = []; }
+        $newLignesJson = [];
+
+        if (!empty($lignes)) {
+            foreach ($lignes as $l) {
+                $lPaye = 0.0;
+                $lExclu = 0.0;
+                foreach ($reglements as $r) {
+                    $match = (!empty($r['ligne_prestation_id']) && $r['ligne_prestation_id'] === $l['id'])
+                        || (empty($r['ligne_prestation_id']) && count($lignes) === 1);
+                    if ($match) {
+                        $lPaye += cleanAmount($r['total_paye']);
+                        $lExclu += cleanAmount($r['montant_exclu']);
+                    }
+                }
+
+                $lBrut = cleanAmount($l['total_prestation']);
+                $lMod = cleanAmount($l['ticket_moderateur']);
+                $lRemb = cleanAmount($l['montant_a_rembourser'] ?? max(0, $lBrut - $lMod));
+                if ($lRemb <= 0) { $lRemb = max(0, $lBrut - $lMod); }
+                $lReste = max(0, $lRemb - $lPaye - $lExclu);
+
+                $isPaid = ($lPaye >= $lRemb && $lRemb > 0) || ($lReste <= 0 && $lPaye > 0);
+                $isPart = $lPaye > 0 && !$isPaid && $lReste > 0;
+                $isExcl = $lExclu >= $lRemb && $lRemb > 0 && $lPaye == 0;
+                $lStatut = $isExcl ? 'Rejeté' : ($isPaid ? 'Payé' : ($isPart ? 'Partiellement payé' : 'En attente'));
+
+                $lData = !empty($l['data']) ? json_decode($l['data'], true) : [];
+                if (!is_array($lData)) { $lData = []; }
+                $lData['id'] = (string)$l['id'];
+                $lData['prestationId'] = (string)$pid;
+                $lData['totalPaye'] = $lPaye;
+                $lData['montantExclu'] = $lExclu;
+                $lData['resteAPayer'] = $lReste;
+                $lData['statut'] = $lStatut;
+                $lJson = json_encode($lData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+                $updLigne->execute([$lPaye, $lExclu, $lStatut, $lJson, $l['id']]);
+                $newLignesJson[] = $lData;
+
+                $totalPaye += $lPaye;
+                $totalExclu += $lExclu;
+            }
+        } else {
+            foreach ($reglements as $r) {
+                $totalPaye += cleanAmount($r['total_paye']);
+                $totalExclu += cleanAmount($r['montant_exclu']);
+            }
+        }
+
+        $brut = cleanAmount($p['total_prestation']);
+        $part = cleanAmount($p['participation']);
+        $remb = cleanAmount($p['montant_a_rembourser'] ?? max(0, $brut - $part));
+        if ($remb <= 0) { $remb = max(0, $brut - $part); }
+        $reste = max(0, $remb - $totalPaye - $totalExclu);
+
+        $isFull = ($totalPaye >= $remb && $remb > 0) || ($reste <= 0 && $totalPaye > 0);
+        $isPart = $totalPaye > 0 && !$isFull && $reste > 0;
+        $isExcl = $totalExclu >= $remb && $remb > 0 && $totalPaye == 0;
+        $statut = $isExcl ? 'Rejeté' : ($isFull ? 'Payé' : ($isPart ? 'Partiellement payé' : 'En attente'));
+
+        $numBord = !empty($bordereaux) ? implode(', ', array_keys($bordereaux)) : null;
+
+        $prestData['id'] = (string)$pid;
+        $prestData['totalPaye'] = $totalPaye;
+        $prestData['montantExclu'] = $totalExclu;
+        $prestData['resteAPayer'] = $reste;
+        $prestData['statut'] = $statut;
+        $prestData['datePaiement'] = $lastDate;
+        $prestData['numeroBordereau'] = $numBord;
+        if (!empty($newLignesJson)) {
+            $prestData['lignes'] = $newLignesJson;
+        }
+        $pJson = json_encode($prestData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        $updPrest->execute([$totalPaye, $totalExclu, $reste, $statut, $lastDate, $numBord, $pJson, $pid]);
+    }
+}
+
+/**
+ * Retourne les ids de prestations impactees par une liste de paiements
+ * (en se basant sur les lignes de paiement actuellement en base).
+ */
+function prestationIdsForPaiements($pdo, $paiementIds) {
+    $ids = array_values(array_unique(array_filter(array_map('strval', (array)$paiementIds))));
+    if (empty($ids)) { return []; }
+    $place = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT COALESCE(lp.`prestation_id`, lpr.`prestation_id`) AS pid
+         FROM `lignes_paiement` lp
+         LEFT JOIN `lignes_prestation` lpr ON lpr.`id` = lp.`ligne_prestation_id`
+         WHERE lp.`paiement_id` IN ($place)"
+    );
+    $stmt->execute($ids);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $pid) {
+        if (!empty($pid)) { $out[] = (string)$pid; }
+    }
+
+    // Egalement le lien direct paiements.prestation_id
+    $stmt2 = $pdo->prepare("SELECT DISTINCT `prestation_id` FROM `paiements` WHERE `id` IN ($place) AND `prestation_id` IS NOT NULL");
+    $stmt2->execute($ids);
+    foreach ($stmt2->fetchAll(PDO::FETCH_COLUMN) as $pid) {
+        if (!empty($pid)) { $out[] = (string)$pid; }
+    }
+
+    return array_values(array_unique($out));
+}
+
+/**
  * Auto-migration douce du schéma MySQL (Élargit les colonnes sans perte de données et installe les clés étrangères en cascade)
  */
 function ensureSchemaIntegrity($pdo) {
@@ -420,6 +609,9 @@ try {
         for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
             try {
                 $pdo->beginTransaction();
+                // Prestations impactées par une modification des règlements -> recalcul obligatoire
+                $paiementIdsTouches = [];
+                $prestationsARecalculer = [];
 
                 if ($action === 'societes') {
                     $stmt = $pdo->prepare("INSERT INTO `societes` (`id`, `nom`, `code`, `contact`, `telephone`, `email`, `adresse`, `taux_couverture_defaut`, `data`) 
@@ -654,8 +846,24 @@ try {
                             ':data' => $jsonString
                         ]);
 
+                        // Toujours purger les anciennes lignes, même si la liste est vide
+                        // (sinon les lignes supprimées restent en base et faussent les totaux)
+                        $delLignes->execute([$id]);
+                        $paiementIdsTouches[$id] = true;
+                        // Prestations liées AVANT modification (pour recalculer aussi
+                        // celles dont une ligne vient d'être retirée du règlement)
+                        foreach (prestationIdsForPaiements($pdo, [$id]) as $oldPid) {
+                            $prestationsARecalculer[$oldPid] = true;
+                        }
+                        if (!empty($item['prestationId'])) {
+                            $prestationsARecalculer[(string)$item['prestationId']] = true;
+                        }
+                        foreach (($item['lignes'] ?? []) as $lg) {
+                            if (!empty($lg['prestationId'])) {
+                                $prestationsARecalculer[(string)$lg['prestationId']] = true;
+                            }
+                        }
                         if (!empty($item['lignes']) && is_array($item['lignes'])) {
-                            $delLignes->execute([$id]);
                             foreach ($item['lignes'] as $ligne) {
                                 $lpId = (string)($ligne['id'] ?? ($id . '-' . uniqid()));
                                 $lPaye = cleanAmount($ligne['totalPaye'] ?? $ligne['montantPaye'] ?? 0);
@@ -686,6 +894,14 @@ try {
                             }
                         }
                     }
+                }
+
+                // Recalcul systématique des prestations & lignes_prestation
+                if ($action === 'paiements') {
+                    foreach (prestationIdsForPaiements($pdo, array_keys($paiementIdsTouches)) as $pid) {
+                        $prestationsARecalculer[$pid] = true;
+                    }
+                    recalcPrestations($pdo, array_keys($prestationsARecalculer));
                 }
 
                 $pdo->commit();
@@ -728,14 +944,23 @@ try {
 
         $pdo->beginTransaction();
 
+        $prestationsARecalculer = [];
+
         if ($action === 'prestations') {
             $pdo->prepare("DELETE FROM `lignes_prestation` WHERE `prestation_id` = ?")->execute([$id]);
         } elseif ($action === 'paiements') {
+            // Mémoriser les prestations liées avant suppression pour les recalculer ensuite
+            $prestationsARecalculer = prestationIdsForPaiements($pdo, [$id]);
             $pdo->prepare("DELETE FROM `lignes_paiement` WHERE `paiement_id` = ?")->execute([$id]);
         }
 
         $stmt = $pdo->prepare("DELETE FROM `$action` WHERE `id` = :id");
         $stmt->execute([':id' => $id]);
+
+        // Après suppression d'un règlement, les prestations doivent être recalculées
+        if ($action === 'paiements' && !empty($prestationsARecalculer)) {
+            recalcPrestations($pdo, $prestationsARecalculer);
+        }
 
         $pdo->commit();
         sendJson(true, ['id' => $id, 'deleted' => true]);

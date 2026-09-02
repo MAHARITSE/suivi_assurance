@@ -382,37 +382,67 @@ export function App() {
     }
   };
 
+  // Fusionne d'éventuelles nouvelles prestations puis recalcule TOUT à partir des paiements
+  const mergeAndReconcile = useCallback((
+    basePrestations: Prestation[],
+    incoming: Prestation[] | undefined,
+    nextPaiements: Paiement[]
+  ): Prestation[] => {
+    const merged = [...basePrestations];
+    (incoming || []).forEach(up => {
+      const idx = merged.findIndex(p => p.id === up.id);
+      if (idx >= 0) {
+        // On garde les données de base (montants facturés, lignes) et on laisse
+        // la réconciliation recalculer les montants payés / exclus / statuts.
+        merged[idx] = { ...merged[idx], ...up };
+      } else {
+        merged.unshift(up);
+      }
+    });
+    return reconcilePrestationsWithPaiements(merged, nextPaiements);
+  }, [reconcilePrestationsWithPaiements]);
+
   // Handlers for Paiements
   const handleSavePaiement = async (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
     try {
+      const nextPaiements = (() => {
+        const idx = paiements.findIndex(p => p.id === newPaiement.id);
+        if (idx >= 0) {
+          const copy = [...paiements];
+          copy[idx] = newPaiement;
+          return copy;
+        }
+        return [newPaiement, ...paiements];
+      })();
+
+      // Recalcul systématique des prestations & lignes_prestation à partir
+      // de l'intégralité des règlements (ajout, modification ET suppression de lignes).
+      const reconciled = mergeAndReconcile(prestations, updatedPrestations, nextPaiements);
+
+      const beforeMap = new Map(prestations.map(p => [p.id, JSON.stringify({
+        t: p.totalPaye, e: p.montantExclu, r: p.resteAPayer, s: p.statut,
+        b: p.numeroBordereau, d: p.datePaiement,
+        l: (p.lignes || []).map(l => [l.id, l.totalPaye, l.montantExclu, l.statut]),
+      })]));
+      const changed = reconciled.filter(p => beforeMap.get(p.id) !== JSON.stringify({
+        t: p.totalPaye, e: p.montantExclu, r: p.resteAPayer, s: p.statut,
+        b: p.numeroBordereau, d: p.datePaiement,
+        l: (p.lignes || []).map(l => [l.id, l.totalPaye, l.montantExclu, l.statut]),
+      }));
+
       if (storageMode === 'server') {
         await saveWampData('paiements', newPaiement);
-        if (updatedPrestations && updatedPrestations.length > 0) {
-          await Promise.all(updatedPrestations.map(up => saveWampData('prestations', up)));
+        if (changed.length > 0) {
+          await saveWampDataBulk('prestations', changed);
         }
       }
 
-      setPaiements(prev => {
-        const idx = prev.findIndex(p => p.id === newPaiement.id);
-        const updated = idx >= 0 ? [...prev] : [newPaiement, ...prev];
-        if (idx >= 0) updated[idx] = newPaiement;
-        saveLocalTable('paiements', updated);
-        return updated;
-      });
+      setPaiements(nextPaiements);
+      saveLocalTable('paiements', nextPaiements);
 
-      if (updatedPrestations && updatedPrestations.length > 0) {
-        setPrestations(prev => {
-          const updatedMap = new Map(updatedPrestations.map(p => [p.id, p]));
-          const result = prev.map(p => updatedMap.has(p.id) ? updatedMap.get(p.id)! : p);
-          updatedPrestations.forEach(up => {
-            if (!prev.some(p => p.id === up.id)) {
-              result.unshift(up);
-            }
-          });
-          saveLocalTable('prestations', result);
-          return result;
-        });
-      }
+      setPrestations(reconciled);
+      saveLocalTable('prestations', reconciled);
+
       setLastSyncTime(new Date());
     } catch (err: any) {
       alert(`Erreur d'enregistrement du paiement : ${err.message || err}`);
@@ -433,7 +463,7 @@ export function App() {
       saveLocalTable('prestations', reconciled);
 
       if (storageMode === 'server' && reconciled.length > 0) {
-        await Promise.all(reconciled.map(up => saveWampData('prestations', up)));
+        await saveWampDataBulk('prestations', reconciled);
       }
       setLastSyncTime(new Date());
     } catch (err: any) {
@@ -701,10 +731,13 @@ export function App() {
     newPersonnes?: Personne[]
   ) => {
     try {
+      const nextPaiements = [newPaiement, ...paiements.filter(p => p.id !== newPaiement.id)];
+      const reconciled = mergeAndReconcile(prestations, updatedPrestations, nextPaiements);
+
       if (storageMode === 'server') {
         await saveWampData('paiements', newPaiement);
-        if (updatedPrestations && updatedPrestations.length > 0) {
-          await saveWampDataBulk('prestations', updatedPrestations);
+        if (reconciled.length > 0) {
+          await saveWampDataBulk('prestations', reconciled);
         }
         if (newSocietes && newSocietes.length > 0) {
           await saveWampDataBulk('societes', newSocietes);
@@ -740,23 +773,11 @@ export function App() {
         });
       }
 
-      setPaiements(prev => {
-        const copy = [newPaiement, ...prev.filter(p => p.id !== newPaiement.id)];
-        saveLocalTable('paiements', copy);
-        return copy;
-      });
+      setPaiements(nextPaiements);
+      saveLocalTable('paiements', nextPaiements);
 
-      setPrestations(prev => {
-        const updatedMap = new Map(updatedPrestations.map(p => [p.id, p]));
-        const result = prev.map(p => updatedMap.has(p.id) ? updatedMap.get(p.id)! : p);
-        updatedPrestations.forEach(up => {
-          if (!prev.some(p => p.id === up.id)) {
-            result.unshift(up);
-          }
-        });
-        saveLocalTable('prestations', result);
-        return result;
-      });
+      setPrestations(reconciled);
+      saveLocalTable('prestations', reconciled);
 
       setActiveTab('paiements');
       setLastSyncTime(new Date());
