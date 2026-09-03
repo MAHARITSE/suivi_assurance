@@ -49,6 +49,7 @@ import {
   FactureLigneParsed 
 } from '../types';
 import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
+import { normalizePersonName, comparePersonNames, isNameMismatchBlocking } from '../utils/nameMatching';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import { findBestMatchingSociete } from '../utils/societyMatcher';
 import * as XLSX from 'xlsx';
@@ -144,21 +145,6 @@ export function isRealMatricule(mat?: string | null): boolean {
 export type ConfrontationType = 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED';
 
 /**
- * Normalise un nom pour la comparaison sans modifier le nom affiché à l'écran.
- * Les espaces, accents et différences de casse ne doivent pas déclencher une
- * fausse alerte sur l'identité de l'assuré.
- */
-export function normalizePersonName(name?: string | null): string {
-  return (name || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-/**
  * Extrait le nom du titulaire de l'adhésion depuis une cellule de relevé groupé
  * (format « ... N°Règlement ADHESION: TITULAIRE CODE_ACTE Client: ... »).
  */
@@ -217,45 +203,6 @@ export function sanitizeImportedPersonName(raw?: string | null, fallback?: strin
   return v || (fallback || '').trim();
 }
 
-export interface PersonNameComparison {
-  source: string;
-  candidate: string;
-  isSame: boolean;
-  isPartial: boolean;
-  isDifferent: boolean;
-}
-
-/**
- * Une correspondance partielle est utile pour les fichiers qui ne contiennent
- * qu'un seul élément du nom complet (ex. « HASINTSOA » contre
- * « HASINTSOA TSARAVINTANA »), ou qui inversent l'ordre des éléments.
- */
-export function comparePersonNames(sourceName?: string | null, candidateName?: string | null): PersonNameComparison {
-  const source = normalizePersonName(sourceName);
-  const candidate = normalizePersonName(candidateName);
-
-  if (!source || !candidate) {
-    return { source, candidate, isSame: false, isPartial: false, isDifferent: false };
-  }
-
-  if (source === candidate) {
-    return { source, candidate, isSame: true, isPartial: false, isDifferent: false };
-  }
-
-  const sourceTokens = source.split(' ').filter(token => token.length > 1);
-  const candidateTokens = candidate.split(' ').filter(token => token.length > 1);
-  const sharesToken = sourceTokens.some(token => candidateTokens.includes(token));
-  const isPartial = source.includes(candidate) || candidate.includes(source) || sharesToken;
-
-  return {
-    source,
-    candidate,
-    isSame: false,
-    isPartial,
-    isDifferent: !isPartial,
-  };
-}
-
 export interface ConfrontationDetails {
   type: ConfrontationType;
   isSameDate: boolean;
@@ -265,6 +212,8 @@ export interface ConfrontationDetails {
   isSameName: boolean;
   isPartialName: boolean;
   isDifferentName: boolean;
+  /** Vrai si le nom est considéré comme totalement différent (à ne pas lier). */
+  isNameMismatchBlocked?: boolean;
   diffMontantBrut: number;
   label: string;
   badgeClass: string;
@@ -291,6 +240,7 @@ export function getConfrontationDetails(
       isSameName: false,
       isPartialName: false,
       isDifferentName: false,
+      isNameMismatchBlocked: false,
       diffMontantBrut: 0,
       label: 'Non rattaché (Créer)',
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
@@ -325,6 +275,9 @@ export function getConfrontationDetails(
   const isPartialName = comparedNames.isPartial;
   const isDifferentName = comparedNames.isDifferent;
   const hasNameMismatch = isPartialName || isDifferentName;
+  // Nom totalement différent → liaison interdite (sauf si le matricule seul
+  // a permis le rattachement ; dans ce cas on signale mais on ne bloque pas).
+  const isNameMismatchBlocked = isNameMismatchBlocking(sourceName, candidate.personneNom, { allowNameOnly: true });
 
   // Montants et dates parfaitement identiques : le rapprochement est validé,
   // il ne doit PAS être placé dans la liste « À Vérifier (Écarts) », même
@@ -346,6 +299,7 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
+      isNameMismatchBlocked,
       diffMontantBrut,
       label: isPartialName ? 'À vérifier (Nom partiellement similaire)' : 'À vérifier (Nom différent)',
       badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
@@ -365,6 +319,7 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
+      isNameMismatchBlocked,
       diffMontantBrut,
       label: isSameMontantBrut ? 'Même Date & Montant Brut' : 'Même Date & Net Conforme',
       badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
@@ -384,6 +339,7 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
+      isNameMismatchBlocked,
       diffMontantBrut,
       label: 'Même Date (Écart Montant)',
       badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
@@ -403,6 +359,7 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
+      isNameMismatchBlocked,
       diffMontantBrut,
       label: 'Même Montant (Date différente)',
       badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
@@ -421,6 +378,7 @@ export function getConfrontationDetails(
     isSameName,
     isPartialName,
     isDifferentName,
+    isNameMismatchBlocked,
     diffMontantBrut,
     label: 'À vérifier (Dates & Montants diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
@@ -461,6 +419,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // Search / Change Link modal state
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
   const [actSearchQuery, setActSearchQuery] = useState<string>('');
+  const [actSamePersonOnly, setActSamePersonOnly] = useState<boolean>(false);
+  const [actModeDateAmount, setActModeDateAmount] = useState<boolean>(false);
+  const [actModeSameDate, setActModeSameDate] = useState<boolean>(false);
+  const [actModeSameAmount, setActModeSameAmount] = useState<boolean>(false);
 
   // Main Table search & sorting state
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
@@ -485,6 +447,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setErrorMessage(null);
     setLastUploadedFile(null);
     setSearchingRowId(null);
+    setActSearchQuery('');
+    setActSamePersonOnly(false);
+    setActModeDateAmount(false);
+    setActModeSameDate(false);
+    setActModeSameAmount(false);
     setIsProcessing(false);
     setConfrontFilter('ALL');
     setTableSearchQuery('');
@@ -664,11 +631,21 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       const partialMat = cleanMatricule && candMatricule && cleanMatricule !== '-' && (cleanMatricule.includes(candMatricule) || candMatricule.includes(cleanMatricule));
       const nameMatch = comparePersonNames(nomPrenom, cand.personneNom);
       const hasNameMatch = nameMatch.isSame || nameMatch.isPartial;
+      const nameBlocked = isNameMismatchBlocking(nomPrenom, cand.personneNom, { allowNameOnly: true });
 
-      if (exactMat) score += 100;
-      else if (partialMat) score += 80;
-      else if (hasNameMatch) score += nameMatch.isSame ? 75 : 70;
-      else {
+      if (exactMat) {
+        // Matricule strictement identique : le patient est certain, le nom
+        // (même différent) ne doit pas empêcher la liaison automatique.
+        score += 100;
+      } else if (partialMat) {
+        // Matricule partiel (contenu dans l'autre) : si le nom est totalement
+        // différent, on refuse pour éviter les fausses liaisons.
+        if (nameBlocked) return;
+        score += 80;
+      } else if (hasNameMatch) {
+        if (nameBlocked) return; // nom totalement différent → jamais de liaison auto
+        score += nameMatch.isSame ? 75 : 70;
+      } else {
         // Skip candidate if no patient relation
         return;
       }
@@ -1182,32 +1159,61 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     }));
     setSearchingRowId(null);
     setActSearchQuery('');
+    setActSamePersonOnly(false);
+    setActModeDateAmount(false);
+    setActModeSameDate(false);
+    setActModeSameAmount(false);
   };
 
   const activeSearchingRow = rows.find(r => r.rowId === searchingRowId);
 
   // Filtered search list inside manual match modal, scored by match quality
   const filteredSearchCandidates = useMemo(() => {
-    let list = allEligibleActs;
-    if (actSearchQuery.trim()) {
-      const q = actSearchQuery.toLowerCase().trim();
-      list = allEligibleActs.filter(cand => 
-        cand.personneNom.toLowerCase().includes(q) ||
-        cand.matricule.toLowerCase().includes(q) ||
-        cand.prestationNum.toLowerCase().includes(q) ||
-        cand.codeActe.toLowerCase().includes(q) ||
-        cand.libelleActe.toLowerCase().includes(q) ||
-        (cand.sousSociete && cand.sousSociete.toLowerCase().includes(q)) ||
-        (cand.societeNom && cand.societeNom.toLowerCase().includes(q))
-      );
-    }
+    if (!activeSearchingRow) return allEligibleActs;
 
-    if (!activeSearchingRow) return list;
+    // Détermine si un candidat est manifestement le même patient que la ligne :
+    // matricule identique, ou variantes de nom du même assuré (cf. nameMatching).
+    const rowMat = (activeSearchingRow.matricule || '').replace(/\s+/g, '').toLowerCase();
+    const rowNom = activeSearchingRow.nomPrenom || '';
+    const isSamePerson = (cand: MatchCandidate): boolean => {
+      const candMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+      if (rowMat && rowMat !== '-' && candMat && candMat !== '-' && rowMat === candMat) return true;
+      if (!rowNom || !cand.personneNom) return false;
+      const comp = comparePersonNames(rowNom, cand.personneNom);
+      if (comp.isSame) return true;
+      // « EMYMORANE » vs « EMY MORANE », prénom coupé… sont le même patient.
+      return !isNameMismatchBlocking(rowNom, cand.personneNom, { allowNameOnly: true });
+    };
+
+    let list = allEligibleActs.filter(cand => {
+      if (actSamePersonOnly && !isSamePerson(cand)) return false;
+
+      if (actSearchQuery.trim()) {
+        const q = actSearchQuery.toLowerCase().trim();
+        const ok =
+          cand.personneNom.toLowerCase().includes(q) ||
+          cand.matricule.toLowerCase().includes(q) ||
+          cand.prestationNum.toLowerCase().includes(q) ||
+          cand.codeActe.toLowerCase().includes(q) ||
+          cand.libelleActe.toLowerCase().includes(q) ||
+          (cand.sousSociete && cand.sousSociete.toLowerCase().includes(q)) ||
+          (cand.societeNom && cand.societeNom.toLowerCase().includes(q));
+        if (!ok) return false;
+      }
+
+      if (actModeDateAmount || actModeSameDate || actModeSameAmount) {
+        const d = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
+        if (actModeDateAmount && !(d.isSameDate && d.isSameMontantBrut)) return false;
+        if (actModeSameDate && !d.isSameDate) return false;
+        if (actModeSameAmount && !d.isSameMontantBrut) return false;
+      }
+      return true;
+    });
 
     // Sort so candidates with same date and same amount appear first
-    return [...list].sort((a, b) => {
-      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, 0, activeSearchingRow.nomPrenom);
-      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b, 0, activeSearchingRow.nomPrenom);
+    return list.sort((a, b) => {
+      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
+      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
 
       const scoreMap: Record<ConfrontationType, number> = {
         PERFECT: 100,
@@ -1219,7 +1225,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
       return (scoreMap[detailsB.type] || 0) - (scoreMap[detailsA.type] || 0);
     });
-  }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
+  }, [allEligibleActs, actSearchQuery, activeSearchingRow, actSamePersonOnly, actModeDateAmount, actModeSameDate, actModeSameAmount]);
 
   // Helper to find top candidate suggestions for a settlement row (strictly in the same month & year)
   const getRowSuggestions = (row: SettlementRowItem): MatchCandidate[] => {
@@ -2602,6 +2608,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                 setSearchingRowId(row.rowId);
                                 const firstWord = (row.nomPrenom || '').trim().split(/\s+/)[0] || '';
                                 setActSearchQuery(firstWord || row.matricule || '');
+                                setActSamePersonOnly(false);
+                                setActModeDateAmount(false);
+                                setActModeSameDate(false);
+                                setActModeSameAmount(false);
                               }}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
                               title="Modifier ou rechercher un acte à rattacher"
@@ -2736,9 +2746,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <span>
                     {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
                   </span>
-                  {actSearchQuery && (
+                  {(actSearchQuery || actSamePersonOnly || actModeDateAmount || actModeSameDate || actModeSameAmount) && (
                     <button
-                      onClick={() => setActSearchQuery('')}
+                      onClick={() => {
+                        setActSearchQuery('');
+                        setActSamePersonOnly(false);
+                        setActModeDateAmount(false);
+                        setActModeSameDate(false);
+                        setActModeSameAmount(false);
+                      }}
                       className="text-indigo-600 hover:underline font-semibold cursor-pointer"
                     >
                       Afficher tous les actes ouverts ({allEligibleActs.length})
@@ -2748,28 +2764,89 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
                 {/* Quick filter chips */}
                 <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-0.5">
-                  <span className="text-slate-400 font-medium">Filtres rapides :</span>
+                  <span className="text-slate-400 font-medium flex items-center gap-1">
+                    <Filter className="w-3 h-3" />
+                    Filtres rapides :
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setActSamePersonOnly(v => !v)}
+                    className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer inline-flex items-center gap-1 ${
+                      actSamePersonOnly
+                        ? 'bg-slate-800 text-white border-slate-800 font-bold shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <User className="w-3 h-3" />
+                    Même patient
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActModeDateAmount(v => !v)}
+                    className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                      actModeDateAmount
+                        ? 'bg-emerald-600 text-white border-emerald-600 font-bold shadow-2xs'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                    }`}
+                  >
+                    Date + Montant identiques
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActModeSameDate(v => !v)}
+                    className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                      actModeSameDate
+                        ? 'bg-sky-600 text-white border-sky-600 font-bold shadow-2xs'
+                        : 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                    }`}
+                  >
+                    Même date
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActModeSameAmount(v => !v)}
+                    className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                      actModeSameAmount
+                        ? 'bg-purple-600 text-white border-purple-600 font-bold shadow-2xs'
+                        : 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100'
+                    }`}
+                  >
+                    Même montant
+                  </button>
+
                   {(() => {
                     const nameParts = (activeSearchingRow.nomPrenom || '').trim().split(/\s+/).filter(Boolean);
-                    return (
-                      <>
-                        {nameParts.map((part, idx) => (
-                          <button
-                            key={`${part}-${idx}`}
-                            type="button"
-                            onClick={() => setActSearchQuery(part)}
-                            className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
-                              actSearchQuery.trim().toLowerCase() === part.toLowerCase()
-                                ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
-                                : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                            }`}
-                          >
-                            {part}
-                          </button>
-                        ))}
-                      </>
-                    );
+                    return nameParts.map((part, idx) => (
+                      <button
+                        key={`${part}-${idx}`}
+                        type="button"
+                        onClick={() => setActSearchQuery(part)}
+                        className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                          actSearchQuery.trim().toLowerCase() === part.toLowerCase()
+                            ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                            : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                        }`}
+                      >
+                        {part}
+                      </button>
+                    ));
                   })()}
+
+                  {(actSamePersonOnly || actModeDateAmount || actModeSameDate || actModeSameAmount) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActSamePersonOnly(false);
+                        setActModeDateAmount(false);
+                        setActModeSameDate(false);
+                        setActModeSameAmount(false);
+                      }}
+                      className="text-slate-500 underline hover:text-slate-700 cursor-pointer"
+                    >
+                      Réinitialiser
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2783,7 +2860,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     </div>
                     {allEligibleActs.length > 0 && (
                       <button
-                        onClick={() => setActSearchQuery('')}
+                        onClick={() => {
+                          setActSearchQuery('');
+                          setActSamePersonOnly(false);
+                          setActModeDateAmount(false);
+                          setActModeSameDate(false);
+                          setActModeSameAmount(false);
+                        }}
                         className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
                       >
                         Voir tous les {allEligibleActs.length} actes disponibles
@@ -2793,12 +2876,23 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 ) : (
                   filteredSearchCandidates.map((cand) => {
                     const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
+                    const isCurrentlyAttached = activeSearchingRow.matchedCandidate?.lignePrestationId === cand.lignePrestationId;
+                    const rowMatExact = (activeSearchingRow.matricule || '').replace(/\s+/g, '').toLowerCase();
+                    const candMatExact = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+                    const sameMatricule = Boolean(rowMatExact && rowMatExact !== '-' && candMatExact && candMatExact !== '-' && rowMatExact === candMatExact);
+                    // Garde-fou : un nom totalement différent ne doit pas être lié,
+                    // même si la date et le montant sont identiques. Seul un
+                    // matricule strictement identique (même patient certain) ou
+                    // l'acte déjà rattaché reste accessible.
+                    const isNameLocked = Boolean(compDetails.isNameMismatchBlocked) && !isCurrentlyAttached && !sameMatricule;
 
                     return (
                       <div
                         key={cand.lignePrestationId}
                         className={`p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
-                          compDetails.type === 'PERFECT'
+                          isNameLocked
+                            ? 'bg-rose-50/50 hover:bg-rose-50/80 border-l-4 border-l-rose-400'
+                            : compDetails.type === 'PERFECT'
                             ? 'bg-emerald-50/40 hover:bg-emerald-50/70 border-l-4 border-l-emerald-500'
                             : compDetails.type === 'SAME_DATE'
                             ? 'bg-sky-50/30 hover:bg-sky-50/60 border-l-4 border-l-sky-500'
@@ -2844,6 +2938,13 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             </span>
                           </div>
 
+                          {isNameLocked && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-1.5 py-1 font-bold">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                              <span>Ne pas lier : le nom du décompte ({activeSearchingRow.nomPrenom}) est totalement différent de celui de cet acte ({cand.personneNom}).</span>
+                            </div>
+                          )}
+
                           {/* Detailed price breakdown & live comparison */}
                           <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-200/80">
                             <span>
@@ -2866,13 +2967,24 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                               {formatMoney(cand.resteAPayer)}
                             </strong>
                           </div>
-                          <button
-                            onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
-                            className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Link2 className="w-3.5 h-3.5" />
-                            <span>Rattacher cet Acte</span>
-                          </button>
+                          {isNameLocked ? (
+                            <button
+                              disabled
+                              title="Nom totalement différent du décompte : rattachement interdit pour éviter une fausse liaison"
+                              className="rounded-xl bg-slate-200 px-4 py-2 text-xs font-bold text-slate-500 shadow-xs flex items-center gap-1.5 cursor-not-allowed"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span>Ne pas lier (Nom différent)</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
+                              className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Link2 className="w-3.5 h-3.5" />
+                              <span>Rattacher cet Acte</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );

@@ -7,10 +7,13 @@ import {
   AlertTriangle, 
   AlertCircle,
   User, 
-  Unlink
+  Unlink,
+  Ban,
+  Filter
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation } from '../../types';
 import { formatMoney, formatDate } from '../../utils/formatters';
+import { comparePersonNames, isNameMismatchBlocking, compareNameTokens } from '../../utils/nameMatching';
 
 interface RelierPaiementModalProps {
   isOpen: boolean;
@@ -45,7 +48,8 @@ function getConfrontationDetails(
   dateSoins?: string,
   montantBrutSettlement?: number,
   netAPayerSettlement?: number,
-  candidate?: MatchCandidate
+  candidate?: MatchCandidate,
+  sourceName?: string
 ) {
   if (!candidate) {
     return {
@@ -54,6 +58,7 @@ function getConfrontationDetails(
       isSameMontantBrut: false,
       isSameMontantNet: false,
       isSameMontant: false,
+      isNameMismatchBlocked: false,
       diffMontantBrut: 0,
       label: 'Non relié',
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
@@ -79,6 +84,29 @@ function getConfrontationDetails(
   const isSameMontant = isSameMontantBrut || isSameMontantNet;
   const diffMontantBrut = brut - candBrut;
 
+  // Garde-fou : un nom TOTALEMENT différent doit rester « À vérifier (Nom
+  // différent) » — même avec une date et un montant identiques — et ne jamais
+  // être rattaché (ni auto, ni manuel). Un nom partiellement similaire reste
+  // rattachable (prénom coupé, ordre inversé, « EMYMORANE » vs « EMY MORANE »).
+  const nameBlocked = Boolean(sourceName && isNameMismatchBlocking(sourceName, candidate.personneNom, { allowNameOnly: true }));
+
+  if (nameBlocked) {
+    return {
+      type: 'VERIFY',
+      isSameDate,
+      isSameMontantBrut,
+      isSameMontantNet,
+      isSameMontant,
+      isNameMismatchBlocked: true,
+      diffMontantBrut,
+      label: 'À vérifier (Nom différent)',
+      badgeClass: 'bg-rose-100 text-rose-900 border-rose-300 font-bold',
+      cardBorderClass: 'border-rose-300 bg-rose-50/60',
+      rowBorderClass: 'border-l-4 border-l-rose-500 bg-rose-50/20',
+      tagColor: 'rose'
+    };
+  }
+
   if (isSameDate && isSameMontant) {
     return {
       type: 'PERFECT',
@@ -86,6 +114,7 @@ function getConfrontationDetails(
       isSameMontantBrut,
       isSameMontantNet,
       isSameMontant,
+      isNameMismatchBlocked: false,
       diffMontantBrut,
       label: 'Même Date & Même Montant',
       badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
@@ -102,6 +131,7 @@ function getConfrontationDetails(
       isSameMontantBrut,
       isSameMontantNet,
       isSameMontant,
+      isNameMismatchBlocked: false,
       diffMontantBrut,
       label: 'Même Date (Montant différent)',
       badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
@@ -118,6 +148,7 @@ function getConfrontationDetails(
       isSameMontantBrut,
       isSameMontantNet,
       isSameMontant,
+      isNameMismatchBlocked: false,
       diffMontantBrut,
       label: 'Même Montant (Date différente)',
       badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
@@ -133,6 +164,7 @@ function getConfrontationDetails(
     isSameMontantBrut,
     isSameMontantNet,
     isSameMontant,
+    isNameMismatchBlocked: false,
     diffMontantBrut,
     label: 'À vérifier (Date & Montant diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
@@ -151,6 +183,10 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
   onSavePaiement,
 }) => {
   const [actSearchQuery, setActSearchQuery] = useState('');
+  const [actSamePersonOnly, setActSamePersonOnly] = useState<boolean>(false);
+  const [actModeDateAmount, setActModeDateAmount] = useState<boolean>(false);
+  const [actModeSameDate, setActModeSameDate] = useState<boolean>(false);
+  const [actModeSameAmount, setActModeSameAmount] = useState<boolean>(false);
 
   // Extract patient info & settlement line values
   const activeNom = lignePaiement?.nomAgent || lignePaiement?.nomBaseAssurance || '';
@@ -162,10 +198,14 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
 
   // Initialize search query with patient name or matricule on open
   useEffect(() => {
-    if (lignePaiement) {
+    if (isOpen && lignePaiement) {
       setActSearchQuery(activeNom || activeMat || '');
+      setActSamePersonOnly(false);
+      setActModeDateAmount(false);
+      setActModeSameDate(false);
+      setActModeSameAmount(false);
     }
-  }, [lignePaiement, activeNom, activeMat]);
+  }, [isOpen, lignePaiement, activeNom, activeMat]);
 
   // Compute ALL eligible unpaid / partially paid acts across database
   const allEligibleActs: MatchCandidate[] = useMemo(() => {
@@ -253,7 +293,28 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     const targetSocId = paiement?.societeId;
     const targetSocNom = (paiement?.societeNom || '').toLowerCase().trim();
 
+    // Même patient (matricule identique ou variantes du même nom)
+    const rowMat = activeMat.replace(/\s+/g, '').toLowerCase();
+    const rowNom = (activeNom || '').trim();
+    const samePatient = (cand: MatchCandidate): boolean => {
+      const candMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+      if (rowMat && rowMat !== '-' && candMat && candMat !== '-' && rowMat === candMat) return true;
+      if (!rowNom || !cand.personneNom) return false;
+      const comp = comparePersonNames(rowNom, cand.personneNom);
+      if (comp.isSame) return true;
+      return compareNameTokens(rowNom, cand.personneNom) || !isNameMismatchBlocking(rowNom, cand.personneNom, { allowNameOnly: true });
+    };
+
     const candidates = allEligibleActs.filter(cand => {
+      // Filtres rapides
+      if (actSamePersonOnly && !samePatient(cand)) return false;
+      if (actModeDateAmount || actModeSameDate || actModeSameAmount) {
+        const d = getConfrontationDetails(activeDate, activeBrut, activeNet, cand, activeNom);
+        if (actModeDateAmount && !(d.isSameDate && d.isSameMontantBrut)) return false;
+        if (actModeSameDate && !d.isSameDate) return false;
+        if (actModeSameAmount && !d.isSameMontantBrut) return false;
+      }
+
       // STRICT INTER-SOCIETY RULE: Disallow linking payment to prestations of a different society/garant
       if (targetSocId && cand.societeId && cand.societeId !== targetSocId) {
         return false;
@@ -286,6 +347,9 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
         if (cleanMat && cMat && cMat !== '-' && cleanMat === cMat) score += 100;
         else if (cleanNom && cNom && (cNom.includes(cleanNom) || cleanNom.includes(cNom))) score += 80;
 
+        // Nom totalement différent : relégué tout en bas (jamais proposé en tête)
+        if (isNameMismatchBlocking(activeNom, cand.personneNom, { allowNameOnly: true })) score -= 300;
+
         if (activeDate && cand.prestationDate && activeDate.substring(0, 10) === cand.prestationDate.substring(0, 10)) score += 50;
         if (activeBrut && cand.montantInitial && Math.abs(activeBrut - cand.montantInitial) < 2) score += 50;
 
@@ -294,7 +358,7 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
 
       return scoreCand(b) - scoreCand(a);
     });
-  }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut]);
+  }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut, actSamePersonOnly, actModeDateAmount, actModeSameDate, actModeSameAmount]);
 
   if (!isOpen || !paiement || !lignePaiement) return null;
 
@@ -407,12 +471,105 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
               <span>
                 {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
               </span>
-              {actSearchQuery && (
+              {(actSearchQuery || actSamePersonOnly || actModeDateAmount || actModeSameDate || actModeSameAmount) && (
                 <button
-                  onClick={() => setActSearchQuery('')}
+                  onClick={() => {
+                    setActSearchQuery('');
+                    setActSamePersonOnly(false);
+                    setActModeDateAmount(false);
+                    setActModeSameDate(false);
+                    setActModeSameAmount(false);
+                  }}
                   className="text-indigo-600 hover:underline font-semibold cursor-pointer"
                 >
                   Afficher tous les actes ouverts ({allEligibleActs.length})
+                </button>
+              )}
+            </div>
+
+            {/* Quick filter chips */}
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-0.5">
+              <span className="text-slate-400 font-medium flex items-center gap-1">
+                <Filter className="w-3 h-3" />
+                Filtres rapides :
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setActSamePersonOnly(v => !v)}
+                className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer inline-flex items-center gap-1 ${
+                  actSamePersonOnly
+                    ? 'bg-slate-800 text-white border-slate-800 font-bold shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <User className="w-3 h-3" />
+                Même patient
+              </button>
+              <button
+                type="button"
+                onClick={() => setActModeDateAmount(v => !v)}
+                className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                  actModeDateAmount
+                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold shadow-2xs'
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                }`}
+              >
+                Date + Montant identiques
+              </button>
+              <button
+                type="button"
+                onClick={() => setActModeSameDate(v => !v)}
+                className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                  actModeSameDate
+                    ? 'bg-sky-600 text-white border-sky-600 font-bold shadow-2xs'
+                    : 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                }`}
+              >
+                Même date
+              </button>
+              <button
+                type="button"
+                onClick={() => setActModeSameAmount(v => !v)}
+                className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                  actModeSameAmount
+                    ? 'bg-purple-600 text-white border-purple-600 font-bold shadow-2xs'
+                    : 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100'
+                }`}
+              >
+                Même montant
+              </button>
+
+              {(() => {
+                const nameParts = (activeNom || '').trim().split(/\s+/).filter(Boolean);
+                return nameParts.map((part, idx) => (
+                  <button
+                    key={`${part}-${idx}`}
+                    type="button"
+                    onClick={() => setActSearchQuery(part)}
+                    className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                      actSearchQuery.trim().toLowerCase() === part.toLowerCase()
+                        ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                        : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                    }`}
+                  >
+                    {part}
+                  </button>
+                ));
+              })()}
+
+              {(actSamePersonOnly || actModeDateAmount || actModeSameDate || actModeSameAmount) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActSamePersonOnly(false);
+                    setActModeDateAmount(false);
+                    setActModeSameDate(false);
+                    setActModeSameAmount(false);
+                  }}
+                  className="text-slate-500 underline hover:text-slate-700 cursor-pointer"
+                >
+                  Réinitialiser
                 </button>
               )}
             </div>
@@ -428,7 +585,13 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                 </div>
                 {allEligibleActs.length > 0 && (
                   <button
-                    onClick={() => setActSearchQuery('')}
+                    onClick={() => {
+                      setActSearchQuery('');
+                      setActSamePersonOnly(false);
+                      setActModeDateAmount(false);
+                      setActModeSameDate(false);
+                      setActModeSameAmount(false);
+                    }}
                     className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
                   >
                     Voir tous les {allEligibleActs.length} actes disponibles
@@ -437,14 +600,23 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
               </div>
             ) : (
               filteredSearchCandidates.map((cand) => {
-                const compDetails = getConfrontationDetails(activeDate, activeBrut, activeNet, cand);
+                const compDetails = getConfrontationDetails(activeDate, activeBrut, activeNet, cand, activeNom);
                 const isCurrentlyLinked = lignePaiement.prestationId === cand.prestationId && 
                   (lignePaiement.lignePrestationId === cand.lignePrestationId || (!lignePaiement.lignePrestationId && cand.lignePrestationId.endsWith('-main')));
+                const rowMatExact = activeMat.replace(/\s+/g, '').toLowerCase();
+                const candMatExact = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+                const sameMatricule = Boolean(rowMatExact && rowMatExact !== '-' && candMatExact && candMatExact !== '-' && rowMatExact === candMatExact);
+                // Garde-fou : nom totalement différent → jamais de rattachement,
+                // sauf matricule strictement identique (même patient certain) ou
+                // acte déjà relié à cette ligne.
+                const isNameLocked = Boolean(compDetails.isNameMismatchBlocked) && !isCurrentlyLinked && !sameMatricule;
 
                 return (
                   <div
                     key={cand.lignePrestationId}
-                    className={`p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${compDetails.rowBorderClass}`}
+                    className={`p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                      isNameLocked ? 'border-l-4 border-l-rose-500 bg-rose-50/40' : compDetails.rowBorderClass
+                    }`}
                   >
                     <div className="space-y-1.5 flex-1 min-w-0">
                       {/* 1. Nom du Patient en évidence (Priorité N°1) */}
@@ -483,6 +655,13 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                         </span>
                       </div>
 
+                      {isNameLocked && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-1.5 py-1 font-bold">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Ne pas lier : le nom de cette ligne ({activeNom}) est totalement différent de celui de cet acte ({cand.personneNom}).</span>
+                        </div>
+                      )}
+
                       {/* Detailed price breakdown & live comparison */}
                       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-200/80">
                         <span>
@@ -505,17 +684,28 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                           {formatMoney(cand.resteAPayer)}
                         </strong>
                       </div>
-                      <button
-                        onClick={() => handleAssignCandidate(cand)}
-                        className={`rounded-xl px-4 py-2 text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer ${
-                          isCurrentlyLinked
-                            ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                            : 'bg-indigo-600 text-white hover:bg-indigo-500'
-                        }`}
-                      >
-                        {isCurrentlyLinked ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />}
-                        <span>{isCurrentlyLinked ? 'Acte actuellement relié' : 'Rattacher cet Acte'}</span>
-                      </button>
+                      {isNameLocked ? (
+                        <button
+                          disabled
+                          title="Nom totalement différent de la ligne de règlement : rattachement interdit pour éviter une fausse liaison"
+                          className="rounded-xl bg-slate-200 px-4 py-2 text-xs font-bold text-slate-500 shadow-xs flex items-center gap-1.5 cursor-not-allowed"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                          <span>Ne pas lier (Nom différent)</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleAssignCandidate(cand)}
+                          className={`rounded-xl px-4 py-2 text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer ${
+                            isCurrentlyLinked
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                          }`}
+                        >
+                          {isCurrentlyLinked ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />}
+                          <span>{isCurrentlyLinked ? 'Acte actuellement relié' : 'Rattacher cet Acte'}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
