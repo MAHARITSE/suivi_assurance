@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { unlessTextSelected } from '../utils/textSelection';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
 import { RelierPaiementModal } from './paiements/RelierPaiementModal';
@@ -1457,13 +1458,13 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
           <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 shadow-2xs">
                 <tr>
                   <th className="py-3 px-2 w-8"></th>
                   
                   {/* Date Règlement */}
                   <th 
-                    onClick={() => handleSort('datePaiement')}
+                    onClick={unlessTextSelected(() => handleSort('datePaiement'))}
                     className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'datePaiement' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center">
@@ -1474,7 +1475,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* N° Bordereau */}
                   <th 
-                    onClick={() => handleSort('numeroBordereau')}
+                    onClick={unlessTextSelected(() => handleSort('numeroBordereau'))}
                     className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'numeroBordereau' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center">
@@ -1485,7 +1486,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Société Assureur */}
                   <th 
-                    onClick={() => handleSort('societe')}
+                    onClick={unlessTextSelected(() => handleSort('societe'))}
                     className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'societe' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center">
@@ -1496,7 +1497,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Mode & Référence */}
                   <th 
-                    onClick={() => handleSort('modePaiement')}
+                    onClick={unlessTextSelected(() => handleSort('modePaiement'))}
                     className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'modePaiement' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center">
@@ -1507,7 +1508,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Total Réclamé */}
                   <th 
-                    onClick={() => handleSort('totalReclame')}
+                    onClick={unlessTextSelected(() => handleSort('totalReclame'))}
                     className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalReclame' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center justify-end">
@@ -1518,7 +1519,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Somme Payée */}
                   <th 
-                    onClick={() => handleSort('totalPaye')}
+                    onClick={unlessTextSelected(() => handleSort('totalPaye'))}
                     className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalPaye' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center justify-end">
@@ -1529,7 +1530,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Ticket Modérateur */}
                   <th 
-                    onClick={() => handleSort('totalModerateur')}
+                    onClick={unlessTextSelected(() => handleSort('totalModerateur'))}
                     className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalModerateur' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center justify-end">
@@ -1540,7 +1541,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Exclu / Rejet */}
                   <th 
-                    onClick={() => handleSort('totalExclu')}
+                    onClick={unlessTextSelected(() => handleSort('totalExclu'))}
                     className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalExclu' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center justify-end">
@@ -1551,7 +1552,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
                   {/* Statut */}
                   <th 
-                    onClick={() => handleSort('statut')}
+                    onClick={unlessTextSelected(() => handleSort('statut'))}
                     className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'statut' ? 'bg-emerald-50/60 text-emerald-900 font-bold' : ''}`}
                   >
                     <div className="flex items-center justify-center">
@@ -1975,7 +1976,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
           <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 shadow-2xs">
                 <tr>
                   <th className="py-3 px-2 w-8"></th>
 

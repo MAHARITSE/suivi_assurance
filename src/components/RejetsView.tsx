@@ -805,7 +805,7 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
           <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 uppercase text-[11px] font-semibold border-b border-slate-200 shadow-2xs">
                 <tr>
                   <th className="py-3 px-3.5">Type & Facture</th>
                   <th className="py-3 px-3">Date Soins</th>
