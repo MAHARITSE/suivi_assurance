@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { GroupedFacture, FactureSortField } from '../PrestationsView';
 import { formatDate, formatMoney } from '../../utils/formatters';
+import { unlessTextSelected } from '../../utils/textSelection';
 import { Personne, Prestation } from '../../types';
 
 interface FacturesGroupedTableProps {
@@ -81,13 +82,13 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
     <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
       <div className="overflow-auto flex-1">
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 shadow-2xs">
             <tr>
               <th className="py-3 px-2 w-8"></th>
 
               {/* N° Facture */}
               <th 
-                onClick={() => onSort('numeroFacture')}
+                onClick={unlessTextSelected(() => onSort('numeroFacture'))}
                 className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'numeroFacture' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center">
@@ -98,7 +99,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Date */}
               <th 
-                onClick={() => onSort('date')}
+                onClick={unlessTextSelected(() => onSort('date'))}
                 className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'date' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center">
@@ -109,7 +110,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Société / Sous-sociétés */}
               <th 
-                onClick={() => onSort('societe')}
+                onClick={unlessTextSelected(() => onSort('societe'))}
                 className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'societe' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center">
@@ -120,7 +121,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Assurés & Actes */}
               <th 
-                onClick={() => onSort('nombreAssures')}
+                onClick={unlessTextSelected(() => onSort('nombreAssures'))}
                 className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'nombreAssures' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center justify-center">
@@ -131,7 +132,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Montant Brut */}
               <th 
-                onClick={() => onSort('totalFacture')}
+                onClick={unlessTextSelected(() => onSort('totalFacture'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'totalFacture' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center justify-end">
@@ -142,7 +143,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Ticket Modérateur */}
               <th 
-                onClick={() => onSort('totalTicketMod')}
+                onClick={unlessTextSelected(() => onSort('totalTicketMod'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'totalTicketMod' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center justify-end">
@@ -153,7 +154,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Part Assurance (À Rembourser) */}
               <th 
-                onClick={() => onSort('totalARembourser')}
+                onClick={unlessTextSelected(() => onSort('totalARembourser'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'totalARembourser' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center justify-end">
@@ -164,7 +165,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Total Perçu (Encaissé) */}
               <th 
-                onClick={() => onSort('totalPaye')}
+                onClick={unlessTextSelected(() => onSort('totalPaye'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-emerald-50/80 transition ${factureSortField === 'totalPaye' ? 'bg-emerald-100/70 text-emerald-950 font-bold' : 'text-emerald-800'}`}
               >
                 <div className="flex items-center justify-end">
@@ -175,7 +176,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Montants Restant à Réclamer */}
               <th 
-                onClick={() => onSort('resteAReclamer')}
+                onClick={unlessTextSelected(() => onSort('resteAReclamer'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-rose-50/80 transition ${factureSortField === 'resteAReclamer' ? 'bg-rose-100/70 text-rose-950 font-bold' : 'text-rose-800'}`}
               >
                 <div className="flex items-center justify-end">
@@ -186,7 +187,7 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
 
               {/* Statut & Taux */}
               <th 
-                onClick={() => onSort('statut')}
+                onClick={unlessTextSelected(() => onSort('statut'))}
                 className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${factureSortField === 'statut' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
               >
                 <div className="flex items-center justify-center">
@@ -217,8 +218,8 @@ export const FacturesGroupedTable: React.FC<FacturesGroupedTableProps> = ({
                 return (
                   <React.Fragment key={facture.numeroFacture}>
                     <tr 
-                      onClick={() => toggleFactureRow(facture.numeroFacture)}
-                      className={`hover:bg-indigo-50/30 transition-colors cursor-pointer select-none ${
+                      onClick={unlessTextSelected(() => toggleFactureRow(facture.numeroFacture))}
+                      className={`hover:bg-indigo-50/30 transition-colors cursor-pointer ${
                         isExpanded ? 'bg-indigo-50/40' : ''
                       }`}
                     >

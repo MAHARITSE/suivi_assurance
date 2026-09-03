@@ -14,6 +14,7 @@ import {
   ArrowDown
 } from 'lucide-react';
 import { formatMoney, formatDate } from '../utils/formatters';
+import { unlessTextSelected } from '../utils/textSelection';
 import { RejetDetail } from './RejetsView';
 
 export interface GroupedRejetFacture {
@@ -91,13 +92,13 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
     <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
       <div className="overflow-auto flex-1">
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 shadow-2xs">
             <tr>
               <th className="py-3 px-2 w-8"></th>
 
               {/* N° Facture */}
               <th
-                onClick={() => onSort('numeroFacture')}
+                onClick={unlessTextSelected(() => onSort('numeroFacture'))}
                 className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'numeroFacture' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -110,7 +111,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
 
               {/* Date Soins */}
               <th
-                onClick={() => onSort('date')}
+                onClick={unlessTextSelected(() => onSort('date'))}
                 className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'date' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -123,7 +124,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
 
               {/* Tiers-Payeur */}
               <th
-                onClick={() => onSort('societe')}
+                onClick={unlessTextSelected(() => onSort('societe'))}
                 className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'societe' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -136,7 +137,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
 
               {/* Assurés & Actes */}
               <th
-                onClick={() => onSort('nombreAssures')}
+                onClick={unlessTextSelected(() => onSort('nombreAssures'))}
                 className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'nombreAssures' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -149,7 +150,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
 
               {/* Montant Initial Brut */}
               <th
-                onClick={() => onSort('totalMontantBrut')}
+                onClick={unlessTextSelected(() => onSort('totalMontantBrut'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'totalMontantBrut' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -162,7 +163,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
 
               {/* Montant Total Rejeté */}
               <th
-                onClick={() => onSort('totalMontantRejete')}
+                onClick={unlessTextSelected(() => onSort('totalMontantRejete'))}
                 className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'totalMontantRejete' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -175,7 +176,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
 
               {/* Impact / Taux */}
               <th
-                onClick={() => onSort('tauxRejet')}
+                onClick={unlessTextSelected(() => onSort('tauxRejet'))}
                 className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${
                   sortField === 'tauxRejet' ? 'bg-rose-50/60 text-rose-900 font-bold' : ''
                 }`}
@@ -208,7 +209,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                 return (
                   <React.Fragment key={facture.numeroFacture}>
                     <tr
-                      onClick={() => toggleRow(facture.numeroFacture)}
+                      onClick={unlessTextSelected(() => toggleRow(facture.numeroFacture))}
                       className={`hover:bg-rose-50/40 transition-colors cursor-pointer ${
                         isExpanded ? 'bg-rose-50/30' : ''
                       }`}

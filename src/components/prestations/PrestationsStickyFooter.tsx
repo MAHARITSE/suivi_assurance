@@ -60,7 +60,7 @@ export const PrestationsStickyFooter: React.FC<PrestationsStickyFooterProps> = (
   return (
     <div 
       id="prestations-sticky-footer"
-      className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 text-white border-t-2 border-indigo-500 shadow-2xl backdrop-blur-md py-2.5 px-3 sm:px-6 transition-all duration-200 select-none"
+      className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 text-white border-t-2 border-indigo-500 shadow-2xl backdrop-blur-md py-2.5 px-3 sm:px-6 transition-all duration-200"
     >
       <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs">
         
