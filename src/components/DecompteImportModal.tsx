@@ -326,9 +326,17 @@ export function getConfrontationDetails(
   const isDifferentName = comparedNames.isDifferent;
   const hasNameMismatch = isPartialName || isDifferentName;
 
-  // Même avec une date et un montant identiques, une identité partielle doit
-  // rester à vérifier avant de valider le rapprochement.
-  if (hasNameMismatch) {
+  // Montants et dates parfaitement identiques : le rapprochement est validé,
+  // il ne doit PAS être placé dans la liste « À Vérifier (Écarts) », même
+  // lorsque le nom n'est que partiellement similaire (ex. prénom absent ou
+  // tronqué dans le décompte : « RAMANANANDRO DIAMANGAVONY » vs
+  // « RAMANANANDRO DIAMANGAVONY CLAUDIO »). Un nom totalement différent
+  // reste toutefois à vérifier (risque de mauvaise liaison malgré un montant
+  // identique).
+  const isPerfectDateMontant = isSameDate && isSameMontantBrut;
+  const needsNameVerification = hasNameMismatch && !(isPartialName && isPerfectDateMontant);
+
+  if (needsNameVerification) {
     return {
       type: 'VERIFY',
       isSameDate,
@@ -2488,7 +2496,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
                                   {/* Explication Synthétique du Rapprochement */}
                                   <div className="space-y-1">
-                                    {nameNeedsReview && (
+                                    {nameNeedsReview && confront.type !== 'PERFECT' && (
                                       <div className="rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-[10px] text-amber-950 flex items-center gap-1 font-bold">
                                         <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                                         <span>{confront.isPartialName ? 'À vérifier : nom partiellement similaire.' : 'À vérifier : nom différent.'}</span>
