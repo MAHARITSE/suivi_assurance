@@ -265,14 +265,6 @@ export interface ConfrontationDetails {
   isSameName: boolean;
   isPartialName: boolean;
   isDifferentName: boolean;
-  /**
-   * Vrai lorsque l'identité de l'assuré doit réellement être contrôlée :
-   * nom totalement différent, ou nom partiellement similaire SANS date et
-   * montant parfaitement identiques. Un nom partiellement similaire avec date
-   * et montant identiques est accepté (statut PERFECT) et n'est donc pas
-   * classé dans « À Vérifier (Écarts) ».
-   */
-  nameNeedsReview: boolean;
   diffMontantBrut: number;
   label: string;
   badgeClass: string;
@@ -299,7 +291,6 @@ export function getConfrontationDetails(
       isSameName: false,
       isPartialName: false,
       isDifferentName: false,
-      nameNeedsReview: false,
       diffMontantBrut: 0,
       label: 'Non rattaché (Créer)',
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
@@ -333,17 +324,11 @@ export function getConfrontationDetails(
   const isSameName = comparedNames.isSame;
   const isPartialName = comparedNames.isPartial;
   const isDifferentName = comparedNames.isDifferent;
+  const hasNameMismatch = isPartialName || isDifferentName;
 
-  // Un nom partiellement similaire (ex. « RAMANANANDRO DIAMANGAVONY » contre
-  // « RAMANANANDRO DIAMANGAVONY CLAUDIO ») avec une date ET un montant
-  // parfaitement identiques est considéré comme la même personne : la ligne
-  // est classée « Même Date & Même Montant » et NON dans « À Vérifier (Écarts) ».
-  // Seul un nom totalement différent, ou un nom partiel sans concordance
-  // parfaite de date/montant, reste à vérifier.
-  const isPerfectDateAndAmount = isSameDate && isSameMontant;
-  const nameNeedsReview = isDifferentName || (isPartialName && !isPerfectDateAndAmount);
-
-  if (nameNeedsReview) {
+  // Même avec une date et un montant identiques, une identité partielle doit
+  // rester à vérifier avant de valider le rapprochement.
+  if (hasNameMismatch) {
     return {
       type: 'VERIFY',
       isSameDate,
@@ -353,7 +338,6 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
-      nameNeedsReview,
       diffMontantBrut,
       label: isPartialName ? 'À vérifier (Nom partiellement similaire)' : 'À vérifier (Nom différent)',
       badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
@@ -363,7 +347,7 @@ export function getConfrontationDetails(
     };
   }
 
-  if (isPerfectDateAndAmount) {
+  if (isSameDate && isSameMontant) {
     return {
       type: 'PERFECT',
       isSameDate,
@@ -373,7 +357,6 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
-      nameNeedsReview,
       diffMontantBrut,
       label: isSameMontantBrut ? 'Même Date & Montant Brut' : 'Même Date & Net Conforme',
       badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
@@ -393,7 +376,6 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
-      nameNeedsReview,
       diffMontantBrut,
       label: 'Même Date (Écart Montant)',
       badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
@@ -413,7 +395,6 @@ export function getConfrontationDetails(
       isSameName,
       isPartialName,
       isDifferentName,
-      nameNeedsReview,
       diffMontantBrut,
       label: 'Même Montant (Date différente)',
       badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
@@ -432,7 +413,6 @@ export function getConfrontationDetails(
     isSameName,
     isPartialName,
     isDifferentName,
-    nameNeedsReview,
     diffMontantBrut,
     label: 'À vérifier (Dates & Montants diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
@@ -2325,14 +2305,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     {displayedRows.map((row) => {
                       const matched = row.matchedCandidate;
                       const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation, row.nomPrenom);
-                      // Nom réellement à contrôler (nom différent, ou nom partiel sans date/montant identiques)
-                      const nameNeedsReview = confront.nameNeedsReview;
-                      // Nom partiellement similaire accepté car date et montant parfaitement identiques
-                      const isAcceptedPartialName = confront.isPartialName && !confront.nameNeedsReview;
+                      const nameNeedsReview = confront.isPartialName || confront.isDifferentName;
                       const baseNameClass = confront.isSameName
                         ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                        : isAcceptedPartialName
-                        ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
                         : confront.isPartialName
                         ? 'bg-amber-200 text-amber-950 border-amber-400 ring-2 ring-amber-100'
                         : 'bg-rose-100 text-rose-900 border-rose-300';
@@ -2478,19 +2453,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 border border-amber-400 font-bold">
                                           <AlertTriangle className="w-3 h-3" />
                                           {confront.isPartialName ? 'Nom partiellement similaire' : 'Nom différent'}
-                                        </span>
-                                      </div>
-                                    )}
-                                    {isAcceptedPartialName && (
-                                      <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px]">
-                                        <span className="text-slate-600 font-medium">Nom du décompte :</span>
-                                        <strong className="text-slate-900">{row.nomPrenom}</strong>
-                                        <span
-                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-semibold"
-                                          title="Nom partiellement similaire accepté : date et montant parfaitement identiques"
-                                        >
-                                          <CheckCircle2 className="w-3 h-3" />
-                                          Nom partiel accepté (date & montant identiques)
                                         </span>
                                       </div>
                                     )}

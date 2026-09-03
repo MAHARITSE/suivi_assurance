@@ -35,7 +35,6 @@ import {
 } from 'lucide-react';
 import { Prestation, LignePrestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId } from '../utils/formatters';
-import { unlessTextSelected } from '../utils/textSelection';
 import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPrestationsPdf } from '../utils/recouvrementPdf';
 import { SalfaImportModal } from './SalfaImportModal';
 import { FacturesGroupedTable } from './prestations/FacturesGroupedTable';
@@ -1989,7 +1988,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
         <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col max-h-[calc(100vh-220px)]">
           <div className="overflow-auto flex-1">
             <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 shadow-2xs">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 uppercase text-[11px] font-semibold border-b border-slate-200 select-none shadow-2xs">
               <tr>
                 <th className="py-3 px-2 w-8">
                   <input 
@@ -2011,7 +2010,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                 
                 {/* Date Soins */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('date'))}
+                  onClick={() => handleSort('date')}
                   className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'date' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center">
@@ -2022,7 +2021,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* N° Facture */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('numeroFacture'))}
+                  onClick={() => handleSort('numeroFacture')}
                   className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'numeroFacture' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center">
@@ -2033,7 +2032,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Nom de l'Agent / Assuré */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('nom'))}
+                  onClick={() => handleSort('nom')}
                   className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'nom' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center">
@@ -2044,7 +2043,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Société / Sous-société */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('societe'))}
+                  onClick={() => handleSort('societe')}
                   className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'societe' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center">
@@ -2055,7 +2054,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Montant Total */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('totalPrestation'))}
+                  onClick={() => handleSort('totalPrestation')}
                   className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalPrestation' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center justify-end">
@@ -2066,7 +2065,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Ticket Modérateur */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('participation'))}
+                  onClick={() => handleSort('participation')}
                   className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'participation' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center justify-end">
@@ -2077,7 +2076,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* À Rembourser */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('montantARembourser'))}
+                  onClick={() => handleSort('montantARembourser')}
                   className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'montantARembourser' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center justify-end">
@@ -2088,7 +2087,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Total Payé */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('totalPaye'))}
+                  onClick={() => handleSort('totalPaye')}
                   className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'totalPaye' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center justify-end">
@@ -2099,7 +2098,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Reste à Payer */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('resteAPayer'))}
+                  onClick={() => handleSort('resteAPayer')}
                   className={`py-3 px-3 text-right cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'resteAPayer' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center justify-end">
@@ -2110,7 +2109,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
 
                 {/* Statut */}
                 <th 
-                  onClick={unlessTextSelected(() => handleSort('statut'))}
+                  onClick={() => handleSort('statut')}
                   className={`py-3 px-3 text-center cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'statut' ? 'bg-indigo-50/60 text-indigo-900 font-bold' : ''}`}
                 >
                   <div className="flex items-center justify-center">
