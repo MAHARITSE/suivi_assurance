@@ -30,7 +30,7 @@ import {
   Personne, 
   Famille 
 } from '../../types';
-import { formatMoney, formatDate, generateId } from '../../utils/formatters';
+import { formatMoney, formatDate, formatDateTime, generateId, getCurrentTimestamp } from '../../utils/formatters';
 
 interface SaisieReglementModalProps {
   isOpen: boolean;
@@ -88,6 +88,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     return `BORD-${today}-${rand}`;
   });
   const [datePaiement, setDatePaiement] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [dateSaisie, setDateSaisie] = useState<string>(() => getCurrentTimestamp());
   const [modePaiement, setModePaiement] = useState<'Virement bancaire' | 'Chèque' | 'Espèces' | 'Mobile Money' | 'Autre'>('Virement bancaire');
   const [referencePaiement, setReferencePaiement] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -158,6 +159,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     if (isOpen) {
       setSocieteId('');
       setSearchQuery('');
+      // Nouvelle référence technique à chaque ouverture du formulaire.
+      setDateSaisie(getCurrentTimestamp());
       if (bordereauLines.length === 0) {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const rand = Math.floor(100 + Math.random() * 900);
@@ -497,6 +500,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     }
 
     const currentSociete = societes.find(s => s.id === societeId);
+    const dateEnregistrement = getCurrentTimestamp();
+    setDateSaisie(dateEnregistrement);
 
     // Create the Paiement object
     const paiementId = generateId('pmt');
@@ -529,7 +534,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
       id: paiementId,
       numeroBordereau: numeroBordereau.trim(),
       datePaiement,
-      dateSaisie: new Date().toISOString(),
+      dateSaisie: dateEnregistrement,
       societeId,
       societeNom: currentSociete?.nom || 'Société',
       modePaiement,
@@ -678,7 +683,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
               <span>1. Informations Générales du Bordereau</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 text-xs">
               {/* Société Assureur */}
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
@@ -727,6 +732,19 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                   onChange={(e) => setDatePaiement(e.target.value)}
                   className="w-full p-2 border border-slate-300 rounded-lg font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
+              </div>
+
+              {/* Date automatique de saisie */}
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Date import / saisie
+                </label>
+                <div
+                  className="w-full p-2 border border-indigo-200 rounded-lg font-medium text-indigo-800 bg-indigo-50 whitespace-nowrap"
+                  title="Horodatage automatique et immuable de l'enregistrement"
+                >
+                  {formatDateTime(dateSaisie)}
+                </div>
               </div>
 
               {/* Mode de Paiement */}

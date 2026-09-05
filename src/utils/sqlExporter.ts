@@ -244,7 +244,7 @@ export function generateMySQLDump(data: {
   lines.push(`  \`numero_bordereau\` VARCHAR(255) NOT NULL,`);
   lines.push(`  \`date_paiement\` VARCHAR(100) DEFAULT NULL,`);
   lines.push(`  \`date_soins\` VARCHAR(100) DEFAULT NULL,`);
-  lines.push(`  \`date_saisie\` VARCHAR(100) DEFAULT NULL,`);
+  lines.push(`  \`date_saisie\` VARCHAR(100) DEFAULT NULL COMMENT 'Horodatage immuable importation ou saisie',`);
   lines.push(`  \`societe_id\` VARCHAR(100) NOT NULL,`);
   lines.push(`  \`societe_nom\` VARCHAR(255) DEFAULT NULL,`);
   lines.push(`  \`sous_societe\` VARCHAR(255) DEFAULT NULL,`);
@@ -266,6 +266,7 @@ export function generateMySQLDump(data: {
   lines.push(`  \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,`);
   lines.push(`  PRIMARY KEY (\`id\`),`);
   lines.push(`  KEY \`idx_paiements_bordereau\` (\`numero_bordereau\`),`);
+  lines.push(`  KEY \`idx_paiements_date_saisie\` (\`date_saisie\`),`);
   lines.push(`  KEY \`idx_paiements_societe\` (\`societe_id\`),`);
   lines.push(`  KEY \`idx_paiements_prestation\` (\`prestation_id\`),`);
   lines.push(`  CONSTRAINT \`fk_paiements_societe\` FOREIGN KEY (\`societe_id\`) REFERENCES \`societes\` (\`id\`) ON DELETE CASCADE ON UPDATE CASCADE,`);

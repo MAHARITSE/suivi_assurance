@@ -57,6 +57,43 @@ export function formatDate(dateString: string | undefined | null): string {
   return dateString;
 }
 
+/**
+ * Affiche un horodatage d'enregistrement en heure locale, tout en restant
+ * compatible avec les anciennes valeurs qui ne contiennent qu'une date.
+ */
+export function formatDateTime(dateString: string | undefined | null): string {
+  if (!dateString) return '-';
+  const value = String(dateString).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return formatDate(value);
+  }
+
+  // MySQL renvoie souvent « YYYY-MM-DD HH:mm:ss », que l'on convertit en
+  // notation ISO locale avant de le confier au moteur JavaScript.
+  const parseableValue = /^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/.test(value)
+    ? value.replace(' ', 'T')
+    : value;
+  const parsed = new Date(parseableValue);
+
+  if (!isNaN(parsed.getTime())) {
+    return new Intl.DateTimeFormat('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(parsed);
+  }
+
+  return value;
+}
+
+/** Horodatage unique utilisé comme référence d'importation ou de saisie. */
+export function getCurrentTimestamp(): string {
+  return new Date().toISOString();
+}
+
 export function generateId(prefix: string = 'id'): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 }

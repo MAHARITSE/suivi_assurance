@@ -108,6 +108,7 @@ export interface Paiement {
   numeroBordereau: string;
   datePaiement: string;
   dateSoins?: string; // Date des soins
+  /** Horodatage technique, immuable, de l'importation ou de la saisie du règlement. */
   dateSaisie: string;
   societeId: string;
   societeNom?: string;

@@ -48,7 +48,7 @@ import {
   ParsedFactureAssurance,
   FactureLigneParsed 
 } from '../types';
-import { formatMoney, formatDate, generateId, normalizeDateISO } from '../utils/formatters';
+import { formatMoney, formatDate, generateId, getCurrentTimestamp, normalizeDateISO } from '../utils/formatters';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import { findBestMatchingSociete } from '../utils/societyMatcher';
 import * as XLSX from 'xlsx';
@@ -1577,7 +1577,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       id: paymentId,
       numeroBordereau: parsedDoc.numeroBordereau || parsedDoc.numeroFacture || `BORD-${Date.now().toString().substring(6)}`,
       datePaiement: parsedDoc.dateEmission || new Date().toISOString().split('T')[0],
-      dateSaisie: new Date().toISOString().split('T')[0],
+      dateSaisie: getCurrentTimestamp(),
       societeId: matchedSoc?.id || 'soc-1',
       modePaiement: 'Virement bancaire',
       referencePaiement: `VIR-${parsedDoc.numeroBordereau || Date.now().toString().substring(6)}`,
