@@ -34,7 +34,7 @@ import {
   Ban
 } from 'lucide-react';
 import { Prestation, LignePrestation, Paiement, Societe, Personne, Famille } from '../types';
-import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { formatMoney, formatDate, generateId, getCurrentTimestamp } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPrestationsPdf } from '../utils/recouvrementPdf';
 import { SalfaImportModal } from './SalfaImportModal';
 import { FacturesGroupedTable } from './prestations/FacturesGroupedTable';
@@ -1270,7 +1270,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       id: newId,
       numeroBordereau: `REJET-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
       datePaiement: new Date().toISOString().split('T')[0],
-      dateSaisie: new Date().toISOString().split('T')[0],
+      dateSaisie: getCurrentTimestamp(),
       societeId: prestation.societeId,
       nomAgent: pers?.nomPrenom || prestation.nomAgent,
       matricule: pers?.matricule || prestation.matricule,
@@ -1432,7 +1432,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
       id: newId,
       numeroBordereau: `REJET-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
       datePaiement: new Date().toISOString().split('T')[0],
-      dateSaisie: new Date().toISOString().split('T')[0],
+      dateSaisie: getCurrentTimestamp(),
       societeId: prestation.societeId,
       nomAgent: pers?.nomPrenom || prestation.nomAgent,
       matricule: pers?.matricule || prestation.matricule,

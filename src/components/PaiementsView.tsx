@@ -34,14 +34,14 @@ import {
   FileText
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from '../types';
-import { formatMoney, formatDate, generateId } from '../utils/formatters';
+import { formatMoney, formatDate, formatDateTime, generateId, getCurrentTimestamp } from '../utils/formatters';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
 import { RelierPaiementModal } from './paiements/RelierPaiementModal';
 import { SaisieReglementModal } from './paiements/SaisieReglementModal';
 import * as XLSX from 'xlsx';
 
-type PaiementSortField = 'datePaiement' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
+type PaiementSortField = 'datePaiement' | 'dateSaisie' | 'numeroBordereau' | 'societe' | 'modePaiement' | 'totalReclame' | 'totalPaye' | 'totalModerateur' | 'totalExclu' | 'statut';
 type GroupSortField = 'dateSoins' | 'nomAgent' | 'codeActe' | 'societe' | 'totalReclame' | 'totalPaye' | 'ticketModerateur' | 'totalExclu' | 'nombreLignes';
 type SortDirection = 'asc' | 'desc';
 type ViewMode = 'bordereaux' | 'groupes_actes';
@@ -59,6 +59,7 @@ export interface GroupedPaymentAct {
     paiementId: string;
     numeroBordereau: string;
     datePaiement: string;
+    dateSaisie: string;
     modePaiement: string;
     referencePaiement: string;
   }>;
@@ -73,6 +74,7 @@ export interface GroupedPaymentAct {
     paiementId: string;
     numeroBordereau: string;
     datePaiement: string;
+    dateSaisie: string;
     dateSoins?: string;
     prestationNumero?: string;
     montantReclame?: number;
@@ -138,6 +140,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   const [filterLiaison, setFilterLiaison] = useState<'ALL' | 'NON_RELIE' | 'RELIE'>('ALL');
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
+  const [dateFilterField, setDateFilterField] = useState<'datePaiement' | 'dateSaisie'>('datePaiement');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
   const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
 
@@ -364,6 +367,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     setFilterExclusion('ALL');
     setDateDebut('');
     setDateFin('');
+    setDateFilterField('datePaiement');
   };
 
   const setDatePreset = (preset: 'this_month' | 'last_month' | 'this_year' | 'all') => {
@@ -463,11 +467,13 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           }
         }
 
-        // Date range
-        if (dateDebut && p.datePaiement < dateDebut) {
+        // Plage de dates : au choix date métier du règlement ou référence
+        // technique d'importation / saisie.
+        const dateToFilter = ((dateFilterField === 'dateSaisie' ? p.dateSaisie : p.datePaiement) || '').slice(0, 10);
+        if (dateDebut && (!dateToFilter || dateToFilter < dateDebut)) {
           return false;
         }
-        if (dateFin && p.datePaiement > dateFin) {
+        if (dateFin && (!dateToFilter || dateToFilter > dateFin)) {
           return false;
         }
 
@@ -505,6 +511,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
           case 'datePaiement':
             valA = a.datePaiement || '';
             valB = b.datePaiement || '';
+            break;
+          case 'dateSaisie':
+            valA = a.dateSaisie || '';
+            valB = b.dateSaisie || '';
             break;
           case 'numeroBordereau':
             valA = a.numeroBordereau || '';
@@ -560,6 +570,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     filterLiaison,
     dateDebut,
     dateFin,
+    dateFilterField,
     searchTerm,
     sortField,
     sortDirection,
@@ -603,6 +614,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                 paiementId: p.id,
                 numeroBordereau: p.numeroBordereau,
                 datePaiement: p.datePaiement,
+                dateSaisie: p.dateSaisie,
                 modePaiement: p.modePaiement,
                 referencePaiement: p.referencePaiement,
               }
@@ -619,6 +631,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                 paiementId: p.id,
                 numeroBordereau: p.numeroBordereau,
                 datePaiement: p.datePaiement,
+                dateSaisie: p.dateSaisie,
                 dateSoins: l.dateSoins,
                 prestationNumero: l.prestationNumero,
                 montantReclame: reclame,
@@ -645,6 +658,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               paiementId: p.id,
               numeroBordereau: p.numeroBordereau,
               datePaiement: p.datePaiement,
+              dateSaisie: p.dateSaisie,
               modePaiement: p.modePaiement,
               referencePaiement: p.referencePaiement,
             });
@@ -659,6 +673,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
             paiementId: p.id,
             numeroBordereau: p.numeroBordereau,
             datePaiement: p.datePaiement,
+            dateSaisie: p.dateSaisie,
             dateSoins: l.dateSoins,
             prestationNumero: l.prestationNumero,
             montantReclame: reclame,
@@ -995,7 +1010,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
       id: newPaiementId,
       numeroBordereau: bordereauRef,
       datePaiement: datePaiementInput,
-      dateSaisie: new Date().toISOString().split('T')[0],
+      dateSaisie: getCurrentTimestamp(),
       societeId: targetSocieteId,
       modePaiement: modePaiement,
       referencePaiement: referenceTransaction,
@@ -1058,6 +1073,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
         'Libellé Acte': g.libelleActe,
         'Société Assureur': g.societeNom,
         'N° Bordereaux Associés': g.bordereaux.map(b => b.numeroBordereau).join(', '),
+        'Dates Importation / Saisie': g.bordereaux.map(b => b.dateSaisie).filter(Boolean).join(', '),
         'Réf Prescriptions': g.prestationsNumeros.join(', '),
         'Nb Lignes / Règlements': g.nombreLignes,
         'Total Réclamé (Brut)': g.totalReclame,
@@ -1078,7 +1094,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
       return {
         'N° Bordereau': p.numeroBordereau,
         'Date Règlement': p.datePaiement,
-        'Date Saisie': p.dateSaisie,
+        'Date Importation / Saisie': p.dateSaisie,
         'Société': soc?.nom || '',
         'Mode Paiement': p.modePaiement,
         'Référence Transaction': p.referencePaiement,
@@ -1393,9 +1409,20 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
 
             {/* Date Range & Presets */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                Date de règlement
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="block text-[11px] font-semibold text-slate-600">
+                  Période de référence
+                </label>
+                <select
+                  value={dateFilterField}
+                  onChange={(e) => setDateFilterField(e.target.value as 'datePaiement' | 'dateSaisie')}
+                  className="text-[10px] py-0.5 px-1.5 rounded border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  title="Choisir la date utilisée par le filtre"
+                >
+                  <option value="datePaiement">Date règlement</option>
+                  <option value="dateSaisie">Date import / saisie</option>
+                </select>
+              </div>
               <div className="flex items-center gap-1.5">
                 <input
                   type="date"
@@ -1469,6 +1496,18 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                     <div className="flex items-center">
                       <span>Date Règlement</span>
                       {renderSortIcon('datePaiement')}
+                    </div>
+                  </th>
+
+                  {/* Référence automatique d'importation / saisie */}
+                  <th
+                    onClick={() => handleSort('dateSaisie')}
+                    className={`py-3 px-3 cursor-pointer group hover:bg-slate-100/80 transition ${sortField === 'dateSaisie' ? 'bg-indigo-50/70 text-indigo-900 font-bold' : ''}`}
+                    title="Horodatage automatique de l'importation ou de la saisie"
+                  >
+                    <div className="flex items-center">
+                      <span>Date Import / Saisie</span>
+                      {renderSortIcon('dateSaisie')}
                     </div>
                   </th>
 
@@ -1566,7 +1605,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {filteredAndSortedPaiements.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="py-10 text-center text-slate-400 space-y-2">
+                    <td colSpan={12} className="py-10 text-center text-slate-400 space-y-2">
                       <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
                       <div>Aucun bordereau de règlement ne correspond aux critères sélectionnés.</div>
                       {activeFiltersCount > 0 && (
@@ -1630,6 +1669,12 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                               )}
                             </div>
                           </td>
+                          <td className="py-3 px-3 text-indigo-700 font-medium whitespace-nowrap">
+                            <div className="flex items-center gap-1" title="Référence automatique de l'enregistrement">
+                              <CalendarCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                              <span>{formatDateTime(p.dateSaisie)}</span>
+                            </div>
+                          </td>
                           <td className="py-3 px-3 font-bold text-emerald-700 whitespace-nowrap">{p.numeroBordereau}</td>
                           <td className="py-3 px-3 font-medium text-slate-900">{getSocieteNom(p.societeId)}</td>
                           <td className="py-3 px-3">
@@ -1690,7 +1735,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                         {/* Nested Expandable Sub-Table of Payment Lines */}
                         {isExpanded && (
                           <tr className="bg-slate-50/90 border-y border-slate-200/80">
-                            <td colSpan={11} className="p-4 pl-10">
+                            <td colSpan={12} className="p-4 pl-10">
                               <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                                   <div className="flex items-center gap-2">
@@ -2138,7 +2183,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                 <span
                                   key={b.paiementId}
                                   className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 text-[10px] font-mono font-medium"
-                                  title={`Règlement du ${formatDate(b.datePaiement)} via ${b.modePaiement}`}
+                                  title={`Règlement du ${formatDate(b.datePaiement)} • Import / saisie : ${formatDateTime(b.dateSaisie)} • ${b.modePaiement}`}
                                 >
                                   {b.numeroBordereau}
                                 </span>
@@ -2182,6 +2227,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                     <tr>
                                       <th className="py-2 px-2 text-left">N° Bordereau</th>
                                       <th className="py-2 px-2 text-left">Date Règlement</th>
+                                      <th className="py-2 px-2 text-left">Date Import / Saisie</th>
                                       <th className="py-2 px-2 text-left">Réf Prescription</th>
                                       <th className="py-2 px-2 text-left">Détail Acte / Commentaire</th>
                                       <th className="py-2 px-2 text-right">Montant Réclamé</th>
@@ -2198,6 +2244,9 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                         </td>
                                         <td className="py-2 px-2 text-slate-600">
                                           {formatDate(sub.datePaiement)}
+                                        </td>
+                                        <td className="py-2 px-2 text-indigo-700 whitespace-nowrap">
+                                          {formatDateTime(sub.dateSaisie)}
                                         </td>
                                         <td className="py-2 px-2 font-mono font-bold text-indigo-700">
                                           <div className="flex items-center gap-1.5">
@@ -2327,10 +2376,14 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-4 rounded-xl">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs bg-slate-50 p-4 rounded-xl">
               <div>
                 <span className="text-slate-400 block text-[10px]">Date Règlement</span>
                 <span className="font-semibold text-slate-900">{formatDate(viewingPaiement.datePaiement)}</span>
+              </div>
+              <div>
+                <span className="text-indigo-500 block text-[10px]">Date Import / Saisie</span>
+                <span className="font-semibold text-indigo-800">{formatDateTime(viewingPaiement.dateSaisie)}</span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px]">Société d'Assurance</span>
@@ -2623,6 +2676,10 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                 <div className="flex justify-between items-center py-1 border-b border-slate-100">
                   <span className="text-slate-500 font-medium">Date de règlement :</span>
                   <span className="font-semibold text-slate-900">{formatDate(paiementToDelete.datePaiement)}</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-100">
+                  <span className="text-indigo-600 font-medium">Date import / saisie :</span>
+                  <span className="font-semibold text-indigo-800">{formatDateTime(paiementToDelete.dateSaisie)}</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-100">
                   <span className="text-slate-500 font-medium">Mode & Réf :</span>

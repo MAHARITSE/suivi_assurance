@@ -271,7 +271,9 @@ function ensureSchemaIntegrity($pdo) {
             "ALTER TABLE `paiements` MODIFY `prestation_id` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `paiements` MODIFY `date_paiement` VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE `paiements` MODIFY `date_soins` VARCHAR(100) DEFAULT NULL",
-            "ALTER TABLE `paiements` MODIFY `date_saisie` VARCHAR(100) DEFAULT NULL",
+            // Ajout tolérant pour les installations créées avec un ancien schéma.
+            "ALTER TABLE `paiements` ADD COLUMN `date_saisie` VARCHAR(100) DEFAULT NULL AFTER `date_soins`",
+            "ALTER TABLE `paiements` MODIFY `date_saisie` VARCHAR(100) DEFAULT NULL COMMENT 'Horodatage immuable importation ou saisie'",
             "ALTER TABLE `paiements` MODIFY `numero_bordereau` VARCHAR(255) NOT NULL",
             "ALTER TABLE `paiements` MODIFY `statut` VARCHAR(100) DEFAULT 'Validé'",
             "ALTER TABLE `lignes_prestation` MODIFY `id` VARCHAR(100) NOT NULL",
@@ -286,6 +288,18 @@ function ensureSchemaIntegrity($pdo) {
         foreach ($alterQueries as $q) {
             try { $pdo->exec($q); } catch (Exception $e) { /* ignore if already modified */ }
         }
+
+        // Les règlements historiques reçoivent comme meilleure référence leur
+        // date de création MySQL. Aucun horodatage existant n'est écrasé.
+        try {
+            $pdo->exec("UPDATE `paiements`
+                        SET `date_saisie` = DATE_FORMAT(COALESCE(`created_at`, CURRENT_TIMESTAMP), '%Y-%m-%d %H:%i:%s')
+                        WHERE `date_saisie` IS NULL OR TRIM(`date_saisie`) = ''");
+        } catch (Exception $e) { /* table ou colonne absente sur installation incomplète */ }
+
+        try {
+            $pdo->exec("ALTER TABLE `paiements` ADD INDEX `idx_paiements_date_saisie` (`date_saisie`)");
+        } catch (Exception $e) { /* index déjà présent */ }
 
         // Ajout des contraintes de clés étrangères avec CASCADE si absentes
         $fkQueries = [
@@ -535,7 +549,9 @@ try {
                 $item['numeroBordereau'] = (string)($row['numero_bordereau'] ?? $item['numeroBordereau'] ?? '');
                 $item['datePaiement'] = (string)($row['date_paiement'] ?? $item['datePaiement'] ?? '');
                 $item['dateSoins'] = $row['date_soins'] ?? $item['dateSoins'] ?? null;
-                $item['dateSaisie'] = $row['date_saisie'] ?? $item['dateSaisie'] ?? null;
+                $item['dateSaisie'] = !empty($row['date_saisie'])
+                    ? $row['date_saisie']
+                    : ($item['dateSaisie'] ?? $row['created_at'] ?? null);
                 $item['societeId'] = (string)($row['societe_id'] ?? $item['societeId'] ?? '');
                 $item['societeNom'] = (string)($row['societe_nom'] ?? $item['societeNom'] ?? '');
                 $item['sousSociete'] = $row['sous_societe'] ?? $item['sousSociete'] ?? null;
@@ -804,7 +820,8 @@ try {
                         VALUES (:id, :num_bord, :date_pai, :date_soins, :date_saisie, :soc_id, :soc_nom, :sous_soc, :nom_agent, :mat, :prest_id, :prest_num, :mode, :ref, :reclame, :paye, :mod, :exclu, :remise, :statut, :notes, :data)
                         ON DUPLICATE KEY UPDATE 
                             `numero_bordereau` = VALUES(`numero_bordereau`), `date_paiement` = VALUES(`date_paiement`), `date_soins` = VALUES(`date_soins`),
-                            `date_saisie` = VALUES(`date_saisie`), `societe_id` = VALUES(`societe_id`), `societe_nom` = VALUES(`societe_nom`),
+                            `date_saisie` = IF(`date_saisie` IS NULL OR TRIM(`date_saisie`) = '', VALUES(`date_saisie`), `date_saisie`),
+                            `societe_id` = VALUES(`societe_id`), `societe_nom` = VALUES(`societe_nom`),
                             `sous_societe` = VALUES(`sous_societe`), `nom_agent` = VALUES(`nom_agent`), `matricule` = VALUES(`matricule`),
                             `prestation_id` = VALUES(`prestation_id`), `prestation_numero` = VALUES(`prestation_numero`), `mode_paiement` = VALUES(`mode_paiement`),
                             `reference_paiement` = VALUES(`reference_paiement`), `total_reclame` = VALUES(`total_reclame`), `total_paye` = VALUES(`total_paye`),
@@ -829,6 +846,9 @@ try {
                         $item['totalModerateur'] = $mod;
                         $item['totalExclu'] = $exclu;
                         $item['remise'] = $remise;
+                        if (empty($item['dateSaisie'])) {
+                            $item['dateSaisie'] = date('Y-m-d H:i:s');
+                        }
                         if (!isset($item['lignes']) || !is_array($item['lignes'])) {
                             $item['lignes'] = [];
                         }

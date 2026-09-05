@@ -13,6 +13,7 @@ import { FamillesView } from './components/FamillesView';
 import { EtatsView } from './components/EtatsView';
 import { EnteteView } from './components/EnteteView';
 import { generateMySQLDump } from './utils/sqlExporter';
+import { getCurrentTimestamp } from './utils/formatters';
 import { checkWampDbConnection, fetchWampData, saveWampData, saveWampDataBulk, deleteWampData } from './utils/wampApi';
 import {
   StorageMode,
@@ -405,14 +406,22 @@ export function App() {
   // Handlers for Paiements
   const handleSavePaiement = async (newPaiement: Paiement, updatedPrestations: Prestation[]) => {
     try {
+      const existingPaiement = paiements.find(p => p.id === newPaiement.id);
+      // La référence de saisie est créée une seule fois, puis conservée lors
+      // des opérations ultérieures (par exemple le rattachement d'une ligne).
+      const paiementToSave: Paiement = {
+        ...newPaiement,
+        dateSaisie: existingPaiement?.dateSaisie || newPaiement.dateSaisie || getCurrentTimestamp(),
+      };
+
       const nextPaiements = (() => {
-        const idx = paiements.findIndex(p => p.id === newPaiement.id);
+        const idx = paiements.findIndex(p => p.id === paiementToSave.id);
         if (idx >= 0) {
           const copy = [...paiements];
-          copy[idx] = newPaiement;
+          copy[idx] = paiementToSave;
           return copy;
         }
-        return [newPaiement, ...paiements];
+        return [paiementToSave, ...paiements];
       })();
 
       // Recalcul systématique des prestations & lignes_prestation à partir
@@ -431,7 +440,7 @@ export function App() {
       }));
 
       if (storageMode === 'server') {
-        await saveWampData('paiements', newPaiement);
+        await saveWampData('paiements', paiementToSave);
         if (changed.length > 0) {
           await saveWampDataBulk('prestations', changed);
         }
@@ -731,11 +740,15 @@ export function App() {
     newPersonnes?: Personne[]
   ) => {
     try {
-      const nextPaiements = [newPaiement, ...paiements.filter(p => p.id !== newPaiement.id)];
+      const paiementToImport: Paiement = {
+        ...newPaiement,
+        dateSaisie: newPaiement.dateSaisie || getCurrentTimestamp(),
+      };
+      const nextPaiements = [paiementToImport, ...paiements.filter(p => p.id !== paiementToImport.id)];
       const reconciled = mergeAndReconcile(prestations, updatedPrestations, nextPaiements);
 
       if (storageMode === 'server') {
-        await saveWampData('paiements', newPaiement);
+        await saveWampData('paiements', paiementToImport);
         if (reconciled.length > 0) {
           await saveWampDataBulk('prestations', reconciled);
         }
