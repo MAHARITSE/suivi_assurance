@@ -282,17 +282,31 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
         let score = 0;
         const cNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
         const cMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
+        const sameDate = Boolean(activeDate && cand.prestationDate && activeDate.substring(0, 10) === cand.prestationDate.substring(0, 10));
+        const sameAmt = Boolean(activeBrut && cand.montantInitial && Math.abs(activeBrut - cand.montantInitial) < 2);
+        const nameSame = Boolean(cleanNom && cNom && cleanNom === cNom);
+        const namePartial = Boolean(cleanNom && cNom && (cNom.includes(cleanNom) || cleanNom.includes(cNom) || cleanNom.split(' ').some(t => t.length > 1 && cNom.split(' ').includes(t))));
 
-        if (cleanMat && cMat && cMat !== '-' && cleanMat === cMat) score += 100;
-        else if (cleanNom && cNom && (cNom.includes(cleanNom) || cleanNom.includes(cNom))) score += 80;
+        if (sameDate && sameAmt) score += 1000;
+        else if (sameDate) score += 700;
+        else if (sameAmt) score += 500;
 
-        if (activeDate && cand.prestationDate && activeDate.substring(0, 10) === cand.prestationDate.substring(0, 10)) score += 50;
-        if (activeBrut && cand.montantInitial && Math.abs(activeBrut - cand.montantInitial) < 2) score += 50;
+        if (cleanMat && cMat && cMat !== '-' && cleanMat === cMat) score += 200;
+        if (nameSame) score += 120;
+        else if (namePartial) score += 60;
+
+        const dA = Date.parse(activeDate || '') || 0;
+        const dC = Date.parse(cand.prestationDate || '') || 0;
+        if (dA && dC) score -= Math.min(80, Math.abs(dA - dC) / (1000 * 60 * 60 * 24));
 
         return score;
       };
 
-      return scoreCand(b) - scoreCand(a);
+      const diff = scoreCand(b) - scoreCand(a);
+      if (diff !== 0) return diff;
+      const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
+      if (nameCmp !== 0) return nameCmp;
+      return (a.prestationDate || '').localeCompare(b.prestationDate || '');
     });
   }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut]);
 
