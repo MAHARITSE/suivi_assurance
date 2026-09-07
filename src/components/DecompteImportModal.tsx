@@ -453,6 +453,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // Search / Change Link modal state
   const [searchingRowId, setSearchingRowId] = useState<string | null>(null);
   const [actSearchQuery, setActSearchQuery] = useState<string>('');
+  // Filtre par pertinence appliqué aux résultats de la sous-fenêtre « Lier »
+  // (même date + même montant, même date, même montant, à vérifier)
+  const [actResultFilter, setActResultFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY'>('ALL');
 
   // Main Table search & sorting state
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
@@ -477,6 +480,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setErrorMessage(null);
     setLastUploadedFile(null);
     setSearchingRowId(null);
+    setActResultFilter('ALL');
     setIsProcessing(false);
     setConfrontFilter('ALL');
     setTableSearchQuery('');
@@ -1174,6 +1178,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     }));
     setSearchingRowId(null);
     setActSearchQuery('');
+    setActResultFilter('ALL');
   };
 
   const activeSearchingRow = rows.find(r => r.rowId === searchingRowId);
@@ -1196,33 +1201,96 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
     if (!activeSearchingRow) return list;
 
+    // Liste triée par pertinence — ordre de priorité explicite :
+    //   1. même date de soins ET même montant (sans ticket modérateur),
+    //   2. même date de soins,
+    //   3. même montant,
+    //   4. similarité de nom (nom identique > partiellement similaire),
+    //   5. proximité de la date de soins,
+    //   6. ordre alphabétique (nom, puis date, puis n° facture).
+    const typeRank: Record<string, number> = { PERFECT: 0, SAME_DATE: 1, SAME_AMOUNT: 2, VERIFY: 3, UNLINKED: 4 };
+    const detailsOf = (cand: MatchCandidate) =>
+      getConfrontationDetails(
+        activeSearchingRow.dateSoins,
+        activeSearchingRow.montantBrut,
+        activeSearchingRow.netAPayer,
+        cand,
+        activeSearchingRow.participation,
+        activeSearchingRow.nomPrenom
+      );
+    const dayOf = (iso?: string): number => {
+      const t = Date.parse(normalizeDateISO(iso || '') || '');
+      return Number.isFinite(t) ? Math.round(t / 86_400_000) : Number.POSITIVE_INFINITY;
+    };
+    const targetDay = dayOf(activeSearchingRow.dateSoins);
+
     return [...list].sort((a, b) => {
-      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
-      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
+      const detA = detailsOf(a);
+      const detB = detailsOf(b);
 
-      const rank = (d: ConfrontationDetails, cand: MatchCandidate) => {
-        let s = 0;
-        if (d.type === 'PERFECT') s += 1000;
-        else if (d.type === 'SAME_DATE') s += 700;
-        else if (d.type === 'SAME_AMOUNT') s += 500;
-        else if (d.type === 'VERIFY') s += 80;
-        if (d.isSameDate) s += 200;
-        if (d.isSameMontant) s += 150;
-        if (d.isSameName) s += 120;
-        else if (d.isPartialName) s += 60;
-        const dA = Date.parse(normalizeDateISO(activeSearchingRow.dateSoins) || '') || 0;
-        const dC = Date.parse(normalizeDateISO(cand.prestationDate) || '') || 0;
-        if (dA && dC) s -= Math.min(80, Math.abs(dA - dC) / (1000 * 60 * 60 * 24));
-        return s;
-      };
+      // 1-3. Même date + même montant, puis même date, puis même montant
+      const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
+      if (typeDiff !== 0) return typeDiff;
 
-      const diff = rank(detailsB, b) - rank(detailsA, a);
-      if (diff !== 0) return diff;
+      // 4. Similarité de nom : identique > partiellement similaire > différent
+      const nameScore = (d: ConfrontationDetails) => (d.isSameName ? 2 : d.isPartialName ? 1 : 0);
+      const nameDiff = nameScore(detB) - nameScore(detA);
+      if (nameDiff !== 0) return nameDiff;
+
+      // 5. Proximité de la date de soins (la plus proche d'abord)
+      const distA = Math.abs(dayOf(a.prestationDate) - targetDay);
+      const distB = Math.abs(dayOf(b.prestationDate) - targetDay);
+      if (distA !== distB) return distA - distB;
+
+      // 6. Ordre alphabétique, puis date et n° facture (ordre déterministe)
       const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
       if (nameCmp !== 0) return nameCmp;
-      return (a.prestationDate || '').localeCompare(b.prestationDate || '');
+      const dateCmp = (a.prestationDate || '').localeCompare(b.prestationDate || '');
+      if (dateCmp !== 0) return dateCmp;
+      return (a.prestationNum || '').localeCompare(b.prestationNum || '');
     });
   }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
+
+  // Sous-fenêtre « Lier » : liste réellement affichée selon le filtre de pertinence choisi
+  const resultFilterCandidates = useMemo(() => {
+    if (actResultFilter === 'ALL' || !activeSearchingRow) return filteredSearchCandidates;
+    const targetType = actResultFilter;
+    return filteredSearchCandidates.filter(cand =>
+      getConfrontationDetails(
+        activeSearchingRow.dateSoins,
+        activeSearchingRow.montantBrut,
+        activeSearchingRow.netAPayer,
+        cand,
+        activeSearchingRow.participation,
+        activeSearchingRow.nomPrenom
+      ).type === targetType
+    );
+  }, [filteredSearchCandidates, actResultFilter, activeSearchingRow]);
+
+  // Nombre de résultats par catégorie de pertinence (pour les pastilles du filtre)
+  const resultFilterCounts = useMemo(() => {
+    const counts: Record<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY', number> = {
+      ALL: filteredSearchCandidates.length,
+      PERFECT: 0,
+      SAME_DATE: 0,
+      SAME_AMOUNT: 0,
+      VERIFY: 0,
+    };
+    if (activeSearchingRow) {
+      filteredSearchCandidates.forEach(cand => {
+        const type = getConfrontationDetails(
+          activeSearchingRow.dateSoins,
+          activeSearchingRow.montantBrut,
+          activeSearchingRow.netAPayer,
+          cand,
+          activeSearchingRow.participation,
+          activeSearchingRow.nomPrenom
+        ).type;
+        if (type !== 'UNLINKED') counts[type]++;
+      });
+    }
+    return counts;
+  }, [filteredSearchCandidates, activeSearchingRow]);
 
   // Helper to find top candidate suggestions for a settlement row (strictly in the same month & year)
   const getRowSuggestions = (row: SettlementRowItem): MatchCandidate[] => {
@@ -2627,6 +2695,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           <td className="py-2.5 px-3 text-center whitespace-nowrap">
                             <button
                               onClick={() => {
+                                setActResultFilter('ALL');
                                 setSearchingRowId(row.rowId);
                                 const firstWord = (row.nomPrenom || '').trim().split(/\s+/)[0] || '';
                                 setActSearchQuery(firstWord || row.matricule || '');
@@ -2762,7 +2831,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
                 <div className="flex items-center justify-between text-[11px] text-slate-500">
                   <span>
-                    {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
+                    {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
+                    {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
+                      <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
+                    )}
                   </span>
                   {actSearchQuery && (
                     <button
@@ -2799,27 +2871,71 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     );
                   })()}
                 </div>
+
+                {/* Pertinence filter chips on the results of the name search */}
+                <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-1.5 mt-0.5 border-t border-slate-100">
+                  <span
+                    className="text-slate-400 font-medium inline-flex items-center gap-1 shrink-0"
+                    title="Tri par pertinence : 1) même date + même montant, 2) même date, 3) même montant, 4) similarité de nom, 5) date la plus proche, 6) ordre alphabétique"
+                  >
+                    <Filter className="w-3 h-3" />
+                    Filtrer les résultats :
+                  </span>
+                  {([
+                    { key: 'ALL' as const, label: 'Tous', active: 'bg-slate-900 text-white border-slate-900 shadow-2xs', idle: 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100' },
+                    { key: 'PERFECT' as const, label: 'Même date & même montant', active: 'bg-emerald-700 text-white border-emerald-700 shadow-2xs', idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
+                    { key: 'SAME_DATE' as const, label: 'Même date', active: 'bg-sky-700 text-white border-sky-700 shadow-2xs', idle: 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100' },
+                    { key: 'SAME_AMOUNT' as const, label: 'Même montant', active: 'bg-purple-700 text-white border-purple-700 shadow-2xs', idle: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
+                    { key: 'VERIFY' as const, label: 'À vérifier', active: 'bg-amber-600 text-white border-amber-600 shadow-2xs', idle: 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100' },
+                  ]).map(chip => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={() => setActResultFilter(chip.key)}
+                      title={`Afficher uniquement les actes « ${chip.label} » parmi les résultats`}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border transition font-semibold cursor-pointer ${
+                        actResultFilter === chip.key ? chip.active : chip.idle
+                      }`}
+                    >
+                      {chip.label}
+                      <span className={`px-1 rounded-full text-[9px] font-bold ${actResultFilter === chip.key ? 'bg-white/25' : 'bg-slate-100 text-slate-600'}`}>
+                        {resultFilterCounts[chip.key]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Act candidate list with live comparison badges */}
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-                {filteredSearchCandidates.length === 0 ? (
+                {resultFilterCandidates.length === 0 ? (
                   <div className="p-8 text-center space-y-2">
                     <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
                     <div className="text-xs text-slate-600 font-medium">
-                      Aucun acte en attente ou partiellement payé correspondant trouvé.
+                      {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0
+                        ? `Aucun acte ne correspond au filtre « ${
+                            { PERFECT: 'Même date & même montant', SAME_DATE: 'Même date', SAME_AMOUNT: 'Même montant', VERIFY: 'À vérifier' }[actResultFilter]
+                          } » parmi les ${filteredSearchCandidates.length} résultat(s) de la recherche.`
+                        : 'Aucun acte en attente ou partiellement payé correspondant trouvé.'}
                     </div>
-                    {allEligibleActs.length > 0 && (
+                    {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0 ? (
+                      <button
+                        onClick={() => setActResultFilter('ALL')}
+                        className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
+                      >
+                        Afficher les {filteredSearchCandidates.length} actes trouvés (lever le filtre)
+                      </button>
+                    ) : allEligibleActs.length > 0 ? (
                       <button
                         onClick={() => setActSearchQuery('')}
                         className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
                       >
                         Voir tous les {allEligibleActs.length} actes disponibles
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 ) : (
-                  filteredSearchCandidates.map((cand) => {
+                  resultFilterCandidates.map((cand) => {
                     const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
 
                     return (

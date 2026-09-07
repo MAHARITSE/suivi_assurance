@@ -277,38 +277,48 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     const cleanNom = activeNom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const cleanMat = activeMat.replace(/\s+/g, '').toLowerCase();
 
+    // Liste triée par pertinence — ordre de priorité explicite :
+    //   1. même date de soins ET même montant,  2. même date de soins,
+    //   3. même montant,                        4. similarité de nom,
+    //   5. proximité de la date de soins,       6. ordre alphabétique.
+    const typeRank: Record<string, number> = { PERFECT: 0, SAME_DATE: 1, SAME_AMOUNT: 2, VERIFY: 3, UNLINKED: 4 };
+    const dayOf = (iso?: string): number => {
+      const t = Date.parse(iso || '');
+      return Number.isFinite(t) ? Math.round(t / 86_400_000) : Number.POSITIVE_INFINITY;
+    };
+    const targetDay = dayOf(activeDate);
+
     return candidates.sort((a, b) => {
-      const scoreCand = (cand: MatchCandidate) => {
-        let score = 0;
+      const detA = getConfrontationDetails(activeDate, activeBrut, activeNet, a);
+      const detB = getConfrontationDetails(activeDate, activeBrut, activeNet, b);
+
+      // 1-3. Même date + même montant, puis même date, puis même montant
+      const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
+      if (typeDiff !== 0) return typeDiff;
+
+      // 4. Similarité de nom : identique > partiellement similaire > matricule identique > autre
+      const nameSim = (cand: MatchCandidate): number => {
         const cNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        if (cleanNom && cNom && cleanNom === cNom) return 3;
+        if (cleanNom && cNom && (cNom.includes(cleanNom) || cleanNom.includes(cNom) || cleanNom.split(' ').some(t => t.length > 1 && cNom.split(' ').includes(t)))) return 2;
         const cMat = (cand.matricule || '').replace(/\s+/g, '').toLowerCase();
-        const sameDate = Boolean(activeDate && cand.prestationDate && activeDate.substring(0, 10) === cand.prestationDate.substring(0, 10));
-        const sameAmt = Boolean(activeBrut && cand.montantInitial && Math.abs(activeBrut - cand.montantInitial) < 2);
-        const nameSame = Boolean(cleanNom && cNom && cleanNom === cNom);
-        const namePartial = Boolean(cleanNom && cNom && (cNom.includes(cleanNom) || cleanNom.includes(cNom) || cleanNom.split(' ').some(t => t.length > 1 && cNom.split(' ').includes(t))));
-
-        if (sameDate && sameAmt) score += 1000;
-        else if (sameDate) score += 700;
-        else if (sameAmt) score += 500;
-
-        if (cleanMat && cMat && cMat !== '-' && cleanMat === cMat) score += 200;
-        if (nameSame) score += 120;
-        else if (namePartial) score += 60;
-
-        const dA = Date.parse(activeDate || '') || 0;
-        const dC = Date.parse(cand.prestationDate || '') || 0;
-        if (dA && dC) score -= Math.min(80, Math.abs(dA - dC) / (1000 * 60 * 60 * 24));
-
-        return score;
+        if (cleanMat && cMat && cMat !== '-' && cleanMat === cMat) return 1;
+        return 0;
       };
+      const simDiff = nameSim(b) - nameSim(a);
+      if (simDiff !== 0) return simDiff;
 
-      const diff = scoreCand(b) - scoreCand(a);
-      if (diff !== 0) return diff;
+      // 5. Proximité de la date de soins (la plus proche d'abord)
+      const distA = Math.abs(dayOf(a.prestationDate) - targetDay);
+      const distB = Math.abs(dayOf(b.prestationDate) - targetDay);
+      if (distA !== distB) return distA - distB;
+
+      // 6. Ordre alphabétique, puis date (ordre déterministe)
       const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
       if (nameCmp !== 0) return nameCmp;
       return (a.prestationDate || '').localeCompare(b.prestationDate || '');
     });
-  }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut]);
+  }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut, activeNet]);
 
   if (!isOpen || !paiement || !lignePaiement) return null;
 
