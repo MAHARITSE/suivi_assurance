@@ -33,6 +33,11 @@ function refreshConnection($pdo) {
 
 $action = isset($_GET['action']) ? trim($_GET['action']) : '';
 
+// Détection d'un enregistrement en lot (imports décompte / règlements, `?bulk=1`).
+// Règle « nom figé à l'import » : lors d'un import, le nom d'adhérent déjà
+// enregistré en base n'est jamais écrasé par le nom importé.
+$isBulkImport = isset($_GET['bulk']) && (string)$_GET['bulk'] === '1';
+
 function sendJson($success, $data = null, $error = null, $code = 200) {
     http_response_code($code);
     echo json_encode([
@@ -674,9 +679,26 @@ try {
                             `sous_societe` = VALUES(`sous_societe`), `qualite` = VALUES(`qualite`), `famille_code` = VALUES(`famille_code`),
                             `date_naissance` = VALUES(`date_naissance`), `telephone` = VALUES(`telephone`), `email` = VALUES(`email`),
                             `taux_couverture` = VALUES(`taux_couverture`), `statut` = VALUES(`statut`), `data` = VALUES(`data`)");
-                    
+
+                    // Nom figé à l'import : en lot uniquement (imports), si un nom
+                    // existe déjà en base, on le conserve tel quel (colonnes ET JSON)
+                    // au lieu de l'écraser avec le nom du fichier importé.
+                    // La saisie unitaire (onglet Adhérents) garde le droit de renommer.
+                    $stmtNomExistant = $isBulkImport
+                        ? $pdo->prepare("SELECT `nom_prenom` FROM `personnes` WHERE `id` = ?")
+                        : null;
+
                     foreach ($items as $item) {
                         $id = (string)$item['id'];
+
+                        if ($stmtNomExistant !== null) {
+                            $stmtNomExistant->execute([$id]);
+                            $nomExistant = $stmtNomExistant->fetchColumn();
+                            if (is_string($nomExistant) && trim($nomExistant) !== '') {
+                                $item['nomPrenom'] = $nomExistant;
+                            }
+                        }
+
                         $stmt->execute([
                             ':id' => $id,
                             ':nom' => $item['nomPrenom'] ?? '',

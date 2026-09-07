@@ -2146,10 +2146,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     />
                     {tableSearchQuery && (
                       <button
-                        onClocus:ring-2 focus:ring-indigo-100 shadow-2xs"
-                    />
-                    {tableSearchQuery && (
-                      <button
                         onClick={() => setTableSearchQuery('')}
                         className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
                       >
