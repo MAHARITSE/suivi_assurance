@@ -324,11 +324,11 @@ export function getConfrontationDetails(
   const isSameName = comparedNames.isSame;
   const isPartialName = comparedNames.isPartial;
   const isDifferentName = comparedNames.isDifferent;
-  const hasNameMismatch = isPartialName || isDifferentName;
 
-  // Même avec une date et un montant identiques, une identité partielle doit
-  // rester à vérifier avant de valider le rapprochement.
-  if (hasNameMismatch) {
+  // Date identique + nom partiellement similaire : ne PAS classer en « À vérifier »
+  // (rapprochement décompte / import règlement). Un nom vraiment différent reste à vérifier.
+  const mustVerifyName = isDifferentName || (isPartialName && !isSameDate);
+  if (mustVerifyName) {
     return {
       type: 'VERIFY',
       isSameDate,
@@ -1196,20 +1196,31 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
 
     if (!activeSearchingRow) return list;
 
-    // Sort so candidates with same date and same amount appear first
     return [...list].sort((a, b) => {
-      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, 0, activeSearchingRow.nomPrenom);
-      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b, 0, activeSearchingRow.nomPrenom);
+      const detailsA = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, a, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
+      const detailsB = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, b, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
 
-      const scoreMap: Record<ConfrontationType, number> = {
-        PERFECT: 100,
-        SAME_DATE: 70,
-        SAME_AMOUNT: 60,
-        VERIFY: 20,
-        UNLINKED: 0
+      const rank = (d: ConfrontationDetails, cand: MatchCandidate) => {
+        let s = 0;
+        if (d.type === 'PERFECT') s += 1000;
+        else if (d.type === 'SAME_DATE') s += 700;
+        else if (d.type === 'SAME_AMOUNT') s += 500;
+        else if (d.type === 'VERIFY') s += 80;
+        if (d.isSameDate) s += 200;
+        if (d.isSameMontant) s += 150;
+        if (d.isSameName) s += 120;
+        else if (d.isPartialName) s += 60;
+        const dA = Date.parse(normalizeDateISO(activeSearchingRow.dateSoins) || '') || 0;
+        const dC = Date.parse(normalizeDateISO(cand.prestationDate) || '') || 0;
+        if (dA && dC) s -= Math.min(80, Math.abs(dA - dC) / (1000 * 60 * 60 * 24));
+        return s;
       };
 
-      return (scoreMap[detailsB.type] || 0) - (scoreMap[detailsA.type] || 0);
+      const diff = rank(detailsB, b) - rank(detailsA, a);
+      if (diff !== 0) return diff;
+      const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
+      if (nameCmp !== 0) return nameCmp;
+      return (a.prestationDate || '').localeCompare(b.prestationDate || '');
     });
   }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
 
@@ -1362,7 +1373,21 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       });
     }
 
-    // 3. Sorting
+    // 3. Grouper les « À vérifier » à nom partiellement similaire, puis tri optionnel
+    list = [...list].sort((a, b) => {
+      const detA = getConfrontationDetails(a.dateSoins, a.montantBrut, a.netAPayer, a.matchedCandidate, a.participation, a.nomPrenom);
+      const detB = getConfrontationDetails(b.dateSoins, b.montantBrut, b.netAPayer, b.matchedCandidate, b.participation, b.nomPrenom);
+      const partialA = detA.type === 'VERIFY' && detA.isPartialName ? 0 : 1;
+      const partialB = detB.type === 'VERIFY' && detB.isPartialName ? 0 : 1;
+      if (partialA !== partialB) return partialA - partialB;
+      if (partialA === 0) {
+        const nA = normalizePersonName(a.nomPrenom);
+        const nB = normalizePersonName(b.nomPrenom);
+        if (nA !== nB) return nA.localeCompare(nB, 'fr');
+      }
+      return 0;
+    });
+
     if (sortBy !== 'DEFAULT') {
       list = [...list].sort((a, b) => {
         let valA: any = 0;
@@ -1452,10 +1477,11 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             );
 
           if (targetPersonne) {
-            // Update matricule in the insured person's dossier if the file provides an immatriculation
+            // Ne JAMAIS mettre à jour le nom de la personne dans la base lors de l'import règlement.
             if (hasRealMatricule && targetPersonne.matricule.trim() !== rowMatricule) {
               targetPersonne = {
                 ...targetPersonne,
+                nomPrenom: targetPersonne.nomPrenom,
                 matricule: rowMatricule,
                 sousSociete: row.sousSociete || targetPersonne.sousSociete
               };
@@ -1470,7 +1496,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
             const newPer: Personne = {
               id: generateId(`per-cand-${idx}`),
               matricule: hasRealMatricule ? rowMatricule : (prest.matricule || `MAT-${1000 + idx}`),
-              nomPrenom: row.nomPrenom || prest.nomAgent || 'Assuré',
+              nomPrenom: prest.nomAgent || 'Assuré',
               societeId: matchedSoc?.id || prest.societeId || 'soc-1',
               sousSociete: row.sousSociete || prest.sousSociete || undefined,
               qualite: 'Adhérent Principal'
@@ -1591,7 +1617,17 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       lignes: newLignesPaiement
     };
 
-    const finalPersonnesList = Array.from(finalPersonnesMap.values());
+    const originalById = new Map(personnes.map(p => [p.id, p]));
+    const finalPersonnesList = Array.from(finalPersonnesMap.values())
+      .filter(p => {
+        const orig = originalById.get(p.id);
+        if (!orig) return true;
+        return orig.matricule !== p.matricule || orig.sousSociete !== p.sousSociete;
+      })
+      .map(p => {
+        const orig = originalById.get(p.id);
+        return orig ? { ...p, nomPrenom: orig.nomPrenom } : p;
+      });
     onSavePaiement(nouveauPaiement, updatedPrestations, createdSocietes, finalPersonnesList);
 
     // Sequential Queue check: proceed to next file if present
@@ -2107,6 +2143,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       onChange={(e) => setTableSearchQuery(e.target.value)}
                       placeholder="Rechercher par patient, matricule, code acte, montant ou date dans le tableau..."
                       className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 shadow-2xs"
+                    />
+                    {tableSearchQuery && (
+                      <button
+                        onClocus:ring-2 focus:ring-indigo-100 shadow-2xs"
                     />
                     {tableSearchQuery && (
                       <button

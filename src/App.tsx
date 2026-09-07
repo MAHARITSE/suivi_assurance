@@ -778,8 +778,10 @@ export function App() {
           const copy = [...prev];
           newPersonnes.forEach(np => {
             const idx = copy.findIndex(p => p.id === np.id);
-            if (idx >= 0) copy[idx] = np;
-            else copy.push(np);
+            if (idx >= 0) {
+              // Import règlement : ne jamais écraser le nom existant en base
+              copy[idx] = { ...np, nomPrenom: copy[idx].nomPrenom };
+            } else copy.push(np);
           });
           saveLocalTable('personnes', copy);
           return copy;
