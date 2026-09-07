@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+:root {
+  color: #0f172a;
+  background: #f8fafc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  background: #f8fafc;
+}
+
+button,
+select,
+input,
+textarea {
+  font: inherit;
+}
+
+/* Navigation horizontale discrète sans barre visible. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Éléments masqués à l'impression (navigation, filtres, boutons d'action) */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
