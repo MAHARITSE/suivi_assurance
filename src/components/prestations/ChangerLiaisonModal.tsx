@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Prestation, LignePrestation, Paiement, LignePaiement } from '../../types';
 import { formatMoney, formatDate } from '../../utils/formatters';
+import { maskNom } from '../../utils/inputMasks';
 
 interface ChangerLiaisonModalProps {
   isOpen: boolean;
@@ -294,9 +295,9 @@ export const ChangerLiaisonModal: React.FC<ChangerLiaisonModalProps> = ({
             <input
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => setSearchTerm(maskNom(e.target.value))}
               placeholder="Rechercher un règlement par N° Bordereau, Code Acte, Assuré ou Montant..."
-              className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 focus:bg-white focus:outline-none transition-all"
+              className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 focus:bg-white focus:outline-none transition-all uppercase"
             />
           </div>
 

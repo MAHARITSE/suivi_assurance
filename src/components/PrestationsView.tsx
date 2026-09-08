@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Prestation, LignePrestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, generateId, getCurrentTimestamp } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 import { calculateRecouvrementData, generateRecouvrementPdf, generateSelectedPrestationsPdf } from '../utils/recouvrementPdf';
 import { SalfaImportModal } from './SalfaImportModal';
 import { FacturesGroupedTable } from './prestations/FacturesGroupedTable';
@@ -1780,7 +1781,7 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
               type="text"
               placeholder="Recherche par n° facture, assuré, matricule, sous-société, acte..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => setSearchTerm(maskNom(e.target.value))}
               className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition"
             />
             {searchTerm && (
@@ -2746,8 +2747,8 @@ export const PrestationsView: React.FC<PrestationsViewProps> = ({
                   <input
                     type="text"
                     value={formData.sousSociete || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, sousSociete: e.target.value }))}
-                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    onChange={(e) => setFormData(prev => ({ ...prev, sousSociete: maskNom(e.target.value) }))}
+                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                     placeholder="Ex: Service Commercial"
                   />
                 </div>

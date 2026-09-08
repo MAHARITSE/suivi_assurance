@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 import { getStoredEnteteConfig } from '../utils/enteteStorage';
 import * as XLSX from 'xlsx';
 
@@ -536,7 +537,7 @@ export const EtatsView: React.FC<EtatsViewProps> = ({
                 type="text"
                 placeholder="N° facture, adhérent, matricule..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => setSearchTerm(maskNom(e.target.value))}
                 className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               />
             </div>

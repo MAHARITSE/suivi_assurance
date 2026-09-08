@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Building, Plus, Search, Edit3, Trash2, Phone, Mail, MapPin, X, Layers, GitMerge, CheckSquare, Square, ArrowRight, Check, Sparkles, RefreshCw } from 'lucide-react';
 import { Societe, Prestation, Personne } from '../types';
 import { generateId } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 
 interface SocietesViewProps {
   societes: Societe[];
@@ -115,22 +116,26 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
 
   const handleOpenEdit = (s: Societe) => {
     setEditingSociete(s);
-    setFormData({ ...s });
+    setFormData({
+      ...s,
+      nom: maskNom(s.nom || ''),
+      contact: maskNom(s.contact || ''),
+    });
     setIsModalOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.nom || !formData.code) {
+    if (!formData.nom?.trim() || !formData.code?.trim()) {
       alert('Veuillez renseigner le nom et le code de la société.');
       return;
     }
 
     const toSave: Societe = {
       id: editingSociete ? editingSociete.id : generateId('soc'),
-      nom: formData.nom!,
+      nom: maskNom(formData.nom.trim()),
       code: formData.code!,
-      contact: formData.contact || '',
+      contact: maskNom(formData.contact || '').trim(),
       telephone: formData.telephone || '',
       email: formData.email || '',
       adresse: formData.adresse || '',
@@ -155,13 +160,13 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
       if (prev.includes(name)) {
         const next = prev.filter(item => item !== name);
         if (next.length > 0 && !next.includes(targetSubName)) {
-          setTargetSubName(next[0]);
+          setTargetSubName(maskNom(next[0]));
         }
         return next;
       } else {
         const next = [...prev, name];
         if (!targetSubName) {
-          setTargetSubName(name);
+          setTargetSubName(maskNom(name));
         }
         return next;
       }
@@ -175,7 +180,7 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
       const allNames = subSocietesStats.map(s => s.name);
       setSelectedSubNames(allNames);
       if (allNames.length > 0 && !targetSubName) {
-        setTargetSubName(allNames[0]);
+        setTargetSubName(maskNom(allNames[0]));
       }
     }
   };
@@ -193,8 +198,9 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
 
     try {
       setIsProcessingMerge(true);
-      await onMergeSubSocietes(regroupSociete.id, selectedSubNames, targetSubName.trim());
-      setSuccessMsg(`Regroupement réussi ! ${selectedSubNames.length} sous-sociétés ont été unifiées sous "${targetSubName.trim()}".`);
+      const finalTargetName = maskNom(targetSubName.trim());
+      await onMergeSubSocietes(regroupSociete.id, selectedSubNames, finalTargetName);
+      setSuccessMsg(`Regroupement réussi ! ${selectedSubNames.length} sous-sociétés ont été unifiées sous "${finalTargetName}".`);
       setSelectedSubNames([]);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
@@ -205,15 +211,16 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
   };
 
   const handleExecuteSingleRename = async (oldName: string, newName: string) => {
-    if (!regroupSociete || !onMergeSubSocietes || !newName.trim() || oldName === newName) {
+    const finalNewName = maskNom(newName.trim());
+    if (!regroupSociete || !onMergeSubSocietes || !finalNewName || oldName === finalNewName) {
       setEditingSingleSub(null);
       return;
     }
 
     try {
       setIsProcessingMerge(true);
-      await onMergeSubSocietes(regroupSociete.id, [oldName], newName.trim());
-      setSuccessMsg(`Sous-société "${oldName}" renommée avec succès en "${newName.trim()}".`);
+      await onMergeSubSocietes(regroupSociete.id, [oldName], finalNewName);
+      setSuccessMsg(`Sous-société "${oldName}" renommée avec succès en "${finalNewName}".`);
       setEditingSingleSub(null);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
@@ -251,7 +258,7 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
             type="text"
             placeholder="Rechercher une société..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => setSearchTerm(maskNom(e.target.value))}
             className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
@@ -472,8 +479,8 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                               <input
                                 type="text"
                                 value={editingSingleSub.newName}
-                                onChange={(e) => setEditingSingleSub({ ...editingSingleSub, newName: e.target.value })}
-                                className="px-2 py-1 border border-indigo-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex-1"
+                                onChange={(e) => setEditingSingleSub({ ...editingSingleSub, newName: maskNom(e.target.value) })}
+                                className="px-2 py-1 border border-indigo-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex-1 uppercase"
                                 autoFocus
                               />
                               <button
@@ -514,7 +521,7 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                         {!isEditing && (
                           <button
                             type="button"
-                            onClick={() => setEditingSingleSub({ oldName: item.name, newName: item.name })}
+                            onClick={() => setEditingSingleSub({ oldName: item.name, newName: maskNom(item.name) })}
                             className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 shrink-0 cursor-pointer"
                             title="Renommer directement"
                           >
@@ -547,8 +554,8 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                   type="text"
                   placeholder="Saisissez ou choisissez le nom unifié (ex: DIRECTION GENERALE)"
                   value={targetSubName}
-                  onChange={(e) => setTargetSubName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                  onChange={(e) => setTargetSubName(maskNom(e.target.value))}
+                  className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs uppercase"
                 />
 
                 <button
@@ -574,7 +581,7 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                     <button
                       key={name}
                       type="button"
-                      onClick={() => setTargetSubName(name)}
+                      onClick={() => setTargetSubName(maskNom(name))}
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border transition cursor-pointer ${
                         targetSubName === name
                           ? 'bg-indigo-600 text-white border-indigo-600'
@@ -623,8 +630,8 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                   type="text"
                   required
                   value={formData.nom || ''}
-                  onChange={(e) => setFormData(p => ({ ...p, nom: e.target.value }))}
-                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  onChange={(e) => setFormData(p => ({ ...p, nom: maskNom(e.target.value) }))}
+                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                   placeholder="Ex: Sanlam Santé"
                 />
               </div>
@@ -660,8 +667,8 @@ export const SocietesView: React.FC<SocietesViewProps> = ({
                 <input
                   type="text"
                   value={formData.contact || ''}
-                  onChange={(e) => setFormData(p => ({ ...p, contact: e.target.value }))}
-                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  onChange={(e) => setFormData(p => ({ ...p, contact: maskNom(e.target.value) }))}
+                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                   placeholder="Ex: M. Rasoanaivo"
                 />
               </div>

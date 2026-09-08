@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 import { FacturesRejetsGroupedTable, GroupedRejetFacture, RejetFactureSortField } from './FacturesRejetsGroupedTable';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -729,7 +730,7 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
               type="text"
               placeholder="Facture, patient, acte, motif..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => setSearchTerm(maskNom(e.target.value))}
               className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-rose-500 focus:outline-none"
             />
           </div>

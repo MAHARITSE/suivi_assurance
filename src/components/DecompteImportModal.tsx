@@ -49,6 +49,7 @@ import {
   FactureLigneParsed 
 } from '../types';
 import { formatMoney, formatDate, generateId, getCurrentTimestamp, normalizeDateISO } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import { findBestMatchingSociete } from '../utils/societyMatcher';
 import {
@@ -2318,9 +2319,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     <input
                       type="text"
                       value={tableSearchQuery}
-                      onChange={(e) => setTableSearchQuery(e.target.value)}
+                      onChange={(e) => setTableSearchQuery(maskNom(e.target.value))}
                       placeholder="Rechercher par patient, matricule, code acte, montant ou date dans le tableau..."
-                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 shadow-2xs"
+                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 shadow-2xs uppercase"
                     />
                     {tableSearchQuery && (
                       <button
@@ -2967,9 +2968,9 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <input
                     type="text"
                     value={actSearchQuery}
-                    onChange={(e) => setActSearchQuery(e.target.value)}
+                    onChange={(e) => setActSearchQuery(maskNom(e.target.value))}
                     placeholder="Rechercher par nom de patient, matricule, n° facture, code acte (ex: CONS, MEDIC)..."
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-10 py-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-10 py-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 uppercase"
                     autoFocus
                   />
                   {actSearchQuery && (
