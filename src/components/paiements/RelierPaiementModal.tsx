@@ -7,7 +7,8 @@ import {
   AlertTriangle, 
   AlertCircle,
   User, 
-  Unlink
+  Unlink,
+  Filter
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation } from '../../types';
 import { formatMoney, formatDate } from '../../utils/formatters';
@@ -151,6 +152,9 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
   onSavePaiement,
 }) => {
   const [actSearchQuery, setActSearchQuery] = useState('');
+  // Filtre par pertinence appliqué aux résultats de la sous-fenêtre « Lier »
+  // (même date + même montant, même date, même montant, à vérifier) — identique à l'importation
+  const [actResultFilter, setActResultFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY'>('ALL');
 
   // Extract patient info & settlement line values
   const activeNom = lignePaiement?.nomAgent || lignePaiement?.nomBaseAssurance || '';
@@ -164,6 +168,7 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
   useEffect(() => {
     if (lignePaiement) {
       setActSearchQuery(activeNom || activeMat || '');
+      setActResultFilter('ALL');
     }
   }, [lignePaiement, activeNom, activeMat]);
 
@@ -320,6 +325,31 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     });
   }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut, activeNet]);
 
+  // Sous-fenêtre « Lier » : liste réellement affichée selon le filtre de pertinence choisi
+  const resultFilterCandidates = useMemo(() => {
+    if (actResultFilter === 'ALL') return filteredSearchCandidates;
+    const targetType = actResultFilter;
+    return filteredSearchCandidates.filter(cand =>
+      getConfrontationDetails(activeDate, activeBrut, activeNet, cand).type === targetType
+    );
+  }, [filteredSearchCandidates, actResultFilter, activeDate, activeBrut, activeNet]);
+
+  // Nombre de résultats par catégorie de pertinence (pour les pastilles du filtre)
+  const resultFilterCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      ALL: filteredSearchCandidates.length,
+      PERFECT: 0,
+      SAME_DATE: 0,
+      SAME_AMOUNT: 0,
+      VERIFY: 0,
+    };
+    filteredSearchCandidates.forEach(cand => {
+      const type = getConfrontationDetails(activeDate, activeBrut, activeNet, cand).type;
+      if (type !== 'UNLINKED' && counts[type] !== undefined) counts[type]++;
+    });
+    return counts;
+  }, [filteredSearchCandidates, activeDate, activeBrut, activeNet]);
+
   if (!isOpen || !paiement || !lignePaiement) return null;
 
   const handleAssignCandidate = (cand: MatchCandidate | null) => {
@@ -429,7 +459,10 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
 
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>
-                {filteredSearchCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
+                {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
+                {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
+                  <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
+                )}
               </span>
               {actSearchQuery && (
                 <button
@@ -440,27 +473,95 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Quick filter chips by name token (identique à l'importation) */}
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-0.5">
+              <span className="text-slate-400 font-medium">Filtres rapides :</span>
+              {(() => {
+                const nameParts = (activeNom || '').trim().split(/\s+/).filter(Boolean);
+                return (
+                  <>
+                    {nameParts.map((part, idx) => (
+                      <button
+                        key={`${part}-${idx}`}
+                        type="button"
+                        onClick={() => setActSearchQuery(part)}
+                        className={`px-2 py-0.5 rounded-md border transition font-medium cursor-pointer ${
+                          actSearchQuery.trim().toLowerCase() === part.toLowerCase()
+                            ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                            : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                        }`}
+                      >
+                        {part}
+                      </button>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Pertinence filter chips on the results of the name search */}
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-1.5 mt-0.5 border-t border-slate-100">
+              <span
+                className="text-slate-400 font-medium inline-flex items-center gap-1 shrink-0"
+                title="Tri par pertinence : 1) même date + même montant, 2) même date, 3) même montant, 4) similarité de nom, 5) date la plus proche, 6) ordre alphabétique"
+              >
+                <Filter className="w-3 h-3" />
+                Filtrer les résultats :
+              </span>
+              {([
+                { key: 'ALL' as const, label: 'Tous', active: 'bg-slate-900 text-white border-slate-900 shadow-2xs', idle: 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100' },
+                { key: 'PERFECT' as const, label: 'Même date & même montant', active: 'bg-emerald-700 text-white border-emerald-700 shadow-2xs', idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
+                { key: 'SAME_DATE' as const, label: 'Même date', active: 'bg-sky-700 text-white border-sky-700 shadow-2xs', idle: 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100' },
+                { key: 'SAME_AMOUNT' as const, label: 'Même montant', active: 'bg-purple-700 text-white border-purple-700 shadow-2xs', idle: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
+                { key: 'VERIFY' as const, label: 'À vérifier', active: 'bg-amber-600 text-white border-amber-600 shadow-2xs', idle: 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100' },
+              ]).map(chip => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => setActResultFilter(chip.key)}
+                  title={`Afficher uniquement les actes « ${chip.label} » parmi les résultats`}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border transition font-semibold cursor-pointer ${
+                    actResultFilter === chip.key ? chip.active : chip.idle
+                  }`}
+                >
+                  {chip.label}
+                  <span className={`px-1 rounded-full text-[9px] font-bold ${actResultFilter === chip.key ? 'bg-white/25' : 'bg-slate-100 text-slate-600'}`}>
+                    {resultFilterCounts[chip.key]}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Act candidate list with live comparison badges */}
           <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-            {filteredSearchCandidates.length === 0 ? (
+            {resultFilterCandidates.length === 0 ? (
               <div className="p-8 text-center space-y-2">
                 <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
                 <div className="text-xs text-slate-600 font-medium">
-                  Aucun acte en attente ou partiellement payé correspondant trouvé.
+                  {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0
+                    ? `Aucun acte ne correspond au filtre « ${{ PERFECT: 'Même date & même montant', SAME_DATE: 'Même date', SAME_AMOUNT: 'Même montant', VERIFY: 'À vérifier' }[actResultFilter]} » parmi les ${filteredSearchCandidates.length} résultat(s) de la recherche.`
+                    : 'Aucun acte en attente ou partiellement payé correspondant trouvé.'}
                 </div>
-                {allEligibleActs.length > 0 && (
+                {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0 ? (
+                  <button
+                    onClick={() => setActResultFilter('ALL')}
+                    className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
+                  >
+                    Afficher les {filteredSearchCandidates.length} actes trouvés (lever le filtre)
+                  </button>
+                ) : allEligibleActs.length > 0 ? (
                   <button
                     onClick={() => setActSearchQuery('')}
                     className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
                   >
                     Voir tous les {allEligibleActs.length} actes disponibles
                   </button>
-                )}
+                ) : null}
               </div>
             ) : (
-              filteredSearchCandidates.map((cand) => {
+              resultFilterCandidates.map((cand) => {
                 const compDetails = getConfrontationDetails(activeDate, activeBrut, activeNet, cand);
                 const isCurrentlyLinked = lignePaiement.prestationId === cand.prestationId && 
                   (lignePaiement.lignePrestationId === cand.lignePrestationId || (!lignePaiement.lignePrestationId && cand.lignePrestationId.endsWith('-main')));
