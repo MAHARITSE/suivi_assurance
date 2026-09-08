@@ -2419,7 +2419,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
                     <tr>
-                      <th className="py-2.5 px-3 w-8">
+                      <th className="py-2 px-3 w-8">
                         <input
                           type="checkbox"
                           checked={selectedRows.length === rows.length}
@@ -2427,15 +2427,15 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           className="rounded text-indigo-600"
                         />
                       </th>
-                      <th className="py-2.5 px-3">Date Soins</th>
-                      <th className="py-2.5 px-3">Adhérent & Matricule</th>
-                      <th className="py-2.5 px-3">Acte Règlement (Brut sans TM)</th>
-                      <th className="py-2.5 px-3 min-w-[320px]">Acte Prescrit Rattaché (Confrontation)</th>
-                      <th className="py-2.5 px-3 text-right">Net Réglé</th>
-                      <th className="py-2.5 px-3 text-center">Action</th>
+                      <th className="py-2 px-3">Date Soins</th>
+                      <th className="py-2 px-3">Adhérent & Matricule</th>
+                      <th className="py-2 px-3">Acte Règlement (Brut sans TM)</th>
+                      <th className="py-2 px-3 min-w-[320px]">Acte Prescrit Rattaché (Confrontation)</th>
+                      <th className="py-2 px-3 text-right">Net Réglé</th>
+                      <th className="py-2 px-3 text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-300 border-t border-slate-300">
                     {displayedRows.map((row) => {
                       const matched = row.matchedCandidate;
                       const confront = getConfrontationDetails(row.dateSoins, row.montantBrut, row.netAPayer, matched, row.participation, row.nomPrenom);
@@ -2453,7 +2453,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             row.selected ? '' : 'opacity-60 bg-slate-50/50'
                           }`}
                         >
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <input
                               type="checkbox"
                               checked={row.selected}
@@ -2463,14 +2463,14 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           </td>
                           
                           {/* Date Soins */}
-                          <td className="py-2.5 px-3 whitespace-nowrap">
+                          <td className="py-2 px-3 whitespace-nowrap">
                             <div className="font-mono text-xs font-bold text-slate-800">
                               {formatDate(row.dateSoins)}
                             </div>
                           </td>
 
                           {/* Adherent / Patient */}
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <div className="font-bold text-slate-900 text-xs">{row.nomPrenom}</div>
                             <div className="text-[11px] text-slate-600 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
                               {isRealMatricule(row.matricule) ? (
@@ -2520,7 +2520,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           </td>
 
                           {/* Acte Decompte (Gross amount without ticket moderator) */}
-                          <td className="py-2.5 px-3 whitespace-nowrap">
+                          <td className="py-2 px-3 whitespace-nowrap">
                             <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200">
                               <span>{row.actCode}</span>
                               <span className="text-[10px] text-indigo-700 font-semibold">Brut: {formatMoney(row.montantBrut)}</span>
@@ -2536,128 +2536,95 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           </td>
 
                           {/* Matched Prescription Act with Live Comparison & Color Coding */}
-                          <td className="py-2.5 px-3 min-w-[340px]">
+                          <td className="py-2 px-3 min-w-[340px]">
                             {matched ? (
-                              <div className={`rounded-xl border p-2.5 text-xs space-y-2 shadow-2xs ${confront.cardBorderClass}`}>
-                                {/* 1. En-tête : Référence Facture & Badge de Statut */}
-                                <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 pb-1.5">
+                              <div className={`rounded-lg border p-1.5 text-[10.5px] leading-[1.35] space-y-1 shadow-2xs ${confront.cardBorderClass}`}>
+                                {/* 1. En-tête compact : Référence Facture & Badge de Statut */}
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-200/70 pb-1">
                                   <div className="flex items-center gap-1.5 min-w-0">
-                                    <FileText className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                    <span className="font-mono font-bold text-slate-900 text-[11px] truncate" title={`Référence Facture : ${matched.prestationNum}`}>
+                                    <FileText className="w-3 h-3 text-indigo-600 shrink-0" />
+                                    <span className="font-mono font-bold text-slate-900 truncate" title={`Référence Facture : ${matched.prestationNum}`}>
                                       {matched.prestationNum ? `Facture N° ${matched.prestationNum}` : 'Facture en Base'}
                                     </span>
                                   </div>
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border shrink-0 ${confront.badgeClass}`}>
-                                    {confront.type === 'PERFECT' && <CheckCircle2 className="w-3 h-3 text-emerald-700" />}
-                                    {confront.type === 'SAME_DATE' && <CalendarCheck className="w-3 h-3 text-sky-700" />}
-                                    {confront.type === 'SAME_AMOUNT' && <Tag className="w-3 h-3 text-purple-700" />}
-                                    {confront.type === 'VERIFY' && <AlertTriangle className="w-3 h-3 text-amber-700" />}
-                                    <span>{confront.label}</span>
+                                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border shrink-0 ${confront.badgeClass}`}>
+                                    {confront.type === 'PERFECT' && <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />}
+                                    {confront.type === 'SAME_DATE' && <CalendarCheck className="w-2.5 h-2.5 text-sky-700" />}
+                                    {confront.type === 'SAME_AMOUNT' && <Tag className="w-2.5 h-2.5 text-purple-700" />}
+                                    {confront.type === 'VERIFY' && <AlertTriangle className="w-2.5 h-2.5 text-amber-700" />}
+                                    <span className="whitespace-nowrap">{confront.label}</span>
                                   </span>
                                 </div>
 
-                                {/* 2. Acte & nom de l'assuré dans la facture en base */}
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
-                                      {matched.codeActe}
+                                {/* 2. Acte + nom base + alerte nom + entreprise : une seule ligne */}
+                                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0" title={matched.libelleActe}>
+                                    {matched.codeActe}
+                                  </span>
+                                  <span className="font-semibold text-slate-800 truncate max-w-[150px]" title={matched.libelleActe}>
+                                    {matched.libelleActe}
+                                  </span>
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold ${baseNameClass}`}
+                                    title={`Nom dans la facture en base : ${matched.personneNom} — Nom du décompte : ${row.nomPrenom}`}
+                                  >
+                                    <User className="w-2.5 h-2.5" />
+                                    <span className="truncate max-w-[130px]">{matched.personneNom}</span>
+                                  </span>
+                                  {nameNeedsReview && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 border border-amber-400 text-[9px] font-bold shrink-0" title={`Nom du décompte : ${row.nomPrenom}`}>
+                                      <AlertTriangle className="w-2.5 h-2.5" />
+                                      {confront.isPartialName ? 'Nom partiel. similaire' : 'Nom différent'}
                                     </span>
-                                    <span className="font-semibold text-slate-800 text-[11px] truncate" title={matched.libelleActe}>
-                                      {matched.libelleActe}
+                                  )}
+                                  {matched.sousSociete && (
+                                    <span className="text-[9px] text-slate-500 font-medium truncate max-w-[130px]" title={`Entreprise : ${matched.sousSociete}`}>
+                                      • {matched.sousSociete}
                                     </span>
-                                  </div>
+                                  )}
+                                </div>
 
-                                  <div className={`rounded-lg border px-2 py-1.5 ${nameNeedsReview ? 'bg-amber-50/90 border-amber-300' : 'bg-white/80 border-slate-200'}`}>
-                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                      <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">
-                                        Nom dans la facture en base
-                                      </span>
-                                      <span
-                                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-extrabold ${baseNameClass}`}
-                                        title={`Nom enregistré dans la facture : ${matched.personneNom}`}
-                                      >
-                                        <User className="w-3 h-3" />
-                                        {matched.personneNom}
-                                      </span>
+                                {/* 3. Comparatif compact 2 colonnes (une ligne chacune) */}
+                                <div className="grid grid-cols-2 gap-1.5 rounded border border-slate-200/80 bg-white/95 px-1.5 py-1 text-[9.5px]">
+                                  <div className="min-w-0">
+                                    <span className="text-[8px] uppercase tracking-wider text-slate-400 font-bold block leading-none">Décompte Excel</span>
+                                    <div className="text-slate-800 truncate" title={`Décompte Excel — ${formatDate(row.dateSoins)} — Brut ${formatMoney(row.montantBrut)}${row.participation > 0 ? ` — TM ${formatMoney(row.participation)}` : ''}`}>
+                                      {formatDate(row.dateSoins)} • <strong>Brut {formatMoney(row.montantBrut)}</strong>
+                                      {row.participation > 0 && <span className="text-amber-700"> • TM -{formatMoney(row.participation)}</span>}
                                     </div>
-                                    {nameNeedsReview && (
-                                      <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px]">
-                                        <span className="text-slate-600 font-medium">Nom du décompte :</span>
-                                        <strong className="text-slate-900">{row.nomPrenom}</strong>
-                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 border border-amber-400 font-bold">
-                                          <AlertTriangle className="w-3 h-3" />
-                                          {confront.isPartialName ? 'Nom partiellement similaire' : 'Nom différent'}
-                                        </span>
-                                      </div>
-                                    )}
+                                  </div>
+                                  <div className="border-l border-slate-200 pl-2 min-w-0">
+                                    <span className="text-[8px] uppercase tracking-wider text-slate-400 font-bold block leading-none">Facture en Base</span>
+                                    <div className="text-slate-800 truncate" title={`Facture en Base — ${formatDate(matched.prestationDate)} — Initial ${formatMoney(matched.montantInitial)} — Reste ${formatMoney(matched.resteAPayer)}`}>
+                                      {formatDate(matched.prestationDate)} • <strong>Init. {formatMoney(matched.montantInitial)}</strong> • <span className="text-emerald-700 font-semibold">Reste {formatMoney(matched.resteAPayer)}</span>
+                                    </div>
                                   </div>
                                 </div>
 
-                                {/* 3. Encadré comparatif côte-à-côte (Tableau Synthétique Ultra-Clair) */}
-                                <div className="bg-white/95 dark:bg-slate-900/60 p-2 rounded-lg border border-slate-200/80 space-y-1.5 text-[10px]">
-                                  <div className="grid grid-cols-2 gap-2 text-slate-700 border-b border-slate-100 pb-1">
-                                    <div>
-                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block">Décompte Excel</span>
-                                      <div className="font-medium text-slate-900">Date: {formatDate(row.dateSoins)}</div>
-                                      <div className="font-mono text-slate-800">
-                                        Brut: <strong className="text-slate-900">{formatMoney(row.montantBrut)}</strong>
-                                      </div>
-                                      {row.participation > 0 && (
-                                        <div className="font-mono text-amber-700 text-[9.5px]">
-                                          TM: -{formatMoney(row.participation)}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="border-l border-slate-100 pl-2">
-                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block">Facture en Base</span>
-                                      <div className="font-medium text-slate-900">Date: {formatDate(matched.prestationDate)}</div>
-                                      <div className="font-mono text-slate-800">
-                                        Initial: <strong className="text-slate-900">{formatMoney(matched.montantInitial)}</strong>
-                                      </div>
-                                      <div className="font-mono text-emerald-700 text-[9.5px] font-semibold">
-                                        Reste: {formatMoney(matched.resteAPayer)}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Explication Synthétique du Rapprochement */}
-                                  <div className="space-y-1">
-                                    {nameNeedsReview && (
-                                      <div className="rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-[10px] text-amber-950 flex items-center gap-1 font-bold">
-                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                        <span>{confront.isPartialName ? 'À vérifier : nom partiellement similaire.' : 'À vérifier : nom différent.'}</span>
-                                      </div>
-                                    )}
-                                    <div className="text-[10px] font-medium leading-tight">
+                                {/* 4. Alerte de rapprochement : une seule ligne compacte */}
+                                {(nameNeedsReview || !confront.isSameDate || !confront.isSameMontant) && (
+                                  <div
+                                    className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[9.5px] font-bold truncate ${
+                                      confront.isSameDate && !confront.isSameMontant
+                                        ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                        : 'bg-amber-50 text-amber-900 border border-amber-200'
+                                    }`}
+                                    title={(() => {
+                                      if (confront.isSameDate && confront.isSameMontantBrut) return `Montants et dates parfaitement identiques (${formatMoney(row.montantBrut)}).`;
+                                      if (confront.isSameDate && row.participation > 0 && Math.abs((row.montantBrut - row.participation) - matched.montantInitial) < 2) return `Part Net Assurance (${formatMoney(row.montantBrut)} Brut - TM ${formatMoney(row.participation)} = ${formatMoney(row.montantBrut - row.participation)}) égale à la Facture (${formatMoney(matched.montantInitial)}).`;
+                                      if (!confront.isSameDate) return `Date Décompte (${formatDate(row.dateSoins)}) ≠ Date Facture (${formatDate(matched.prestationDate)}).`;
+                                      return `Écart de Montant : Décompte (${formatMoney(row.montantBrut)}) ≠ Facture (${formatMoney(matched.montantInitial)}).`;
+                                    })()}
+                                  >
                                     {confront.isSameDate && confront.isSameMontantBrut ? (
-                                      <span className="text-emerald-700 flex items-center gap-1 font-bold">
-                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                        <span>Montants et dates parfaitement identiques ({formatMoney(row.montantBrut)}).</span>
-                                      </span>
+                                      <><CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" /><span>Montants & dates identiques ({formatMoney(row.montantBrut)}).</span></>
                                     ) : confront.isSameDate && (row.participation > 0 && Math.abs((row.montantBrut - row.participation) - matched.montantInitial) < 2) ? (
-                                      <span className="text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1 font-bold">
-                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                        <span>Part Net Assurance ({formatMoney(row.montantBrut)} Brut - TM {formatMoney(row.participation)} = {formatMoney(row.montantBrut - row.participation)}) égale à la Facture ({formatMoney(matched.montantInitial)}).</span>
-                                      </span>
+                                      <><CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" /><span>Net Assurance ({formatMoney(row.montantBrut)} - TM {formatMoney(row.participation)} = {formatMoney(row.montantBrut - row.participation)}) = Facture ({formatMoney(matched.montantInitial)}).</span></>
                                     ) : !confront.isSameDate ? (
-                                      <span className="text-amber-800 flex items-center gap-1 font-semibold">
-                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                        <span>Date Décompte ({formatDate(row.dateSoins)}) ≠ Date Facture ({formatDate(matched.prestationDate)}).</span>
-                                      </span>
+                                      <><AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" /><span>Date Décompte ({formatDate(row.dateSoins)}) ≠ Facture ({formatDate(matched.prestationDate)}).</span></>
                                     ) : (
-                                      <span className="text-rose-800 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 flex items-center gap-1 font-bold">
-                                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                                        <span>Écart de Montant : Décompte ({formatMoney(row.montantBrut)}) ≠ Facture ({formatMoney(matched.montantInitial)}).</span>
-                                      </span>
+                                      <><AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" /><span>Écart Montant : Décompte ({formatMoney(row.montantBrut)}) ≠ Facture ({formatMoney(matched.montantInitial)}).</span></>
                                     )}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* 4. Pied de carte : Société / Entreprise */}
-                                {matched.sousSociete && (
-                                  <div className="text-[10px] text-slate-500 font-medium truncate pt-0.5">
-                                    Entreprise : <span className="text-slate-800 font-semibold">{matched.sousSociete}</span>
                                   </div>
                                 )}
                               </div>
@@ -2717,12 +2684,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           </td>
 
                           {/* Net Regle */}
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
+                          <td className="py-2 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
                             {formatMoney(row.netAPayer)}
                           </td>
 
                           {/* Action */}
-                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <td className="py-2 px-3 text-center whitespace-nowrap">
                             <button
                               onClick={() => {
                                 setActResultFilter('ALL');
