@@ -456,6 +456,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // Filtre par pertinence appliqué aux résultats de la sous-fenêtre « Lier »
   // (même date + même montant, même date, même montant, à vérifier)
   const [actResultFilter, setActResultFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY'>('ALL');
+  // Tri des résultats de la sous-fenêtre « Lier » — date croissante par défaut
+  const [actSortMode, setActSortMode] = useState<'DATE_ASC' | 'DATE_DESC' | 'PERTINENCE'>('DATE_ASC');
 
   // Main Table search & sorting state
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
@@ -1188,7 +1190,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     let list = allEligibleActs;
     if (actSearchQuery.trim()) {
       const q = actSearchQuery.toLowerCase().trim();
-      list = allEligibleActs.filter(cand => 
+      list = allEligibleActs.filter(cand =>
         cand.personneNom.toLowerCase().includes(q) ||
         cand.matricule.toLowerCase().includes(q) ||
         cand.prestationNum.toLowerCase().includes(q) ||
@@ -1197,6 +1199,44 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         (cand.sousSociete && cand.sousSociete.toLowerCase().includes(q)) ||
         (cand.societeNom && cand.societeNom.toLowerCase().includes(q))
       );
+    }
+
+    const typeRank: Record<string, number> = { PERFECT: 0, SAME_DATE: 1, SAME_AMOUNT: 2, VERIFY: 3, UNLINKED: 4 };
+    const detailsOf = (cand: MatchCandidate) =>
+      activeSearchingRow
+        ? getConfrontationDetails(
+            activeSearchingRow.dateSoins,
+            activeSearchingRow.montantBrut,
+            activeSearchingRow.netAPayer,
+            cand,
+            activeSearchingRow.participation,
+            activeSearchingRow.nomPrenom
+          )
+        : null;
+    const isoOf = (iso?: string): string => normalizeDateISO(iso || '') || (iso || '').trim().substring(0, 10);
+
+    // Tri par date de soins croissante / décroissante (date croissante par défaut) :
+    // la date de l'acte prescrit est le critère principal, la pertinence départage les ex æquo.
+    if (actSortMode === 'DATE_ASC' || actSortMode === 'DATE_DESC') {
+      const dir = actSortMode === 'DATE_ASC' ? 1 : -1;
+      return [...list].sort((a, b) => {
+        const dA = isoOf(a.prestationDate);
+        const dB = isoOf(b.prestationDate);
+        if (!dA && dB) return 1;
+        if (dA && !dB) return -1;
+        if (dA && dB && dA !== dB) return dir * dA.localeCompare(dB);
+
+        // Ex æquo sur la date : pertinence, puis ordre alphabétique (déterministe)
+        if (activeSearchingRow) {
+          const detA = detailsOf(a);
+          const detB = detailsOf(b);
+          const typeDiff = (detA ? (typeRank[detA.type] ?? 4) : 4) - (detB ? (typeRank[detB.type] ?? 4) : 4);
+          if (typeDiff !== 0) return typeDiff;
+        }
+        const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
+        if (nameCmp !== 0) return nameCmp;
+        return (a.prestationNum || '').localeCompare(b.prestationNum || '');
+      });
     }
 
     if (!activeSearchingRow) return list;
@@ -1208,16 +1248,6 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     //   4. similarité de nom (nom identique > partiellement similaire),
     //   5. proximité de la date de soins,
     //   6. ordre alphabétique (nom, puis date, puis n° facture).
-    const typeRank: Record<string, number> = { PERFECT: 0, SAME_DATE: 1, SAME_AMOUNT: 2, VERIFY: 3, UNLINKED: 4 };
-    const detailsOf = (cand: MatchCandidate) =>
-      getConfrontationDetails(
-        activeSearchingRow.dateSoins,
-        activeSearchingRow.montantBrut,
-        activeSearchingRow.netAPayer,
-        cand,
-        activeSearchingRow.participation,
-        activeSearchingRow.nomPrenom
-      );
     const dayOf = (iso?: string): number => {
       const t = Date.parse(normalizeDateISO(iso || '') || '');
       return Number.isFinite(t) ? Math.round(t / 86_400_000) : Number.POSITIVE_INFINITY;
@@ -1225,8 +1255,8 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     const targetDay = dayOf(activeSearchingRow.dateSoins);
 
     return [...list].sort((a, b) => {
-      const detA = detailsOf(a);
-      const detB = detailsOf(b);
+      const detA = detailsOf(a)!;
+      const detB = detailsOf(b)!;
 
       // 1-3. Même date + même montant, puis même date, puis même montant
       const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
@@ -1249,7 +1279,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       if (dateCmp !== 0) return dateCmp;
       return (a.prestationNum || '').localeCompare(b.prestationNum || '');
     });
-  }, [allEligibleActs, actSearchQuery, activeSearchingRow]);
+  }, [allEligibleActs, actSearchQuery, activeSearchingRow, actSortMode]);
 
   // Sous-fenêtre « Lier » : liste réellement affichée selon le filtre de pertinence choisi
   const resultFilterCandidates = useMemo(() => {
@@ -2829,9 +2859,10 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   )}
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <div className="flex items-center justify-between gap-2 flex-wrap text-[11px] text-slate-500">
                   <span>
-                    {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
+                    {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par{' '}
+                    {actSortMode === 'DATE_ASC' ? 'date croissante' : actSortMode === 'DATE_DESC' ? 'date décroissante' : 'pertinence'})
                     {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
                       <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
                     )}
@@ -2844,6 +2875,33 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       Afficher tous les actes ouverts ({allEligibleActs.length})
                     </button>
                   )}
+                </div>
+
+                {/* Tri des résultats : date croissante par défaut */}
+                <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                  <span className="text-slate-400 font-medium inline-flex items-center gap-1 shrink-0">
+                    <Calendar className="w-3 h-3" />
+                    Trier les résultats par :
+                  </span>
+                  {([
+                    { key: 'DATE_ASC' as const, label: 'Date croissante ↑' },
+                    { key: 'DATE_DESC' as const, label: 'Date décroissante ↓' },
+                    { key: 'PERTINENCE' as const, label: 'Pertinence' },
+                  ]).map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setActSortMode(opt.key)}
+                      title={opt.key === 'PERTINENCE' ? 'Tri par pertinence : même date + même montant, même date, même montant, similarité de nom, date la plus proche' : `Trier les actes par date de soins ${opt.key === 'DATE_ASC' ? 'croissante (plus anciens d\u2019abord)' : 'décroissante (plus récents d\u2019abord)'}`}
+                      className={`px-2 py-0.5 rounded-md border transition font-semibold cursor-pointer ${
+                        actSortMode === opt.key
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Quick filter chips */}
