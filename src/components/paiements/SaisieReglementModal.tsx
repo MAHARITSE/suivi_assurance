@@ -31,6 +31,7 @@ import {
   Famille 
 } from '../../types';
 import { formatMoney, formatDate, formatDateTime, generateId, getCurrentTimestamp } from '../../utils/formatters';
+import { maskNom } from '../../utils/inputMasks';
 
 interface SaisieReglementModalProps {
   isOpen: boolean;
@@ -159,6 +160,11 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
     if (isOpen) {
       setSocieteId('');
       setSearchQuery('');
+      // Réinitialise le formulaire de saisie libre (nom par défaut vide)
+      setShowManualForm(false);
+      setManualNom('');
+      setManualMatricule('');
+      setManualFacture('');
       // Nouvelle référence technique à chaque ouverture du formulaire.
       setDateSaisie(getCurrentTimestamp());
       if (bordereauLines.length === 0) {
@@ -426,7 +432,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
       id: newId,
       numeroFacture: manualFacture.trim() || undefined,
       dateSoins: manualDateSoins,
-      nomAgent: manualNom.trim(),
+      nomAgent: maskNom(manualNom.trim()),
       matricule: manualMatricule.trim() || '-',
       codeActe: manualCodeActe.toUpperCase().trim(),
       libelleActe: manualLibelleActe.trim() || manualCodeActe,
@@ -807,10 +813,19 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (!showManualForm && !societeId) {
-                      triggerSocieteAlert();
+                    if (!showManualForm) {
+                      if (!societeId) {
+                        triggerSocieteAlert();
+                      }
+                      // Le nom recherché devient le nom par défaut de la saisie libre
+                      const searchedName = searchQuery.trim();
+                      if (searchedName) {
+                        setManualNom(maskNom(searchedName));
+                      }
+                      setShowManualForm(true);
+                    } else {
+                      setShowManualForm(false);
                     }
-                    setShowManualForm(!showManualForm);
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 font-semibold transition cursor-pointer"
                 >
@@ -836,7 +851,7 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                       }
                     }}
                     onChange={(e) => {
-                      const val = e.target.value;
+                      const val = maskNom(e.target.value);
                       if (val.trim() !== '' && !societeId) {
                         triggerSocieteAlert();
                       }
@@ -902,14 +917,28 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
 
                   <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
                     {searchResults.length === 0 ? (
-                      <div className="p-5 text-center text-slate-400 space-y-1">
+                      <div className="p-5 text-center text-slate-400 space-y-2">
                         <AlertCircle className="w-5 h-5 text-slate-300 mx-auto" />
                         <div className="text-xs text-slate-600 font-medium">
                           Aucun acte ne correspond à « {searchQuery} »
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          Utilisez le bouton « + Saisie libre d'un acte non listé » pour l'ajouter directement au bordereau.
+                          Ce nom est introuvable dans les actes existants. Saisissez-le librement pour l'ajouter directement au bordereau.
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!societeId) {
+                              triggerSocieteAlert();
+                            }
+                            setShowManualForm(true);
+                            setManualNom(maskNom(searchQuery.trim()));
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer mx-auto"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ Saisir « {searchQuery} » en saisie libre</span>
+                        </button>
                       </div>
                     ) : (
                       searchResults.map((act) => {
@@ -1010,8 +1039,8 @@ export const SaisieReglementModal: React.FC<SaisieReglementModalProps> = ({
                       required
                       placeholder="Ex: RABE Jean"
                       value={manualNom}
-                      onChange={(e) => setManualNom(e.target.value)}
-                      className="w-full p-1.5 border border-slate-300 rounded-lg bg-white"
+                      onChange={(e) => setManualNom(maskNom(e.target.value))}
+                      className="w-full p-1.5 border border-slate-300 rounded-lg bg-white uppercase"
                     />
                   </div>
 

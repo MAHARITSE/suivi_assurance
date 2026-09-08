@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate, formatDateTime, generateId, getCurrentTimestamp } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 import { calculateRecouvrementData, generateRecouvrementPdf } from '../utils/recouvrementPdf';
 import { DecompteImportModal } from './DecompteImportModal';
 import { RelierPaiementModal } from './paiements/RelierPaiementModal';
@@ -1286,7 +1287,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
               type="text"
               placeholder="Recherche par n° bordereau, référence paiement, assuré, acte, matricule..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => setSearchTerm(maskNom(e.target.value))}
               className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white transition"
             />
             {searchTerm && (

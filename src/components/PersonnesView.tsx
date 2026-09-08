@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Users, Plus, Search, Edit3, Trash2, User, Phone, Mail, Calendar, X, Building } from 'lucide-react';
 import { Personne, Societe, Famille } from '../types';
 import { generateId, formatDate } from '../utils/formatters';
+import { maskNom } from '../utils/inputMasks';
 
 interface PersonnesViewProps {
   personnes: Personne[];
@@ -64,20 +65,23 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
 
   const handleOpenEdit = (p: Personne) => {
     setEditingPersonne(p);
-    setFormData({ ...p });
+    setFormData({
+      ...p,
+      nomPrenom: maskNom(p.nomPrenom || ''),
+    });
     setIsModalOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.nomPrenom || !formData.matricule || !formData.societeId) {
+    if (!formData.nomPrenom?.trim() || !formData.matricule || !formData.societeId) {
       alert('Veuillez renseigner le nom, le matricule et la société.');
       return;
     }
 
     const toSave: Personne = {
       id: editingPersonne ? editingPersonne.id : generateId('per'),
-      nomPrenom: formData.nomPrenom!,
+      nomPrenom: maskNom(formData.nomPrenom.trim()),
       matricule: formData.matricule!,
       societeId: formData.societeId!,
       qualite: formData.qualite as any || 'Adhérent Principal',
@@ -119,7 +123,7 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
             type="text"
             placeholder="Rechercher par nom, matricule..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => setSearchTerm(maskNom(e.target.value))}
             className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
@@ -214,8 +218,8 @@ export const PersonnesView: React.FC<PersonnesViewProps> = ({
                   type="text"
                   required
                   value={formData.nomPrenom || ''}
-                  onChange={(e) => setFormData(p => ({ ...p, nomPrenom: e.target.value }))}
-                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  onChange={(e) => setFormData(p => ({ ...p, nomPrenom: maskNom(e.target.value) }))}
+                  className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                   placeholder="Ex: RAKOTO Jean"
                 />
               </div>

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation } from '../../types';
 import { formatMoney, formatDate } from '../../utils/formatters';
+import { maskNom } from '../../utils/inputMasks';
 import {
   computeMontantConfrontation,
   formatEcartMontant,
@@ -565,9 +566,9 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
               <input
                 type="text"
                 value={actSearchQuery}
-                onChange={(e) => setActSearchQuery(e.target.value)}
+                onChange={(e) => setActSearchQuery(maskNom(e.target.value))}
                 placeholder="Rechercher par nom de patient, matricule, n° facture, code acte (ex: CONS, MEDIC)..."
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-10 py-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-10 py-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 uppercase"
                 autoFocus
               />
               {actSearchQuery && (

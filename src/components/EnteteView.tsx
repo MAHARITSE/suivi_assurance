@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { EnteteConfig, defaultEnteteConfig } from '../types';
 import { getStoredEnteteConfig, saveStoredEnteteConfig, resetStoredEnteteConfig } from '../utils/enteteStorage';
+import { maskNom } from '../utils/inputMasks';
 import jsPDF from 'jspdf';
 
 interface EnteteViewProps {
@@ -305,8 +306,8 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
                 <input
                   type="text"
                   value={config.etablissement}
-                  onChange={(e) => handleChange('etablissement', e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  onChange={(e) => handleChange('etablissement', maskNom(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                   placeholder="Ex: ÉTABLISSEMENT MÉDICAL SALFA"
                 />
               </div>
@@ -319,8 +320,8 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
                   <input
                     type="text"
                     value={config.sousTitre}
-                    onChange={(e) => handleChange('sousTitre', e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    onChange={(e) => handleChange('sousTitre', maskNom(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                     placeholder="Ex: Service Facturation & Recouvrement"
                   />
                 </div>
@@ -332,8 +333,8 @@ export const EnteteView: React.FC<EnteteViewProps> = ({ onConfigChange }) => {
                   <input
                     type="text"
                     value={config.departement}
-                    onChange={(e) => handleChange('departement', e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    onChange={(e) => handleChange('departement', maskNom(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none uppercase"
                     placeholder="Ex: Pôle Tiers-Payant"
                   />
                 </div>
