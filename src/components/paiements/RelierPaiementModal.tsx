@@ -1,14 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  X, 
-  Search, 
-  Link2, 
-  CheckCircle2, 
-  AlertTriangle, 
+import {
+  X,
+  Search,
+  Link2,
+  CheckCircle2,
+  AlertTriangle,
   AlertCircle,
-  User, 
+  User,
   Unlink,
-  Filter
+  Filter,
+  Calendar
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation } from '../../types';
 import { formatMoney, formatDate } from '../../utils/formatters';
@@ -155,6 +156,8 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
   // Filtre par pertinence appliqué aux résultats de la sous-fenêtre « Lier »
   // (même date + même montant, même date, même montant, à vérifier) — identique à l'importation
   const [actResultFilter, setActResultFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY'>('ALL');
+  // Tri des résultats — date croissante par défaut
+  const [actSortMode, setActSortMode] = useState<'DATE_ASC' | 'DATE_DESC' | 'PERTINENCE'>('DATE_ASC');
 
   // Extract patient info & settlement line values
   const activeNom = lignePaiement?.nomAgent || lignePaiement?.nomBaseAssurance || '';
@@ -282,17 +285,40 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     const cleanNom = activeNom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const cleanMat = activeMat.replace(/\s+/g, '').toLowerCase();
 
-    // Liste triée par pertinence — ordre de priorité explicite :
-    //   1. même date de soins ET même montant,  2. même date de soins,
-    //   3. même montant,                        4. similarité de nom,
-    //   5. proximité de la date de soins,       6. ordre alphabétique.
     const typeRank: Record<string, number> = { PERFECT: 0, SAME_DATE: 1, SAME_AMOUNT: 2, VERIFY: 3, UNLINKED: 4 };
     const dayOf = (iso?: string): number => {
       const t = Date.parse(iso || '');
       return Number.isFinite(t) ? Math.round(t / 86_400_000) : Number.POSITIVE_INFINITY;
     };
     const targetDay = dayOf(activeDate);
+    const isoOf = (iso?: string): string => (iso || '').trim().substring(0, 10);
 
+    // Tri par date de soins croissante / décroissante (date croissante par défaut) :
+    // la date de l'acte prescrit est le critère principal, la pertinence départage les ex æquo.
+    if (actSortMode === 'DATE_ASC' || actSortMode === 'DATE_DESC') {
+      const dir = actSortMode === 'DATE_ASC' ? 1 : -1;
+      return candidates.sort((a, b) => {
+        const dA = isoOf(a.prestationDate);
+        const dB = isoOf(b.prestationDate);
+        if (!dA && dB) return 1;
+        if (dA && !dB) return -1;
+        if (dA && dB && dA !== dB) return dir * dA.localeCompare(dB);
+
+        // Ex æquo sur la date : pertinence, puis ordre alphabétique (déterministe)
+        const detA = getConfrontationDetails(activeDate, activeBrut, activeNet, a);
+        const detB = getConfrontationDetails(activeDate, activeBrut, activeNet, b);
+        const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
+        if (typeDiff !== 0) return typeDiff;
+        const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
+        if (nameCmp !== 0) return nameCmp;
+        return (a.prestationNum || '').localeCompare(b.prestationNum || '');
+      });
+    }
+
+    // Liste triée par pertinence — ordre de priorité explicite :
+    //   1. même date de soins ET même montant,  2. même date de soins,
+    //   3. même montant,                        4. similarité de nom,
+    //   5. proximité de la date de soins,       6. ordre alphabétique.
     return candidates.sort((a, b) => {
       const detA = getConfrontationDetails(activeDate, activeBrut, activeNet, a);
       const detB = getConfrontationDetails(activeDate, activeBrut, activeNet, b);
@@ -323,7 +349,7 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
       if (nameCmp !== 0) return nameCmp;
       return (a.prestationDate || '').localeCompare(b.prestationDate || '');
     });
-  }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut, activeNet]);
+  }, [allEligibleActs, actSearchQuery, activeNom, activeMat, activeDate, activeBrut, activeNet, actSortMode]);
 
   // Sous-fenêtre « Lier » : liste réellement affichée selon le filtre de pertinence choisi
   const resultFilterCandidates = useMemo(() => {
@@ -457,9 +483,10 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
               )}
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <div className="flex items-center justify-between gap-2 flex-wrap text-[11px] text-slate-500">
               <span>
-                {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par pertinence)
+                {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par{' '}
+                {actSortMode === 'DATE_ASC' ? 'date croissante' : actSortMode === 'DATE_DESC' ? 'date décroissante' : 'pertinence'})
                 {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
                   <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
                 )}
@@ -472,6 +499,33 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                   Afficher tous les actes ouverts ({allEligibleActs.length})
                 </button>
               )}
+            </div>
+
+            {/* Tri des résultats : date croissante par défaut */}
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+              <span className="text-slate-400 font-medium inline-flex items-center gap-1 shrink-0">
+                <Calendar className="w-3 h-3" />
+                Trier les résultats par :
+              </span>
+              {([
+                { key: 'DATE_ASC' as const, label: 'Date croissante ↑' },
+                { key: 'DATE_DESC' as const, label: 'Date décroissante ↓' },
+                { key: 'PERTINENCE' as const, label: 'Pertinence' },
+              ]).map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setActSortMode(opt.key)}
+                  title={opt.key === 'PERTINENCE' ? 'Tri par pertinence : même date + même montant, même date, même montant, similarité de nom, date la plus proche' : `Trier les actes par date de soins ${opt.key === 'DATE_ASC' ? 'croissante (plus anciens d\u2019abord)' : 'décroissante (plus récents d\u2019abord)'}`}
+                  className={`px-2 py-0.5 rounded-md border transition font-semibold cursor-pointer ${
+                    actSortMode === opt.key
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
             {/* Quick filter chips by name token (identique à l'importation) */}
