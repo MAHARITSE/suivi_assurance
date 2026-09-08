@@ -365,6 +365,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
     setFilterMode('ALL');
     setFilterStatut('ALL');
     setFilterExclusion('ALL');
+    setFilterLiaison('ALL');
     setDateDebut('');
     setDateFin('');
     setDateFilterField('datePaiement');
@@ -585,6 +586,16 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
       const socNom = getSocieteNom(p.societeId);
 
       (p.lignes || []).forEach(l => {
+        // Filtre de liaison appliqué au niveau de la LIGNE de règlement (et non du bordereau) :
+        // dans la vue détaillée groupée, un bordereau mixte contient à la fois des lignes
+        // reliées et des lignes non reliées — le filtre doit donc porter sur chaque ligne.
+        const lineIsLinked = Boolean(
+          (l.prestationId && l.prestationId.trim() !== '') ||
+          (l.prestationNumero && l.prestationNumero.trim() !== '' && l.prestationNumero !== '-')
+        );
+        if (filterLiaison === 'NON_RELIE' && lineIsLinked) return;
+        if (filterLiaison === 'RELIE' && !lineIsLinked) return;
+
         const rawNom = (l.nomAgent || l.nomBaseAssurance || 'Assuré inconnu').trim();
         const rawDate = (l.dateSoins || p.datePaiement || '').split('T')[0];
         
@@ -742,7 +753,7 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
       const comp = String(valA).localeCompare(String(valB));
       return groupSortDirection === 'asc' ? comp : -comp;
     });
-  }, [filteredAndSortedPaiements, groupSortField, groupSortDirection, societes]);
+  }, [filteredAndSortedPaiements, groupSortField, groupSortDirection, societes, filterLiaison]);
 
   const handleGroupSort = (field: GroupSortField) => {
     if (groupSortField === field) {
