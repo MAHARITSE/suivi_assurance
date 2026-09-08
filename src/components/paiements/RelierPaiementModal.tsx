@@ -13,6 +13,19 @@ import {
 } from 'lucide-react';
 import { Paiement, LignePaiement, Prestation } from '../../types';
 import { formatMoney, formatDate } from '../../utils/formatters';
+import {
+  computeMontantConfrontation,
+  formatEcartMontant,
+  montantProximiteScore,
+  MONTANT_IMPORT_LABEL,
+  MONTANT_ACTE_LABEL,
+  MONTANT_TOLERANCE,
+  MONTANT_COMPARISON_HINT,
+  ACT_SORT_OPTIONS,
+  actSortLabel,
+  type ActSortMode,
+  type MontantConfrontation,
+} from '../../utils/montantConfrontation';
 
 interface RelierPaiementModalProps {
   isOpen: boolean;
@@ -43,105 +56,132 @@ interface MatchCandidate {
   resteAPayer: number;
 }
 
+interface ConfrontationDetails {
+  type: 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY' | 'UNLINKED';
+  isSameDate: boolean;
+  isSameMontantBrut: boolean;
+  isSameMontantNet: boolean;
+  isSameMontant: boolean;
+  diffMontantBrut: number;
+  /** Comparaison « Montant_Reclame_Brut du règlement ↔ montant sans TM de l'acte prescrit ». */
+  montant: MontantConfrontation;
+  /** Le montant sans TM de l'acte égale le Montant_Reclame_Brut du règlement. */
+  isSameMontantSansTM: boolean;
+  /** Score de proximité de montant (100 = conforme) utilisé pour le tri des candidats. */
+  montantRank: number;
+  label: string;
+  badgeClass: string;
+  cardBorderClass: string;
+  rowBorderClass: string;
+  tagColor: string;
+}
+
+/**
+ * Confrontation ligne de règlement ↔ acte prescrit.
+ * RÈGLE : le montant comparé est le « montant sans TM » de l'acte prescrit
+ * (total de l'acte − ticket modérateur) contre le « Montant_Reclame_Brut » de
+ * l'importation / de la ligne de règlement. L'écart obtenu alimente le tri et
+ * est affiché sur chaque résultat.
+ */
 function getConfrontationDetails(
   dateSoins?: string,
   montantBrutSettlement?: number,
   netAPayerSettlement?: number,
   candidate?: MatchCandidate
-) {
-  if (!candidate) {
-    return {
-      type: 'UNLINKED',
-      isSameDate: false,
-      isSameMontantBrut: false,
-      isSameMontantNet: false,
-      isSameMontant: false,
-      diffMontantBrut: 0,
-      label: 'Non relié',
-      badgeClass: 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
-      cardBorderClass: 'border-slate-200 bg-slate-50',
-      rowBorderClass: 'hover:bg-indigo-50/40',
-      tagColor: 'slate'
-    };
-  }
+): ConfrontationDetails {
+  const brut = Number(montantBrutSettlement || netAPayerSettlement || 0);
+  const montant = computeMontantConfrontation(brut, candidate);
+  const montantRank = montantProximiteScore(montant);
 
   const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
-  const candDate = (candidate.prestationDate || '').trim().substring(0, 10);
-  const isSameDate = Boolean(cleanDateSoins && candDate && cleanDateSoins === candDate);
+  const candDate = (candidate?.prestationDate || '').trim().substring(0, 10);
+  const isSameDate = Boolean(candidate && cleanDateSoins && candDate && cleanDateSoins === candDate);
 
-  const brut = Number(montantBrutSettlement || 0);
   const net = Number(netAPayerSettlement || 0);
+  const candRemb = Number(candidate?.montantARembourser || 0);
+  const candReste = Number(candidate?.resteAPayer || 0);
 
-  const candBrut = Number(candidate.montantInitial || 0);
-  const candRemb = Number(candidate.montantARembourser || 0);
-  const candReste = Number(candidate.resteAPayer || 0);
-
-  const isSameMontantBrut = brut > 0 && Math.abs(brut - candBrut) < 2;
-  const isSameMontantNet = net > 0 && (Math.abs(net - candRemb) < 2 || Math.abs(net - candReste) < 2);
+  // 1) CRITÈRE PRINCIPAL : montant sans TM de l'acte == Montant_Reclame_Brut du règlement
+  const isSameMontantSansTM = Boolean(candidate) && montant.isConforme;
+  const isSameMontantBrut = isSameMontantSansTM;
+  // 2) FILET DE SECOURS : ligne de règlement exprimée en net payé
+  const isSameMontantNet = Boolean(candidate) && !isSameMontantSansTM && net > 0
+    && (Math.abs(net - candRemb) < MONTANT_TOLERANCE || Math.abs(net - candReste) < MONTANT_TOLERANCE);
   const isSameMontant = isSameMontantBrut || isSameMontantNet;
-  const diffMontantBrut = brut - candBrut;
+  const diffMontantBrut = montant.ecart;
 
-  if (isSameDate && isSameMontant) {
-    return {
-      type: 'PERFECT',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      diffMontantBrut,
-      label: 'Même Date & Même Montant',
-      badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
-      cardBorderClass: 'border-emerald-300 bg-emerald-50/70',
-      rowBorderClass: 'border-l-4 border-l-emerald-500 bg-emerald-50/30',
-      tagColor: 'emerald'
-    };
-  }
-
-  if (isSameDate && !isSameMontant) {
-    return {
-      type: 'SAME_DATE',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      diffMontantBrut,
-      label: 'Même Date (Montant différent)',
-      badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
-      cardBorderClass: 'border-sky-300 bg-sky-50/60',
-      rowBorderClass: 'border-l-4 border-l-sky-500 bg-sky-50/20',
-      tagColor: 'sky'
-    };
-  }
-
-  if (!isSameDate && isSameMontant) {
-    return {
-      type: 'SAME_AMOUNT',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      diffMontantBrut,
-      label: 'Même Montant (Date différente)',
-      badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
-      cardBorderClass: 'border-purple-300 bg-purple-50/60',
-      rowBorderClass: 'border-l-4 border-l-purple-500 bg-purple-50/20',
-      tagColor: 'purple'
-    };
-  }
-
-  return {
-    type: 'VERIFY',
+  const build = (
+    status: Pick<ConfrontationDetails, 'type' | 'label' | 'badgeClass' | 'cardBorderClass' | 'rowBorderClass' | 'tagColor'>
+  ): ConfrontationDetails => ({
     isSameDate,
     isSameMontantBrut,
     isSameMontantNet,
     isSameMontant,
     diffMontantBrut,
-    label: 'À vérifier (Date & Montant diffèrent)',
+    montant,
+    isSameMontantSansTM,
+    montantRank,
+    ...status,
+  });
+
+  if (!candidate) {
+    return build({
+      type: 'UNLINKED',
+      label: 'Non relié',
+      badgeClass: 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
+      cardBorderClass: 'border-slate-200 bg-slate-50',
+      rowBorderClass: 'hover:bg-indigo-50/40',
+      tagColor: 'slate'
+    });
+  }
+
+  if (isSameDate && isSameMontant) {
+    return build({
+      type: 'PERFECT',
+      label: isSameMontantBrut
+        ? 'Même Date & Montant sans TM Conforme'
+        : 'Même Date & Net Conforme',
+      badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+      cardBorderClass: 'border-emerald-300 bg-emerald-50/70',
+      rowBorderClass: 'border-l-4 border-l-emerald-500 bg-emerald-50/30',
+      tagColor: 'emerald'
+    });
+  }
+
+  if (isSameDate && !isSameMontant) {
+    return build({
+      type: 'SAME_DATE',
+      label: `Même Date (Écart ${formatEcartMontant(montant.ecart)})`,
+      badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
+      cardBorderClass: 'border-sky-300 bg-sky-50/60',
+      rowBorderClass: 'border-l-4 border-l-sky-500 bg-sky-50/20',
+      tagColor: 'sky'
+    });
+  }
+
+  if (!isSameDate && isSameMontant) {
+    return build({
+      type: 'SAME_AMOUNT',
+      label: isSameMontantBrut
+        ? 'Même Montant sans TM (Date différente)'
+        : 'Même Net Payé (Date différente)',
+      badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
+      cardBorderClass: 'border-purple-300 bg-purple-50/60',
+      rowBorderClass: 'border-l-4 border-l-purple-500 bg-purple-50/20',
+      tagColor: 'purple'
+    });
+  }
+
+  return build({
+    type: 'VERIFY',
+    label: montant.isComparable
+      ? `À vérifier (Date & Écart ${formatEcartMontant(montant.ecart)})`
+      : 'À vérifier (Date & Montant diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
     cardBorderClass: 'border-amber-300 bg-amber-50/60',
     rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
     tagColor: 'amber'
-  };
+  });
 }
 
 export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
@@ -156,8 +196,8 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
   // Filtre par pertinence appliqué aux résultats de la sous-fenêtre « Lier »
   // (même date + même montant, même date, même montant, à vérifier) — identique à l'importation
   const [actResultFilter, setActResultFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY'>('ALL');
-  // Tri des résultats — date croissante par défaut
-  const [actSortMode, setActSortMode] = useState<'DATE_ASC' | 'DATE_DESC' | 'PERTINENCE'>('DATE_ASC');
+  // Tri des résultats — date croissante par défaut ; « écart de montant » disponible
+  const [actSortMode, setActSortMode] = useState<ActSortMode>('DATE_ASC');
 
   // Extract patient info & settlement line values
   const activeNom = lignePaiement?.nomAgent || lignePaiement?.nomBaseAssurance || '';
@@ -296,8 +336,30 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     const targetDay = dayOf(activeDate);
     const isoOf = (iso?: string): string => (iso || '').trim().substring(0, 10);
 
+    // Tri par écart de montant : classement direct du résultat de la comparaison
+    // « Montant_Reclame_Brut (règlement) ↔ montant sans TM (acte prescrit) ».
+    if (actSortMode === 'MONTANT_ASC' || actSortMode === 'MONTANT_DESC') {
+      const dir = actSortMode === 'MONTANT_ASC' ? 1 : -1;
+      return [...candidates].sort((a, b) => {
+        const detA = getConfrontationDetails(activeDate, activeBrut, activeNet, a);
+        const detB = getConfrontationDetails(activeDate, activeBrut, activeNet, b);
+        if (detA.montant.ecartAbsolu !== detB.montant.ecartAbsolu) {
+          return dir * (detA.montant.ecartAbsolu - detB.montant.ecartAbsolu);
+        }
+        // Ex æquo (écarts identiques) : catégorie de pertinence, puis date, puis nom
+        const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
+        if (typeDiff !== 0) return typeDiff;
+        const dateCmp = isoOf(a.prestationDate).localeCompare(isoOf(b.prestationDate));
+        if (dateCmp !== 0) return dateCmp;
+        const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
+        if (nameCmp !== 0) return nameCmp;
+        return (a.prestationNum || '').localeCompare(b.prestationNum || '');
+      });
+    }
+
     // Tri par date de soins croissante / décroissante (date croissante par défaut) :
-    // la date de l'acte prescrit est le critère principal, la pertinence départage les ex æquo.
+    // la date de l'acte prescrit est le critère principal, la pertinence et l'écart
+    // de montant départagent les ex æquo.
     if (actSortMode === 'DATE_ASC' || actSortMode === 'DATE_DESC') {
       const dir = actSortMode === 'DATE_ASC' ? 1 : -1;
       return candidates.sort((a, b) => {
@@ -307,11 +369,16 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
         if (dA && !dB) return -1;
         if (dA && dB && dA !== dB) return dir * dA.localeCompare(dB);
 
-        // Ex æquo sur la date : pertinence, puis ordre alphabétique (déterministe)
+        // Ex æquo sur la date : pertinence, écart de montant, puis ordre alphabétique
         const detA = getConfrontationDetails(activeDate, activeBrut, activeNet, a);
         const detB = getConfrontationDetails(activeDate, activeBrut, activeNet, b);
         const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
         if (typeDiff !== 0) return typeDiff;
+
+        if (detA.montant.ecartAbsolu !== detB.montant.ecartAbsolu) {
+          return detA.montant.ecartAbsolu - detB.montant.ecartAbsolu;
+        }
+
         const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
         if (nameCmp !== 0) return nameCmp;
         return (a.prestationNum || '').localeCompare(b.prestationNum || '');
@@ -319,9 +386,10 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     }
 
     // Liste triée par pertinence — ordre de priorité explicite :
-    //   1. même date de soins ET même montant,  2. même date de soins,
-    //   3. même montant,                        4. similarité de nom,
-    //   5. proximité de la date de soins,       6. ordre alphabétique.
+    //   1. même date ET montant sans TM conforme, 2. même date de soins,
+    //   3. montant sans TM conforme,              4. écart de montant croissant,
+    //   5. similarité de nom,                     6. proximité de la date de soins,
+    //   7. ordre alphabétique.
     return candidates.sort((a, b) => {
       const detA = getConfrontationDetails(activeDate, activeBrut, activeNet, a);
       const detB = getConfrontationDetails(activeDate, activeBrut, activeNet, b);
@@ -330,7 +398,12 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
       const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
       if (typeDiff !== 0) return typeDiff;
 
-      // 4. Similarité de nom : identique > partiellement similaire > matricule identique > autre
+      // 4. Écart de montant (résultat de la comparaison sans TM) le plus faible d'abord
+      if (detA.montant.ecartAbsolu !== detB.montant.ecartAbsolu) {
+        return detA.montant.ecartAbsolu - detB.montant.ecartAbsolu;
+      }
+
+      // 5. Similarité de nom : identique > partiellement similaire > matricule identique > autre
       const nameSim = (cand: MatchCandidate): number => {
         const cNom = (cand.personneNom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
         if (cleanNom && cNom && cleanNom === cNom) return 3;
@@ -342,12 +415,12 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
       const simDiff = nameSim(b) - nameSim(a);
       if (simDiff !== 0) return simDiff;
 
-      // 5. Proximité de la date de soins (la plus proche d'abord)
+      // 6. Proximité de la date de soins (la plus proche d'abord)
       const distA = Math.abs(dayOf(a.prestationDate) - targetDay);
       const distB = Math.abs(dayOf(b.prestationDate) - targetDay);
       if (distA !== distB) return distA - distB;
 
-      // 6. Ordre alphabétique, puis date (ordre déterministe)
+      // 7. Ordre alphabétique, puis date (ordre déterministe)
       const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
       if (nameCmp !== 0) return nameCmp;
       return (a.prestationDate || '').localeCompare(b.prestationDate || '');
@@ -378,6 +451,17 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
     });
     return counts;
   }, [filteredSearchCandidates, activeDate, activeBrut, activeNet]);
+
+  /**
+   * Résultat de la comparaison : nombre d'actes candidats dont le « montant sans TM »
+   * égale le Montant_Reclame_Brut de cette ligne de règlement.
+   */
+  const montantConformesCount = useMemo(
+    () => filteredSearchCandidates.filter(
+      cand => computeMontantConfrontation(activeBrut || activeNet, cand).isConforme
+    ).length,
+    [filteredSearchCandidates, activeBrut, activeNet]
+  );
 
   if (!isOpen || !paiement || !lignePaiement) return null;
 
@@ -450,7 +534,17 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
               <span>Rattacher un acte prescrit à cette ligne de règlement</span>
             </h4>
             <p className="text-sm text-slate-500 mt-1">
-              Pour : <strong className="text-slate-800">{activeNom || 'Patient'}</strong> (Mat: {activeMat || '-'}) • Date Soins : <strong>{activeDate ? formatDate(activeDate) : 'Non renseignée'}</strong> • Brut sans TM : <strong>{formatMoney(activeBrut)}</strong>
+              Pour : <strong className="text-slate-800">{activeNom || 'Patient'}</strong> (Mat: {activeMat || '-'}) • Date Soins : <strong>{activeDate ? formatDate(activeDate) : 'Non renseignée'}</strong> • {MONTANT_IMPORT_LABEL} : <strong className="text-slate-900">{formatMoney(activeBrut)}</strong>
+            </p>
+            {/* Rappel de la règle de comparaison appliquée au tri et aux badges */}
+            <p
+              className="mt-1.5 inline-flex items-start gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2 py-1 text-[11px] font-medium text-indigo-900"
+              title={MONTANT_COMPARISON_HINT}
+            >
+              <Filter className="w-3.5 h-3.5 shrink-0 mt-0.5 text-indigo-600" />
+              <span>
+                Comparaison &amp; tri : <strong>{MONTANT_IMPORT_LABEL}</strong> contre <strong>{MONTANT_ACTE_LABEL}</strong> — l'écart obtenu est affiché sur chaque acte et commande le tri par pertinence.
+              </span>
             </p>
           </div>
           <button
@@ -487,12 +581,20 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
             </div>
 
             <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-slate-500">
-              <span>
-                {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par{' '}
-                {actSortMode === 'DATE_ASC' ? 'date croissante' : actSortMode === 'DATE_DESC' ? 'date décroissante' : 'pertinence'})
-                {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
-                  <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
-                )}
+              <span className="inline-flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par {actSortLabel(actSortMode)})
+                  {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
+                    <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
+                  )}
+                </span>
+                <span
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10.5px] font-bold text-emerald-800"
+                  title={`Actes dont le montant sans TM (total de l'acte − ticket modérateur) égale le ${MONTANT_IMPORT_LABEL} de cette ligne (${formatMoney(activeBrut || activeNet)})`}
+                >
+                  <CheckCircle2 className="w-3 h-3" />
+                  {montantConformesCount} montant(s) conforme(s)
+                </span>
               </span>
               {actSearchQuery && (
                 <button
@@ -504,25 +606,23 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
               )}
             </div>
 
-            {/* Tri des résultats : date croissante par défaut */}
+            {/* Tri des résultats : date croissante par défaut, écart de montant disponible */}
             <div className="flex items-center gap-2 flex-wrap text-xs">
               <span className="text-slate-500 font-semibold inline-flex items-center gap-1.5 shrink-0">
                 <Calendar className="w-4 h-4" />
                 Trier les résultats par :
               </span>
-              {([
-                { key: 'DATE_ASC' as const, label: 'Date croissante ↑' },
-                { key: 'DATE_DESC' as const, label: 'Date décroissante ↓' },
-                { key: 'PERTINENCE' as const, label: 'Pertinence' },
-              ]).map(opt => (
+              {ACT_SORT_OPTIONS.map(opt => (
                 <button
                   key={opt.key}
                   type="button"
                   onClick={() => setActSortMode(opt.key)}
-                  title={opt.key === 'PERTINENCE' ? 'Tri par pertinence : même date + même montant, même date, même montant, similarité de nom, date la plus proche' : `Trier les actes par date de soins ${opt.key === 'DATE_ASC' ? 'croissante (plus anciens d\u2019abord)' : 'décroissante (plus récents d\u2019abord)'}`}
+                  title={opt.title}
                   className={`px-2.5 py-1 rounded-lg border transition font-semibold cursor-pointer ${
                     actSortMode === opt.key
                       ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                      : opt.key.startsWith('MONTANT')
+                      ? 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200'
                       : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
@@ -561,16 +661,16 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
             <div className="flex items-center gap-2 flex-wrap text-xs pt-2 mt-0.5 border-t border-slate-100">
               <span
                 className="text-slate-500 font-semibold inline-flex items-center gap-1.5 shrink-0"
-                title="Tri par pertinence : 1) même date + même montant, 2) même date, 3) même montant, 4) similarité de nom, 5) date la plus proche, 6) ordre alphabétique"
+                title="Filtre de pertinence basé sur la comparaison « Montant_Reclame_Brut (importation) ↔ montant sans TM de l'acte prescrit » : 1) même date + montant sans TM conforme, 2) même date, 3) montant sans TM conforme, 4) à vérifier"
               >
                 <Filter className="w-4 h-4" />
                 Filtrer les résultats :
               </span>
               {([
                 { key: 'ALL' as const, label: 'Tous', active: 'bg-slate-900 text-white border-slate-900 shadow-2xs', idle: 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100' },
-                { key: 'PERFECT' as const, label: 'Même date & même montant', active: 'bg-emerald-700 text-white border-emerald-700 shadow-2xs', idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
+                { key: 'PERFECT' as const, label: 'Même date & montant sans TM', active: 'bg-emerald-700 text-white border-emerald-700 shadow-2xs', idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
                 { key: 'SAME_DATE' as const, label: 'Même date', active: 'bg-sky-700 text-white border-sky-700 shadow-2xs', idle: 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100' },
-                { key: 'SAME_AMOUNT' as const, label: 'Même montant', active: 'bg-purple-700 text-white border-purple-700 shadow-2xs', idle: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
+                { key: 'SAME_AMOUNT' as const, label: 'Même montant sans TM', active: 'bg-purple-700 text-white border-purple-700 shadow-2xs', idle: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
                 { key: 'VERIFY' as const, label: 'À vérifier', active: 'bg-amber-600 text-white border-amber-600 shadow-2xs', idle: 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100' },
               ]).map(chip => (
                 <button
@@ -598,7 +698,7 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                 <AlertCircle className="w-10 h-10 text-slate-300 mx-auto" />
                 <div className="text-sm text-slate-600 font-medium max-w-xl mx-auto">
                   {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0
-                    ? `Aucun acte ne correspond au filtre « ${{ PERFECT: 'Même date & même montant', SAME_DATE: 'Même date', SAME_AMOUNT: 'Même montant', VERIFY: 'À vérifier' }[actResultFilter]} » parmi les ${filteredSearchCandidates.length} résultat(s) de la recherche.`
+                    ? `Aucun acte ne correspond au filtre « ${{ PERFECT: 'Même date & montant sans TM', SAME_DATE: 'Même date', SAME_AMOUNT: 'Même montant sans TM', VERIFY: 'À vérifier' }[actResultFilter]} » parmi les ${filteredSearchCandidates.length} résultat(s) de la recherche.`
                     : 'Aucun acte en attente ou partiellement payé correspondant trouvé.'}
                 </div>
                 {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0 ? (
@@ -650,6 +750,11 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                             (Facture N° {cand.prestationNum} • {formatDate(cand.prestationDate)})
                           </span>
                         )}
+                        {isCurrentlyLinked && (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                            <Link2 className="w-3 h-3" /> Acte déjà relié à cette ligne
+                          </span>
+                        )}
                       </div>
 
                       {/* 2. Act header & Libelle + Live confrontation badge */}
@@ -665,18 +770,42 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                         </span>
                       </div>
 
-                      {/* Detailed price breakdown & live comparison */}
-                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200/80">
-                        <span>
-                          Prix Brut Initial: <strong className="text-slate-900">{formatMoney(cand.montantInitial)}</strong>
-                          {compDetails.isSameMontantBrut && (
-                            <span className="ml-1 text-xs text-emerald-700 font-bold">(Même montant)</span>
-                          )}
-                        </span>
-                        <span>Ticket Mod.: <strong className="text-amber-700">{formatMoney(cand.ticketModerateur)}</strong></span>
-                        <span>À Rembourser: <strong className="text-indigo-700">{formatMoney(cand.montantARembourser)}</strong></span>
-                        <span>Déjà Réglé: <strong className="text-emerald-700">{formatMoney(cand.dejaPaye)}</strong></span>
-                      </div>
+                      {/* RÉSULTAT DE LA COMPARAISON DES MONTANTS (base du tri par pertinence) */}
+                      {(() => {
+                        const mnt = compDetails.montant;
+                        return (
+                          <div className="rounded-lg border border-slate-200/80 bg-slate-50 p-2.5 space-y-1.5">
+                            <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 text-xs">
+                              <span title="Montant réclamé de cette ligne de règlement (Montant_Reclame_Brut de l'importation)">
+                                {MONTANT_IMPORT_LABEL} : <strong className="text-slate-900 font-mono">{formatMoney(mnt.brutImport)}</strong>
+                              </span>
+                              <span title={`Total de l'acte (${formatMoney(mnt.brutActe)}) − ticket modérateur (${formatMoney(mnt.tmActe)})`}>
+                                {MONTANT_ACTE_LABEL} : <strong className="text-indigo-700 font-mono">{formatMoney(mnt.montantSansTM)}</strong>
+                                <span className="ml-1 text-[10.5px] text-slate-500">
+                                  (Brut {formatMoney(mnt.brutActe)} − TM {formatMoney(mnt.tmActe)})
+                                </span>
+                              </span>
+                              <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-bold ${mnt.badgeClass}`}>
+                                {mnt.isConforme ? (
+                                  <><CheckCircle2 className="w-3 h-3" /> Montants identiques</>
+                                ) : !mnt.isComparable ? (
+                                  <>Montant non comparable</>
+                                ) : (
+                                  <><AlertTriangle className="w-3 h-3" /> Écart {formatEcartMontant(mnt.ecart)}</>
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                              <span>Ticket Mod.: <strong className="text-amber-700 font-mono">{formatMoney(cand.ticketModerateur)}</strong></span>
+                              <span>À Rembourser: <strong className="text-indigo-700 font-mono">{formatMoney(cand.montantARembourser)}</strong></span>
+                              <span>Déjà Réglé: <strong className="text-emerald-700 font-mono">{formatMoney(cand.dejaPaye)}</strong></span>
+                              <span title="Score de proximité utilisé par le tri (100 = montant sans TM conforme)">
+                                Pertinence montant : <strong className={`font-mono ${mnt.ecartTextClass}`}>{compDetails.montantRank}/100</strong>
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Right column: Reste a payer & Action */}
@@ -687,17 +816,35 @@ export const RelierPaiementModal: React.FC<RelierPaiementModalProps> = ({
                           {formatMoney(cand.resteAPayer)}
                         </strong>
                       </div>
-                      <button
-                        onClick={() => handleAssignCandidate(cand)}
-                        className={`rounded-xl px-5 py-2.5 text-sm font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                          isCurrentlyLinked
-                            ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                            : 'bg-indigo-600 text-white hover:bg-indigo-500'
-                        }`}
-                      >
-                        {isCurrentlyLinked ? <CheckCircle2 className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
-                        <span>{isCurrentlyLinked ? 'Acte actuellement relié' : 'Rattacher cet Acte'}</span>
-                      </button>
+                      <div className="flex flex-col items-stretch gap-1.5">
+                        {isCurrentlyLinked ? (
+                          <>
+                            <button
+                              onClick={handleUnlink}
+                              className="rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-bold text-rose-700 hover:bg-rose-50 transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                              title="Délier cet acte prescrit de la ligne de règlement"
+                            >
+                              <Unlink className="w-4 w-4" />
+                              <span>Délier cet acte</span>
+                            </button>
+                            <button
+                              onClick={onClose}
+                              className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Garder ce rattachement</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => handleAssignCandidate(cand)}
+                            className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                          >
+                            <Link2 className="w-4 w-4" />
+                            <span>Rattacher cet Acte</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

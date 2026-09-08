@@ -51,6 +51,20 @@ import {
 import { formatMoney, formatDate, generateId, getCurrentTimestamp, normalizeDateISO } from '../utils/formatters';
 import { downloadDecomptesExcelTemplate } from '../utils/excelTemplates';
 import { findBestMatchingSociete } from '../utils/societyMatcher';
+import {
+  computeMontantConfrontation,
+  formatEcartMontant,
+  montantProximiteScore,
+  MONTANT_IMPORT_LABEL,
+  MONTANT_ACTE_LABEL,
+  MONTANT_TOLERANCE,
+  MONTANT_PROXIMITE_RATIO,
+  MONTANT_COMPARISON_HINT,
+  ACT_SORT_OPTIONS,
+  actSortLabel,
+  type ActSortMode,
+  type MontantConfrontation,
+} from '../utils/montantConfrontation';
 import * as XLSX from 'xlsx';
 
 interface DecompteImportModalProps {
@@ -266,6 +280,12 @@ export interface ConfrontationDetails {
   isPartialName: boolean;
   isDifferentName: boolean;
   diffMontantBrut: number;
+  /** Comparaison « Montant_Reclame_Brut de l'importation ↔ montant sans TM de l'acte prescrit ». */
+  montant: MontantConfrontation;
+  /** Le montant sans TM de l'acte égale le Montant_Reclame_Brut de l'importation. */
+  isSameMontantSansTM: boolean;
+  /** Score de proximité de montant (100 = conforme) utilisé pour classer les candidats. */
+  montantRank: number;
   label: string;
   badgeClass: string;
   cardBorderClass: string;
@@ -281,131 +301,42 @@ export function getConfrontationDetails(
   participation: number = 0,
   sourceName: string = ''
 ): ConfrontationDetails {
-  if (!candidate) {
-    return {
-      type: 'UNLINKED',
-      isSameDate: false,
-      isSameMontantBrut: false,
-      isSameMontantNet: false,
-      isSameMontant: false,
-      isSameName: false,
-      isPartialName: false,
-      isDifferentName: false,
-      diffMontantBrut: 0,
-      label: 'Non rattaché (Créer)',
-      badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
-      cardBorderClass: 'border-slate-200 bg-slate-50/60',
-      rowBorderClass: 'border-l-4 border-l-slate-300',
-      tagColor: 'slate'
-    };
-  }
+  // RÈGLE DE COMPARISON : le montant à confronter est le « montant sans TM » de
+  // l'acte prescrit (total de l'acte − ticket modérateur) contre le
+  // « Montant_Reclame_Brut » lu sur l'importation du règlement.
+  const brut = Number(montantBrut || netAPayer || 0);
+  const montant = computeMontantConfrontation(brut, candidate);
+  const montantRank = montantProximiteScore(montant);
 
   const cleanDateSoins = (dateSoins || '').trim().substring(0, 10);
-  const cleanCandDate = (candidate.prestationDate || '').trim().substring(0, 10);
-  const isSameDate = Boolean(cleanDateSoins && cleanCandDate && cleanDateSoins === cleanCandDate);
+  const cleanCandDate = (candidate?.prestationDate || '').trim().substring(0, 10);
+  const isSameDate = Boolean(candidate && cleanDateSoins && cleanCandDate && cleanDateSoins === cleanCandDate);
 
-  const brut = Number(montantBrut || netAPayer || 0);
   const tm = Number(participation || 0);
   const netDecompte = netAPayer || Math.max(0, brut - tm);
+  const candRemb = Number(candidate?.montantARembourser || 0);
+  const candReste = Number(candidate?.resteAPayer || 0);
 
-  const candBrut = Number(candidate.montantInitial || 0);
-  const candRemb = Number(candidate.montantARembourser || 0);
-  const candReste = Number(candidate.resteAPayer || 0);
-
-  const isSameMontantBrut = Math.abs(brut - candBrut) < 2;
-  const isSameMontantNet = Math.abs(netDecompte - candRemb) < 2 
-    || Math.abs(netDecompte - candReste) < 2 
-    || Math.abs(netDecompte - candBrut) < 2
-    || (tm > 0 && Math.abs((brut - tm) - candBrut) < 2);
+  // 1) CRITÈRE PRINCIPAL : montant sans TM de l'acte == Montant_Reclame_Brut importé.
+  const isSameMontantSansTM = Boolean(candidate) && montant.isConforme;
+  // isSameMontantBrut garde le même nom pour les affichages existants : il désigne
+  // désormais la conformité sur la base « sans TM », celle attendue par le métier.
+  const isSameMontantBrut = isSameMontantSansTM;
+  // 2) FILET DE SECOURS : décomptes qui n'indiquent que le net effectivement réglé.
+  const isSameMontantNet = Boolean(candidate) && !isSameMontantSansTM
+    && (Math.abs(netDecompte - candRemb) < MONTANT_TOLERANCE || Math.abs(netDecompte - candReste) < MONTANT_TOLERANCE);
 
   const isSameMontant = isSameMontantBrut || isSameMontantNet;
-  const diffMontantBrut = brut - candBrut;
-  const comparedNames = comparePersonNames(sourceName, candidate.personneNom);
+  const diffMontantBrut = montant.ecart;
+
+  const comparedNames = comparePersonNames(sourceName, candidate?.personneNom);
   const isSameName = comparedNames.isSame;
   const isPartialName = comparedNames.isPartial;
   const isDifferentName = comparedNames.isDifferent;
 
-  // Date identique + nom partiellement similaire : ne PAS classer en « À vérifier »
-  // (rapprochement décompte / import règlement). Un nom vraiment différent reste à vérifier.
-  const mustVerifyName = isDifferentName || (isPartialName && !isSameDate);
-  if (mustVerifyName) {
-    return {
-      type: 'VERIFY',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      isSameName,
-      isPartialName,
-      isDifferentName,
-      diffMontantBrut,
-      label: isPartialName ? 'À vérifier (Nom partiellement similaire)' : 'À vérifier (Nom différent)',
-      badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
-      cardBorderClass: 'border-amber-300 bg-amber-50/60',
-      rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
-      tagColor: 'amber'
-    };
-  }
-
-  if (isSameDate && isSameMontant) {
-    return {
-      type: 'PERFECT',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      isSameName,
-      isPartialName,
-      isDifferentName,
-      diffMontantBrut,
-      label: isSameMontantBrut ? 'Même Date & Montant Brut' : 'Même Date & Net Conforme',
-      badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
-      cardBorderClass: 'border-emerald-300 bg-emerald-50/70',
-      rowBorderClass: 'border-l-4 border-l-emerald-500 bg-emerald-50/30',
-      tagColor: 'emerald'
-    };
-  }
-
-  if (isSameDate && !isSameMontant) {
-    return {
-      type: 'SAME_DATE',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      isSameName,
-      isPartialName,
-      isDifferentName,
-      diffMontantBrut,
-      label: 'Même Date (Écart Montant)',
-      badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
-      cardBorderClass: 'border-sky-300 bg-sky-50/60',
-      rowBorderClass: 'border-l-4 border-l-sky-500 bg-sky-50/20',
-      tagColor: 'sky'
-    };
-  }
-
-  if (!isSameDate && isSameMontant) {
-    return {
-      type: 'SAME_AMOUNT',
-      isSameDate,
-      isSameMontantBrut,
-      isSameMontantNet,
-      isSameMontant,
-      isSameName,
-      isPartialName,
-      isDifferentName,
-      diffMontantBrut,
-      label: 'Même Montant (Date différente)',
-      badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
-      cardBorderClass: 'border-purple-300 bg-purple-50/60',
-      rowBorderClass: 'border-l-4 border-l-purple-500 bg-purple-50/20',
-      tagColor: 'purple'
-    };
-  }
-
-  return {
-    type: 'VERIFY',
+  const build = (
+    status: Pick<ConfrontationDetails, 'type' | 'label' | 'badgeClass' | 'cardBorderClass' | 'rowBorderClass' | 'tagColor'>
+  ): ConfrontationDetails => ({
     isSameDate,
     isSameMontantBrut,
     isSameMontantNet,
@@ -414,12 +345,84 @@ export function getConfrontationDetails(
     isPartialName,
     isDifferentName,
     diffMontantBrut,
-    label: 'À vérifier (Dates & Montants diffèrent)',
+    montant,
+    isSameMontantSansTM,
+    montantRank,
+    ...status,
+  });
+
+  if (!candidate) {
+    return build({
+      type: 'UNLINKED',
+      label: 'Non rattaché (Créer)',
+      badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
+      cardBorderClass: 'border-slate-200 bg-slate-50/60',
+      rowBorderClass: 'border-l-4 border-l-slate-300',
+      tagColor: 'slate'
+    });
+  }
+
+  // Date identique + nom partiellement similaire : ne PAS classer en « À vérifier »
+  // (rapprochement décompte / import règlement). Un nom vraiment différent reste à vérifier.
+  const mustVerifyName = isDifferentName || (isPartialName && !isSameDate);
+  if (mustVerifyName) {
+    return build({
+      type: 'VERIFY',
+      label: isPartialName ? 'À vérifier (Nom partiellement similaire)' : 'À vérifier (Nom différent)',
+      badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+      cardBorderClass: 'border-amber-300 bg-amber-50/60',
+      rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
+      tagColor: 'amber'
+    });
+  }
+
+  if (isSameDate && isSameMontant) {
+    return build({
+      type: 'PERFECT',
+      label: isSameMontantBrut
+        ? 'Même Date & Montant sans TM Conforme'
+        : 'Même Date & Net Conforme',
+      badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+      cardBorderClass: 'border-emerald-300 bg-emerald-50/70',
+      rowBorderClass: 'border-l-4 border-l-emerald-500 bg-emerald-50/30',
+      tagColor: 'emerald'
+    });
+  }
+
+  if (isSameDate && !isSameMontant) {
+    return build({
+      type: 'SAME_DATE',
+      label: `Même Date (Écart ${formatEcartMontant(montant.ecart)})`,
+      badgeClass: 'bg-sky-100 text-sky-900 border-sky-300 font-semibold',
+      cardBorderClass: 'border-sky-300 bg-sky-50/60',
+      rowBorderClass: 'border-l-4 border-l-sky-500 bg-sky-50/20',
+      tagColor: 'sky'
+    });
+  }
+
+  if (!isSameDate && isSameMontant) {
+    return build({
+      type: 'SAME_AMOUNT',
+      label: isSameMontantBrut
+        ? 'Même Montant sans TM (Date différente)'
+        : 'Même Net Réglé (Date différente)',
+      badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-semibold',
+      cardBorderClass: 'border-purple-300 bg-purple-50/60',
+      rowBorderClass: 'border-l-4 border-l-purple-500 bg-purple-50/20',
+      tagColor: 'purple'
+    });
+  }
+
+  return build({
+    type: 'VERIFY',
+    label: montant.isComparable
+      ? `À vérifier (Date & Écart ${formatEcartMontant(montant.ecart)})`
+      : 'À vérifier (Dates & Montants diffèrent)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-medium',
     cardBorderClass: 'border-amber-300 bg-amber-50/60',
     rowBorderClass: 'border-l-4 border-l-amber-500 bg-amber-50/20',
     tagColor: 'amber'
-  };
+  });
 }
 
 export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
@@ -457,7 +460,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
   // (même date + même montant, même date, même montant, à vérifier)
   const [actResultFilter, setActResultFilter] = useState<'ALL' | 'PERFECT' | 'SAME_DATE' | 'SAME_AMOUNT' | 'VERIFY'>('ALL');
   // Tri des résultats de la sous-fenêtre « Lier » — date croissante par défaut
-  const [actSortMode, setActSortMode] = useState<'DATE_ASC' | 'DATE_DESC' | 'PERTINENCE'>('DATE_ASC');
+  const [actSortMode, setActSortMode] = useState<ActSortMode>('DATE_ASC');
 
   // Main Table search & sorting state
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
@@ -690,15 +693,23 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         score += 70;
       }
 
-      // 5. Montant sans ticket modérateur (Montant brut initial)
-      const isSameGrossAmount = Math.abs(brutMontant - candBrut) < 2;
-      const isSameNetAmount = Math.abs(netMontant - candRemb) < 2 || Math.abs(netMontant - candReste) < 2;
+      // 5. Montants : « Montant_Reclame_Brut » de l'importation contre le montant
+      //    SANS ticket modérateur de l'acte prescrit — même règle que la fenêtre
+      //    « Rattacher un acte prescrit à cette ligne de règlement ». Les
+      //    comparaisons brut/brut et net/net ne restent que des signaux secondaires.
+      const montantCand = computeMontantConfrontation(brutMontant, cand);
+      const isSameGrossAmount = montantCand.isConforme;
+      const isSameNetAmount = !isSameGrossAmount
+        && (Math.abs(netMontant - candRemb) < MONTANT_TOLERANCE || Math.abs(netMontant - candReste) < MONTANT_TOLERANCE);
+      const isSameRawBrut = !isSameGrossAmount && candBrut > 0 && Math.abs(brutMontant - candBrut) < MONTANT_TOLERANCE;
 
       if (isSameGrossAmount) {
         score += 70;
       } else if (isSameNetAmount) {
         score += 45;
-      } else if (candBrut > 0 && Math.abs(brutMontant - candBrut) / candBrut <= 0.15) {
+      } else if (isSameRawBrut) {
+        score += 40;
+      } else if (montantCand.montantSansTM > 0 && montantCand.ecartAbsolu / montantCand.montantSansTM <= MONTANT_PROXIMITE_RATIO) {
         score += 20;
       }
 
@@ -1183,6 +1194,30 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
     setActResultFilter('ALL');
   };
 
+  /**
+   * Délie l'acte prescrit déjà rattaché à une ligne de règlement, sans créer de
+   * nouvelle prestation au vol et sans fermer la fenêtre de rattachement : la
+   * ligne redevient « Non rattaché » et l'utilisateur peut choisir un autre acte.
+   */
+  const handleUnlinkRow = (rowId: string, keepSearchOpen = false) => {
+    setRows(prev => prev.map(r => (r.rowId === rowId ? { ...r, matchedCandidate: null, createNewPrestation: false } : r)));
+    if (!keepSearchOpen) {
+      setSearchingRowId(null);
+      setActSearchQuery('');
+      setActResultFilter('ALL');
+    }
+  };
+
+  /** Délie, en une seule action, tous les actes déjà rattachés du décompte courant. */
+  const handleUnlinkAllRows = () => {
+    const alreadyLinked = rows.filter(r => r.matchedCandidate).length;
+    if (alreadyLinked === 0) return;
+    if (!window.confirm(`Délier les ${alreadyLinked} ligne(s) déjà rattachée(s) à un acte prescrit ?\n\nLes lignes redeviennent « Non rattaché » (aucune prestation n'est créée à l'enregistrement).`)) {
+      return;
+    }
+    setRows(prev => prev.map(r => (r.matchedCandidate ? { ...r, matchedCandidate: null, createNewPrestation: false } : r)));
+  };
+
   const activeSearchingRow = rows.find(r => r.rowId === searchingRowId);
 
   // Filtered search list inside manual match modal, scored by match quality
@@ -1215,6 +1250,33 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         : null;
     const isoOf = (iso?: string): string => normalizeDateISO(iso || '') || (iso || '').trim().substring(0, 10);
 
+    // Tri par écart de montant : utilise directement le résultat de la comparaison
+    // « Montant_Reclame_Brut (importation) ↔ montant sans TM (acte prescrit) » :
+    // les actes dont le montant hors TM tombe exactement sur le montant réclamé
+    // arrivent en tête, puis les écarts croissants.
+    if (!activeSearchingRow) return list;
+
+    if (actSortMode === 'MONTANT_ASC' || actSortMode === 'MONTANT_DESC') {
+      const dir = actSortMode === 'MONTANT_ASC' ? 1 : -1;
+      return [...list].sort((a, b) => {
+        const detA = detailsOf(a);
+        const detB = detailsOf(b);
+        const ecartA = detA ? detA.montant.ecartAbsolu : Number.POSITIVE_INFINITY;
+        const ecartB = detB ? detB.montant.ecartAbsolu : Number.POSITIVE_INFINITY;
+        if (ecartA !== ecartB) return dir * (ecartA - ecartB);
+
+        // Ex æquo sur l'écart : catégorie de pertinence, puis date, puis nom
+        const typeDiff = (detA ? (typeRank[detA.type] ?? 4) : 4) - (detB ? (typeRank[detB.type] ?? 4) : 4);
+        if (typeDiff !== 0) return typeDiff;
+
+        const dateCmp = isoOf(a.prestationDate).localeCompare(isoOf(b.prestationDate));
+        if (dateCmp !== 0) return dateCmp;
+        const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
+        if (nameCmp !== 0) return nameCmp;
+        return (a.prestationNum || '').localeCompare(b.prestationNum || '');
+      });
+    }
+
     // Tri par date de soins croissante / décroissante (date croissante par défaut) :
     // la date de l'acte prescrit est le critère principal, la pertinence départage les ex æquo.
     if (actSortMode === 'DATE_ASC' || actSortMode === 'DATE_DESC') {
@@ -1226,28 +1288,29 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
         if (dA && !dB) return -1;
         if (dA && dB && dA !== dB) return dir * dA.localeCompare(dB);
 
-        // Ex æquo sur la date : pertinence, puis ordre alphabétique (déterministe)
-        if (activeSearchingRow) {
-          const detA = detailsOf(a);
-          const detB = detailsOf(b);
-          const typeDiff = (detA ? (typeRank[detA.type] ?? 4) : 4) - (detB ? (typeRank[detB.type] ?? 4) : 4);
-          if (typeDiff !== 0) return typeDiff;
-        }
+        // Ex æquo sur la date : pertinence, écart de montant, puis ordre alphabétique
+        const detA = detailsOf(a);
+        const detB = detailsOf(b);
+        const typeDiff = (detA ? (typeRank[detA.type] ?? 4) : 4) - (detB ? (typeRank[detB.type] ?? 4) : 4);
+        if (typeDiff !== 0) return typeDiff;
+
+        const ecartDiff = (detA?.montant.ecartAbsolu ?? Number.POSITIVE_INFINITY) - (detB?.montant.ecartAbsolu ?? Number.POSITIVE_INFINITY);
+        if (ecartDiff !== 0) return ecartDiff;
+
         const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
         if (nameCmp !== 0) return nameCmp;
         return (a.prestationNum || '').localeCompare(b.prestationNum || '');
       });
     }
 
-    if (!activeSearchingRow) return list;
-
     // Liste triée par pertinence — ordre de priorité explicite :
-    //   1. même date de soins ET même montant (sans ticket modérateur),
+    //   1. même date de soins ET même montant (montant sans TM de l'acte == Montant_Reclame_Brut),
     //   2. même date de soins,
     //   3. même montant,
-    //   4. similarité de nom (nom identique > partiellement similaire),
-    //   5. proximité de la date de soins,
-    //   6. ordre alphabétique (nom, puis date, puis n° facture).
+    //   4. écart de montant croissant (résultat de la comparaison sans TM),
+    //   5. similarité de nom (nom identique > partiellement similaire),
+    //   6. proximité de la date de soins,
+    //   7. ordre alphabétique (nom, puis date, puis n° facture).
     const dayOf = (iso?: string): number => {
       const t = Date.parse(normalizeDateISO(iso || '') || '');
       return Number.isFinite(t) ? Math.round(t / 86_400_000) : Number.POSITIVE_INFINITY;
@@ -1262,17 +1325,22 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       const typeDiff = (typeRank[detA.type] ?? 4) - (typeRank[detB.type] ?? 4);
       if (typeDiff !== 0) return typeDiff;
 
-      // 4. Similarité de nom : identique > partiellement similaire > différent
+      // 4. Écart de montant (Montant_Reclame_Brut vs montant sans TM) le plus faible d'abord
+      if (detA.montant.ecartAbsolu !== detB.montant.ecartAbsolu) {
+        return detA.montant.ecartAbsolu - detB.montant.ecartAbsolu;
+      }
+
+      // 5. Similarité de nom : identique > partiellement similaire > différent
       const nameScore = (d: ConfrontationDetails) => (d.isSameName ? 2 : d.isPartialName ? 1 : 0);
       const nameDiff = nameScore(detB) - nameScore(detA);
       if (nameDiff !== 0) return nameDiff;
 
-      // 5. Proximité de la date de soins (la plus proche d'abord)
+      // 6. Proximité de la date de soins (la plus proche d'abord)
       const distA = Math.abs(dayOf(a.prestationDate) - targetDay);
       const distB = Math.abs(dayOf(b.prestationDate) - targetDay);
       if (distA !== distB) return distA - distB;
 
-      // 6. Ordre alphabétique, puis date et n° facture (ordre déterministe)
+      // 7. Ordre alphabétique, puis date et n° facture (ordre déterministe)
       const nameCmp = (a.personneNom || '').localeCompare(b.personneNom || '', 'fr', { sensitivity: 'base' });
       if (nameCmp !== 0) return nameCmp;
       const dateCmp = (a.prestationDate || '').localeCompare(b.prestationDate || '');
@@ -1320,6 +1388,18 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
       });
     }
     return counts;
+  }, [filteredSearchCandidates, activeSearchingRow]);
+
+  /**
+   * Résultat de la comparaison demandé par le métier : nombre d'actes candidats
+   * dont le « montant sans TM » égale le Montant_Reclame_Brut de la ligne importée.
+   */
+  const montantConformesCount = useMemo(() => {
+    if (!activeSearchingRow) return 0;
+    const brutImport = Number(activeSearchingRow.montantBrut || activeSearchingRow.netAPayer || 0);
+    return filteredSearchCandidates.filter(
+      cand => computeMontantConfrontation(brutImport, cand).isConforme
+    ).length;
   }, [filteredSearchCandidates, activeSearchingRow]);
 
   // Helper to find top candidate suggestions for a settlement row (strictly in the same month & year)
@@ -2429,8 +2509,12 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                       </th>
                       <th className="py-2 px-3">Date Soins</th>
                       <th className="py-2 px-3">Adhérent & Matricule</th>
-                      <th className="py-2 px-3">Acte Règlement (Brut sans TM)</th>
-                      <th className="py-2 px-3 min-w-[320px]">Acte Prescrit Rattaché (Confrontation)</th>
+                      <th className="py-2 px-3" title={`Montant_Reclame_Brut lu dans l'importation : c'est la base de comparaison avec le montant sans TM de l'acte prescrit`}>
+                        Acte Règlement (Montant_Reclame_Brut)
+                      </th>
+                      <th className="py-2 px-3 min-w-[320px]" title={`Confrontation : ${MONTANT_ACTE_LABEL} (total de l'acte − ticket modérateur) contre ${MONTANT_IMPORT_LABEL}`}>
+                        Acte Prescrit Rattaché (Confrontation sans TM)
+                      </th>
                       <th className="py-2 px-3 text-right">Net Réglé</th>
                       <th className="py-2 px-3 text-center">Action</th>
                     </tr>
@@ -2523,7 +2607,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                           <td className="py-2 px-3 whitespace-nowrap">
                             <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200">
                               <span>{row.actCode}</span>
-                              <span className="text-[10px] text-indigo-700 font-semibold">Brut: {formatMoney(row.montantBrut)}</span>
+                              <span className="text-[10px] text-indigo-700 font-semibold" title={`${MONTANT_IMPORT_LABEL} \u2014 la valeur comparée au ${MONTANT_ACTE_LABEL} de l'acte rattaché`}>Réclamé brut: {formatMoney(row.montantBrut)}</span>
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[170px]" title={row.actLibelle}>
                               {row.articlesCount && row.articlesCount > 1 ? `Total: ${row.articlesCount} articles` : row.actLibelle}
@@ -2595,38 +2679,62 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                   </div>
                                   <div className="border-l border-slate-200 pl-2 min-w-0">
                                     <span className="text-[8px] uppercase tracking-wider text-slate-400 font-bold block leading-none">Facture en Base</span>
-                                    <div className="text-slate-800 truncate" title={`Facture en Base — ${formatDate(matched.prestationDate)} — Initial ${formatMoney(matched.montantInitial)} — Reste ${formatMoney(matched.resteAPayer)}`}>
-                                      {formatDate(matched.prestationDate)} • <strong>Init. {formatMoney(matched.montantInitial)}</strong> • <span className="text-emerald-700 font-semibold">Reste {formatMoney(matched.resteAPayer)}</span>
+                                    <div
+                                      className="text-slate-800 truncate"
+                                      title={`Facture en Base — ${formatDate(matched.prestationDate)} — Brut ${formatMoney(matched.montantInitial)} − TM ${formatMoney(matched.ticketModerateur)} = ${MONTANT_ACTE_LABEL} ${formatMoney(confront.montant.montantSansTM)} (à comparer au ${MONTANT_IMPORT_LABEL} ${formatMoney(confront.montant.brutImport)}) — Reste ${formatMoney(matched.resteAPayer)}`}
+                                    >
+                                      {formatDate(matched.prestationDate)} • <strong>Sans TM {formatMoney(confront.montant.montantSansTM)}</strong> • <span className="text-emerald-700 font-semibold">Reste {formatMoney(matched.resteAPayer)}</span>
                                     </div>
                                   </div>
                                 </div>
 
-                                {/* 4. Alerte de rapprochement : une seule ligne compacte */}
-                                {(nameNeedsReview || !confront.isSameDate || !confront.isSameMontant) && (
-                                  <div
-                                    className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[9.5px] font-bold truncate ${
-                                      confront.isSameDate && !confront.isSameMontant
-                                        ? 'bg-rose-50 text-rose-800 border border-rose-200'
-                                        : 'bg-amber-50 text-amber-900 border border-amber-200'
-                                    }`}
-                                    title={(() => {
-                                      if (confront.isSameDate && confront.isSameMontantBrut) return `Montants et dates parfaitement identiques (${formatMoney(row.montantBrut)}).`;
-                                      if (confront.isSameDate && row.participation > 0 && Math.abs((row.montantBrut - row.participation) - matched.montantInitial) < 2) return `Part Net Assurance (${formatMoney(row.montantBrut)} Brut - TM ${formatMoney(row.participation)} = ${formatMoney(row.montantBrut - row.participation)}) égale à la Facture (${formatMoney(matched.montantInitial)}).`;
-                                      if (!confront.isSameDate) return `Date Décompte (${formatDate(row.dateSoins)}) ≠ Date Facture (${formatDate(matched.prestationDate)}).`;
-                                      return `Écart de Montant : Décompte (${formatMoney(row.montantBrut)}) ≠ Facture (${formatMoney(matched.montantInitial)}).`;
-                                    })()}
-                                  >
-                                    {confront.isSameDate && confront.isSameMontantBrut ? (
-                                      <><CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" /><span>Montants & dates identiques ({formatMoney(row.montantBrut)}).</span></>
-                                    ) : confront.isSameDate && (row.participation > 0 && Math.abs((row.montantBrut - row.participation) - matched.montantInitial) < 2) ? (
-                                      <><CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" /><span>Net Assurance ({formatMoney(row.montantBrut)} - TM {formatMoney(row.participation)} = {formatMoney(row.montantBrut - row.participation)}) = Facture ({formatMoney(matched.montantInitial)}).</span></>
-                                    ) : !confront.isSameDate ? (
-                                      <><AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" /><span>Date Décompte ({formatDate(row.dateSoins)}) ≠ Facture ({formatDate(matched.prestationDate)}).</span></>
-                                    ) : (
-                                      <><AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" /><span>Écart Montant : Décompte ({formatMoney(row.montantBrut)}) ≠ Facture ({formatMoney(matched.montantInitial)}).</span></>
-                                    )}
-                                  </div>
-                                )}
+                                {/* 4. Résultat de la comparaison des montants (Montant_Reclame_Brut ↔ montant sans TM) */}
+                                {(() => {
+                                  const mnt = confront.montant;
+                                  const okMontant = mnt.isConforme;
+                                  const netOk = !okMontant && confront.isSameMontantNet;
+                                  const toneClass = okMontant
+                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    : netOk
+                                    ? 'bg-sky-50 text-sky-900 border border-sky-200'
+                                    : confront.isSameDate
+                                    ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                    : 'bg-amber-50 text-amber-900 border border-amber-200';
+                                  const toneTitle = okMontant
+                                    ? `${MONTANT_IMPORT_LABEL} (${formatMoney(mnt.brutImport)}) = ${MONTANT_ACTE_LABEL} (${formatMoney(mnt.montantSansTM)} = Brut ${formatMoney(mnt.brutActe)} − TM ${formatMoney(mnt.tmActe)}).${confront.isSameDate ? ' Dates identiques.' : ` Dates différentes : Décompte ${formatDate(row.dateSoins)} ≠ Facture ${formatDate(matched.prestationDate)}.`}`
+                                    : netOk
+                                    ? `Le net réglé du décompte (${formatMoney(row.netAPayer)}) correspond au reste à payer de l'acte (${formatMoney(matched.montantARembourser)} / ${formatMoney(matched.resteAPayer)}) — filet de secours, montants hors TM non identiques.`
+                                    : confront.isSameDate
+                                    ? `Mêmes dates mais ${MONTANT_IMPORT_LABEL} (${formatMoney(mnt.brutImport)}) ≠ ${MONTANT_ACTE_LABEL} (${formatMoney(mnt.montantSansTM)}) → écart ${formatEcartMontant(mnt.ecart)}.`
+                                    : `Date Décompte (${formatDate(row.dateSoins)}) ≠ Date Facture (${formatDate(matched.prestationDate)}) et écart de montant ${formatEcartMontant(mnt.ecart)}.`;
+                                  return (
+                                    <div
+                                      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[9.5px] font-bold truncate ${okMontant || netOk ? '' : 'cursor-help '}${toneClass}`}
+                                      title={toneTitle}
+                                    >
+                                      {okMontant ? (
+                                        <>
+                                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                          <span>
+                                            Montant sans TM conforme : {formatMoney(mnt.brutImport)} = {formatMoney(mnt.montantSansTM)}{confront.isSameDate ? ' • mêmes dates' : ''}.
+                                          </span>
+                                        </>
+                                      ) : netOk ? (
+                                        <>
+                                          <CheckCircle2 className="w-2.5 h-2.5 text-sky-600 shrink-0" />
+                                          <span>Net réglé conforme (secours) — écart hors TM {formatEcartMontant(mnt.ecart)}.</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                          <span>
+                                            Écart montant sans TM : import {formatMoney(mnt.brutImport)} ≠ acte {formatMoney(mnt.montantSansTM)} ({formatEcartMontant(mnt.ecart)}).
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ) : (
                               (() => {
@@ -2659,7 +2767,18 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                                 <div className="font-extrabold text-slate-900 truncate uppercase tracking-tight">{sug.personneNom}</div>
                                                 <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1.5 flex-wrap">
                                                   <span className="font-mono bg-slate-100 px-1 py-0.2 rounded text-slate-700">{sug.codeActe}</span>
-                                                  <span>• Brut: {formatMoney(sug.montantInitial)}</span>
+                                                  <span>• Sans TM: {formatMoney(computeMontantConfrontation(row.montantBrut || row.netAPayer, sug).montantSansTM)}</span>
+                                                  {(() => {
+                                                    const sugMnt = computeMontantConfrontation(row.montantBrut || row.netAPayer, sug);
+                                                    return (
+                                                      <span
+                                                        className={`font-bold ${sugMnt.isConforme ? 'text-emerald-700' : 'text-amber-700'}`}
+                                                        title={`Comparaison ${MONTANT_IMPORT_LABEL} vs ${MONTANT_ACTE_LABEL}`}
+                                                      >
+                                                        • {sugMnt.isConforme ? 'montant conforme' : `écart ${formatEcartMontant(sugMnt.ecart)}`}
+                                                      </span>
+                                                    );
+                                                  })()}
                                                   <span>• {formatDate(sug.prestationDate)}</span>
                                                 </div>
                                               </div>
@@ -2688,21 +2807,35 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             {formatMoney(row.netAPayer)}
                           </td>
 
-                          {/* Action */}
+                          {/* Action : rechercher / changer, et délier un acte déjà rattaché */}
                           <td className="py-2 px-3 text-center whitespace-nowrap">
-                            <button
-                              onClick={() => {
-                                setActResultFilter('ALL');
-                                setSearchingRowId(row.rowId);
-                                const firstWord = (row.nomPrenom || '').trim().split(/\s+/)[0] || '';
-                                setActSearchQuery(firstWord || row.matricule || '');
-                              }}
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
-                              title="Modifier ou rechercher un acte à rattacher"
-                            >
-                              <Search className="h-3 w-3" />
-                              <span>{matched ? 'Changer' : 'Lier'}</span>
-                            </button>
+                            <div className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                              <button
+                                onClick={() => {
+                                  setActResultFilter('ALL');
+                                  // Depuis une ligne déjà rattachée, on ouvre directement sur le classement par écart de montant
+                                  setActSortMode(matched ? 'MONTANT_ASC' : 'DATE_ASC');
+                                  setSearchingRowId(row.rowId);
+                                  const firstWord = (row.nomPrenom || '').trim().split(/\s+/)[0] || '';
+                                  setActSearchQuery(firstWord || row.matricule || '');
+                                }}
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
+                                title={matched ? "Changer l'acte rattaché (trié par écart de montant sans TM)" : 'Rechercher un acte à rattacher'}
+                              >
+                                <Search className="h-3 w-3" />
+                                <span>{matched ? 'Changer' : 'Lier'}</span>
+                              </button>
+                              {matched && (
+                                <button
+                                  onClick={() => handleUnlinkRow(row.rowId)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 hover:border-rose-300 transition shadow-2xs cursor-pointer"
+                                  title={`Délier l'acte prescrit déjà rattaché à cette ligne (la ligne redevient « Non rattaché »)`}
+                                >
+                                  <Unlink className="h-3 w-3" />
+                                  <span>Délier</span>
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2711,10 +2844,22 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </table>
               </div>
 
-              {/* Reset action */}
-              <div className="flex justify-between items-center text-xs text-slate-500 pt-2">
-                <div>
-                  Affichage de <strong className="text-slate-800">{displayedRows.length}</strong> sur <strong>{rows.length}</strong> lignes
+              {/* Actions de pied de tableau : déliement global des actes déjà rattachés */}
+              <div className="flex justify-between items-center gap-2 text-xs text-slate-500 pt-2 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span>
+                    Affichage de <strong className="text-slate-800">{displayedRows.length}</strong> sur <strong>{rows.length}</strong> lignes
+                  </span>
+                  {confrontStats.linkedCount > 0 && (
+                    <button
+                      onClick={handleUnlinkAllRows}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 font-semibold text-rose-700 hover:bg-rose-100 hover:border-rose-300 transition cursor-pointer"
+                      title={`Retirer le rattachement des ${confrontStats.linkedCount} ligne(s) déjà liée(s) à un acte prescrit`}
+                    >
+                      <Unlink className="h-3.5 w-3.5" />
+                      <span>Délier les {confrontStats.linkedCount} acte(s) déjà rattaché(s)</span>
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={() => {
@@ -2793,7 +2938,17 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   <span>Rattacher un acte prescrit à cette ligne de règlement</span>
                 </h4>
                 <p className="text-sm text-slate-500 mt-1">
-                  Pour : <strong className="text-slate-800">{activeSearchingRow.nomPrenom}</strong> (Mat: {activeSearchingRow.matricule || '-'}) • Date Soins : <strong>{formatDate(activeSearchingRow.dateSoins)}</strong> • Brut sans TM : <strong>{formatMoney(activeSearchingRow.montantBrut)}</strong>
+                  Pour : <strong className="text-slate-800">{activeSearchingRow.nomPrenom}</strong> (Mat: {activeSearchingRow.matricule || '-'}) • Date Soins : <strong>{formatDate(activeSearchingRow.dateSoins)}</strong> • {MONTANT_IMPORT_LABEL} : <strong className="text-slate-900">{formatMoney(activeSearchingRow.montantBrut)}</strong>
+                </p>
+                {/* Rappel de la règle de comparaison appliquée au tri et aux badges */}
+                <p
+                  className="mt-1.5 inline-flex items-start gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2 py-1 text-[11px] font-medium text-indigo-900"
+                  title={MONTANT_COMPARISON_HINT}
+                >
+                  <Filter className="w-3.5 h-3.5 shrink-0 mt-0.5 text-indigo-600" />
+                  <span>
+                    Comparaison &amp; tri : <strong>{MONTANT_IMPORT_LABEL}</strong> contre <strong>{MONTANT_ACTE_LABEL}</strong> — l'écart obtenu est affiché sur chaque acte et commande le tri par pertinence.
+                  </span>
                 </p>
               </div>
               <button
@@ -2828,12 +2983,20 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-slate-500">
-                  <span>
-                    {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par{' '}
-                    {actSortMode === 'DATE_ASC' ? 'date croissante' : actSortMode === 'DATE_DESC' ? 'date décroissante' : 'pertinence'})
-                    {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
-                      <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
-                    )}
+                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                    <span>
+                      {resultFilterCandidates.length} acte(s) disponible(s) au rattachement (triés par {actSortLabel(actSortMode)})
+                      {actResultFilter !== 'ALL' && resultFilterCandidates.length !== filteredSearchCandidates.length && (
+                        <> sur {filteredSearchCandidates.length} résultat(s) de recherche</>
+                      )}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10.5px] font-bold text-emerald-800"
+                      title={`Actes dont le montant sans TM (total de l'acte − ticket modérateur) égale le ${MONTANT_IMPORT_LABEL} de cette ligne (${formatMoney(activeSearchingRow.montantBrut || activeSearchingRow.netAPayer)})`}
+                    >
+                      <CheckCircle2 className="w-3 h-3" />
+                      {montantConformesCount} montant(s) conforme(s)
+                    </span>
                   </span>
                   {actSearchQuery && (
                     <button
@@ -2845,25 +3008,23 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                   )}
                 </div>
 
-                {/* Tri des résultats : date croissante par défaut */}
+                {/* Tri des résultats : date croissante par défaut, écart de montant disponible */}
                 <div className="flex items-center gap-2 flex-wrap text-xs">
                   <span className="text-slate-500 font-semibold inline-flex items-center gap-1.5 shrink-0">
                     <Calendar className="w-4 h-4" />
                     Trier les résultats par :
                   </span>
-                  {([
-                    { key: 'DATE_ASC' as const, label: 'Date croissante ↑' },
-                    { key: 'DATE_DESC' as const, label: 'Date décroissante ↓' },
-                    { key: 'PERTINENCE' as const, label: 'Pertinence' },
-                  ]).map(opt => (
+                  {ACT_SORT_OPTIONS.map(opt => (
                     <button
                       key={opt.key}
                       type="button"
                       onClick={() => setActSortMode(opt.key)}
-                      title={opt.key === 'PERTINENCE' ? 'Tri par pertinence : même date + même montant, même date, même montant, similarité de nom, date la plus proche' : `Trier les actes par date de soins ${opt.key === 'DATE_ASC' ? 'croissante (plus anciens d\u2019abord)' : 'décroissante (plus récents d\u2019abord)'}`}
+                      title={opt.title}
                       className={`px-2.5 py-1 rounded-lg border transition font-semibold cursor-pointer ${
                         actSortMode === opt.key
                           ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                          : opt.key.startsWith('MONTANT')
+                          ? 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
@@ -2902,16 +3063,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 <div className="flex items-center gap-2 flex-wrap text-xs pt-2 mt-0.5 border-t border-slate-100">
                   <span
                     className="text-slate-500 font-semibold inline-flex items-center gap-1.5 shrink-0"
-                    title="Tri par pertinence : 1) même date + même montant, 2) même date, 3) même montant, 4) similarité de nom, 5) date la plus proche, 6) ordre alphabétique"
+                    title="Filtre de pertinence basé sur la comparaison « Montant_Reclame_Brut (importation) ↔ montant sans TM de l'acte prescrit » : 1) même date + montant sans TM conforme, 2) même date, 3) montant sans TM conforme, 4) à vérifier"
                   >
                     <Filter className="w-4 h-4" />
                     Filtrer les résultats :
                   </span>
                   {([
                     { key: 'ALL' as const, label: 'Tous', active: 'bg-slate-900 text-white border-slate-900 shadow-2xs', idle: 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100' },
-                    { key: 'PERFECT' as const, label: 'Même date & même montant', active: 'bg-emerald-700 text-white border-emerald-700 shadow-2xs', idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
+                    { key: 'PERFECT' as const, label: 'Même date & montant sans TM', active: 'bg-emerald-700 text-white border-emerald-700 shadow-2xs', idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100' },
                     { key: 'SAME_DATE' as const, label: 'Même date', active: 'bg-sky-700 text-white border-sky-700 shadow-2xs', idle: 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100' },
-                    { key: 'SAME_AMOUNT' as const, label: 'Même montant', active: 'bg-purple-700 text-white border-purple-700 shadow-2xs', idle: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
+                    { key: 'SAME_AMOUNT' as const, label: 'Même montant sans TM', active: 'bg-purple-700 text-white border-purple-700 shadow-2xs', idle: 'bg-purple-50 text-purple-800 border-purple-300 hover:bg-purple-100' },
                     { key: 'VERIFY' as const, label: 'À vérifier', active: 'bg-amber-600 text-white border-amber-600 shadow-2xs', idle: 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100' },
                   ]).map(chip => (
                     <button
@@ -2940,7 +3101,7 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                     <div className="text-sm text-slate-600 font-medium max-w-xl mx-auto">
                       {actResultFilter !== 'ALL' && filteredSearchCandidates.length > 0
                         ? `Aucun acte ne correspond au filtre « ${
-                            { PERFECT: 'Même date & même montant', SAME_DATE: 'Même date', SAME_AMOUNT: 'Même montant', VERIFY: 'À vérifier' }[actResultFilter]
+                            { PERFECT: 'Même date & montant sans TM', SAME_DATE: 'Même date', SAME_AMOUNT: 'Même montant sans TM', VERIFY: 'À vérifier' }[actResultFilter]
                           } » parmi les ${filteredSearchCandidates.length} résultat(s) de la recherche.`
                         : 'Aucun acte en attente ou partiellement payé correspondant trouvé.'}
                     </div>
@@ -2963,12 +3124,20 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 ) : (
                   resultFilterCandidates.map((cand) => {
                     const compDetails = getConfrontationDetails(activeSearchingRow.dateSoins, activeSearchingRow.montantBrut, activeSearchingRow.netAPayer, cand, activeSearchingRow.participation, activeSearchingRow.nomPrenom);
+                    // Résultat de la comparaison « Montant_Reclame_Brut (import) ↔ montant sans TM (acte) »
+                    const mnt = compDetails.montant;
+                    const isCurrentlyLinked = activeSearchingRow.matchedCandidate?.lignePrestationId === cand.lignePrestationId;
+                    const isLinkedToOtherRow = !isCurrentlyLinked && rows.some(
+                      r => r.rowId !== activeSearchingRow.rowId && r.matchedCandidate?.lignePrestationId === cand.lignePrestationId
+                    );
 
                     return (
                       <div
                         key={cand.lignePrestationId}
                         className={`p-4 sm:p-5 transition flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-sm ${
-                          compDetails.type === 'PERFECT'
+                          isCurrentlyLinked
+                            ? 'bg-emerald-50/70 hover:bg-emerald-50 ring-1 ring-emerald-300 border-l-4 border-l-emerald-600'
+                            : compDetails.type === 'PERFECT'
                             ? 'bg-emerald-50/40 hover:bg-emerald-50/70 border-l-4 border-l-emerald-500'
                             : compDetails.type === 'SAME_DATE'
                             ? 'bg-sky-50/30 hover:bg-sky-50/60 border-l-4 border-l-sky-500'
@@ -2999,6 +3168,16 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                                 (Facture N° {cand.prestationNum} • {formatDate(cand.prestationDate)})
                               </span>
                             )}
+                            {isCurrentlyLinked && (
+                              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                                <Link2 className="w-3 h-3" /> Acte déjà rattaché à cette ligne
+                              </span>
+                            )}
+                            {isLinkedToOtherRow && (
+                              <span className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700" title="Cet acte est déjà rattaché à une autre ligne du décompte">
+                                Déjà rattaché à une autre ligne
+                              </span>
+                            )}
                           </div>
 
                           {/* 2. Act header & Libelle + Live confrontation badge */}
@@ -3014,35 +3193,75 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                             </span>
                           </div>
 
-                          {/* Detailed price breakdown & live comparison */}
-                          <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200/80">
-                            <span>
-                              Prix Brut Initial: <strong className="text-slate-900">{formatMoney(cand.montantInitial)}</strong>
-                              {compDetails.isSameMontantBrut && (
-                                <span className="ml-1 text-xs text-emerald-700 font-bold">(Même montant)</span>
-                              )}
-                            </span>
-                            <span>Ticket Mod.: <strong className="text-amber-700">{formatMoney(cand.ticketModerateur)}</strong></span>
-                            <span>À Rembourser: <strong className="text-indigo-700">{formatMoney(cand.montantARembourser)}</strong></span>
-                            <span>Déjà Réglé: <strong className="text-emerald-700">{formatMoney(cand.dejaPaye)}</strong></span>
+                          {/* 3. RÉSULTAT DE LA COMPARAISON DES MONTANTS (base du tri par pertinence) */}
+                          <div className="rounded-lg border border-slate-200/80 bg-slate-50 p-2.5 space-y-1.5">
+                            <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 text-xs">
+                              <span title={`Colonne « Montant_Reclame_Brut » lue dans le fichier importé`}>
+                                {MONTANT_IMPORT_LABEL} : <strong className="text-slate-900 font-mono">{formatMoney(mnt.brutImport)}</strong>
+                              </span>
+                              <span title={`Total de l'acte (${formatMoney(mnt.brutActe)}) − ticket modérateur (${formatMoney(mnt.tmActe)})`}>
+                                {MONTANT_ACTE_LABEL} : <strong className="text-indigo-700 font-mono">{formatMoney(mnt.montantSansTM)}</strong>
+                                <span className="ml-1 text-[10.5px] text-slate-500">
+                                  (Brut {formatMoney(mnt.brutActe)} − TM {formatMoney(mnt.tmActe)})
+                                </span>
+                              </span>
+                              <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-bold ${mnt.badgeClass}`}>
+                                {mnt.isConforme ? (
+                                  <><CheckCircle2 className="w-3 h-3" /> Montants identiques</>
+                                ) : !mnt.isComparable ? (
+                                  <>Montant non comparable</>
+                                ) : (
+                                  <><AlertTriangle className="w-3 h-3" /> Écart {formatEcartMontant(mnt.ecart)}</>
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                              <span>À Rembourser: <strong className="text-indigo-700 font-mono">{formatMoney(cand.montantARembourser)}</strong></span>
+                              <span>Déjà Réglé: <strong className="text-emerald-700 font-mono">{formatMoney(cand.dejaPaye)}</strong></span>
+                              <span title="Score de proximité utilisé par le tri (100 = montant sans TM conforme)">
+                                Pertinence montant : <strong className={`font-mono ${mnt.ecartTextClass}`}>{compDetails.montantRank}/100</strong>
+                              </span>
+                            </div>
                           </div>
                         </div>
 
-                        {/* Right column: Reste a payer & Action */}
-                        <div className="flex lg:flex-col items-center lg:items-end justify-between lg:justify-center gap-2.5 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100 lg:pl-4 lg:border-l lg:min-w-[190px]">
+                        {/* Right column: Reste a payer & Action (rattacher / délier) */}
+                        <div className="flex lg:flex-col items-center lg:items-end justify-between lg:justify-center gap-2.5 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100 lg:pl-4 lg:border-l lg:min-w-[210px]">
                           <div className="text-left lg:text-right">
                             <span className="text-xs text-slate-500 uppercase tracking-wider block font-semibold">Reste à régler</span>
                             <strong className="text-base font-extrabold text-emerald-800 font-mono">
                               {formatMoney(cand.resteAPayer)}
                             </strong>
                           </div>
-                          <button
-                            onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
-                            className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          >
-                            <Link2 className="w-4 h-4" />
-                            <span>Rattacher cet Acte</span>
-                          </button>
+                          <div className="flex flex-col items-stretch gap-1.5">
+                            {isCurrentlyLinked ? (
+                              <>
+                                <button
+                                  onClick={() => handleUnlinkRow(activeSearchingRow.rowId, true)}
+                                  className="rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-bold text-rose-700 hover:bg-rose-50 transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                                  title="Délier cet acte prescrit de la ligne de règlement (la ligne redevient « Non rattaché »)"
+                                >
+                                  <Unlink className="w-4 h-4" />
+                                  <span>Délier cet acte</span>
+                                </button>
+                                <button
+                                  onClick={() => setSearchingRowId(null)}
+                                  className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Garder ce rattachement</span>
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => handleAssignCandidate(activeSearchingRow.rowId, cand)}
+                                className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 transition shadow-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                              >
+                                <Link2 className="w-4 h-4" />
+                                <span>Rattacher cet Acte</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -3050,15 +3269,27 @@ export const DecompteImportModal: React.FC<DecompteImportModalProps> = ({
                 )}
               </div>
 
-              {/* Unlink / Create option */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                <button
-                  onClick={() => handleAssignCandidate(activeSearchingRow.rowId, null)}
-                  className="inline-flex items-center gap-1.5 text-sm text-amber-700 hover:text-amber-800 font-semibold px-4 py-2 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 transition cursor-pointer"
-                >
-                  <Unlink className="h-4 w-4" />
-                  <span>Ne pas rattacher (Créer une nouvelle prestation au vol)</span>
-                </button>
+              {/* Délier l'acte déjà rattaché / créer une nouvelle prestation */}
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {activeSearchingRow.matchedCandidate && (
+                    <button
+                      onClick={() => handleUnlinkRow(activeSearchingRow.rowId)}
+                      className="inline-flex items-center gap-1.5 text-sm text-rose-700 hover:text-rose-800 font-semibold px-4 py-2 rounded-xl border border-rose-300 bg-rose-50 hover:bg-rose-100 transition cursor-pointer"
+                      title={`Délier « ${activeSearchingRow.matchedCandidate.personneNom} • ${activeSearchingRow.matchedCandidate.codeActe} » sans créer de nouvelle prestation`}
+                    >
+                      <Unlink className="h-4 w-4" />
+                      <span>Délier l'acte déjà rattaché</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleAssignCandidate(activeSearchingRow.rowId, null)}
+                    className="inline-flex items-center gap-1.5 text-sm text-amber-700 hover:text-amber-800 font-semibold px-4 py-2 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 transition cursor-pointer"
+                  >
+                    <Unlink className="h-4 w-4" />
+                    <span>Ne pas rattacher (Créer une nouvelle prestation au vol)</span>
+                  </button>
+                </div>
                 <button
                   onClick={() => setSearchingRowId(null)}
                   className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"

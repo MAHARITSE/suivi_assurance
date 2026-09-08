@@ -76,6 +76,41 @@ http://localhost/suivi-assurance/
 
 ---
 
+## 7. Rapprochement des règlements : règle de calcul appliquée
+
+Lors du rattachement d'un acte prescrit à une ligne de règlement (fenêtre
+**« Rattacher un acte prescrit à cette ligne de règlement »**, identique dans
+l'import de décompte et dans l'onglet Règlements), l'application compare deux
+montants uniquement :
+
+1. le `Montant_Reclame_Brut` lu dans le fichier importé (ou `lignes_paiement.montant_reclame` en base) ;
+2. le **montant sans ticket modérateur** de l'acte prescrit :
+   `lignes_prestation.total_prestation − lignes_prestation.ticket_moderateur`
+   (à défaut `montant_a_rembourser`).
+
+L'écart obtenu (`Montant_Reclame_Brut − montant sans TM`) est affiché sur chaque
+acte candidat et commande le tri :
+
+* **Écart de montant ↑ / ↓** : classement direct par écart (montants identiques en tête) ;
+* **Pertinence** : même date + montant conforme, puis même date, puis montant conforme, puis écart croissant, similarité de nom, date la plus proche.
+
+Tolérance d'arrondi : **2 Ar** pour conclure à des montants identiques ; un écart
+relatif ≤ **15 %** est considéré comme « proche » (badge ambre) et non comme conforme.
+
+**Aucune migration de la base n'est requise** : les colonnes utilisées existent déjà
+dans `schema.sql`. Pour mettre à jour un poste déjà déployé, remplacez `index.html`
+et le dossier `assets/` par la nouvelle version compilée (cache à vider avec
+`Ctrl + F5`).
+
+**Déliement des actes déjà rattachés** : boutons « Délier » sur chaque acte de la liste
+de rattachement, « Délier » par ligne du tableau de décompte, « Délier les N acte(s) déjà
+rattaché(s) » en pied de tableau et « Délier » sur chaque ligne reliée de l'onglet
+Règlements. Délier retire uniquement le lien `prestationId` / `prestationNumero` /
+`lignePrestationId` de la ligne de paiement : le règlement est conservé et les prestations
+sont recalculées par `api.php` (`recalcPrestations`).
+
+---
+
 ## Structure des fichiers inclus
 
 ```text
