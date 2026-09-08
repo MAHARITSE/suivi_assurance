@@ -17,6 +17,7 @@ import {
   Tag,
   Sparkles,
   Link2,
+  Unlink,
   FileCheck2,
   Printer,
   FileSpreadsheet,
@@ -156,6 +157,25 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
   };
 
   const getSocieteNom = (id: string) => societes.find(s => s.id === id)?.nom || 'Société';
+
+  /**
+   * Délie une ligne de règlement déjà rattachée à une facture de soins :
+   * les références de la prescription sont effacées de la ligne (le paiement et
+   * les totaux sont conservés), puis la base est recalculée par onSavePaiement.
+   */
+  const handleUnlinkLigne = (paiement: Paiement, ligne: LignePaiement) => {
+    if (!paiement || !ligne) return;
+    const libelle = `${ligne.nomAgent || ligne.nomBaseAssurance || 'cette ligne'} • ${ligne.prestationNumero || 'facture rattachée'}`;
+    if (!window.confirm(`Délier le rattachement de ${libelle} ?\n\nLe règlement reste enregistré, seul le lien vers la facture de soins est retiré.`)) {
+      return;
+    }
+
+    const updatedLignes = (paiement.lignes || []).map(l => (l.id === ligne.id
+      ? { ...l, prestationId: '', prestationNumero: '', lignePrestationId: '' }
+      : l));
+
+    onSavePaiement({ ...paiement, lignes: updatedLignes }, []);
+  };
 
   // Memoized Lookup of all medical acts and prescriptions for confrontation / manual reconciliation
   const prestationActsLookup = useMemo(() => {
@@ -1839,6 +1859,23 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                                   <span>{grp.prestationNumero && grp.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
                                                 </button>
                                               )}
+                                              {grp.prestationNumero && grp.prestationNumero !== '-' && grp.subLines && grp.subLines.length > 0 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const targetLigne = grp.subLines[0];
+                                                    if (targetLigne) {
+                                                      handleUnlinkLigne(p, targetLigne);
+                                                    }
+                                                  }}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold border border-rose-200 transition-colors cursor-pointer shrink-0"
+                                                  title="Délier la facture de soins rattachée à cette ligne de règlement"
+                                                >
+                                                  <Unlink className="w-3 h-3" />
+                                                  <span>Délier</span>
+                                                </button>
+                                              )}
                                             </div>
                                           </td>
                                           <td className="py-2 px-2 text-center">
@@ -1930,6 +1967,20 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                                   <Link2 className="w-3 h-3 text-indigo-600" />
                                                   <span>{l.prestationNumero && l.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
                                                 </button>
+                                                {l.prestationNumero && l.prestationNumero !== '-' && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleUnlinkLigne(p, l);
+                                                    }}
+                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold border border-rose-200 transition-colors shadow-2xs cursor-pointer shrink-0"
+                                                    title="Délier la facture de soins rattachée à cette ligne de règlement"
+                                                  >
+                                                    <Unlink className="w-3 h-3" />
+                                                    <span>Délier</span>
+                                                  </button>
+                                                )}
                                               </div>
                                             </td>
                                             <td className="py-2 px-2">
@@ -2287,6 +2338,24 @@ export const PaiementsView: React.FC<PaiementsViewProps> = ({
                                               <Link2 className="w-3 h-3 text-indigo-600" />
                                               <span>{sub.prestationNumero && sub.prestationNumero !== '-' ? "Changer" : "Relier"}</span>
                                             </button>
+                                            {sub.prestationNumero && sub.prestationNumero !== '-' && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const parentPaiement = paiements.find(pp => pp.id === sub.paiementId);
+                                                  const parentLigne = parentPaiement?.lignes?.find(ll => ll.id === sub.ligneId);
+                                                  if (parentPaiement && parentLigne) {
+                                                    handleUnlinkLigne(parentPaiement, parentLigne);
+                                                  }
+                                                }}
+                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold border border-rose-200 transition-colors cursor-pointer"
+                                                title="Délier la facture de soins rattachée à ce règlement"
+                                              >
+                                                <Unlink className="w-3 h-3" />
+                                                <span>Délier</span>
+                                              </button>
+                                            )}
                                           </div>
                                         </td>
                                         <td className="py-2 px-2 text-slate-600">

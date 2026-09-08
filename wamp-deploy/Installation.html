@@ -197,6 +197,34 @@ define('DB_PASS', ''); // Mot de passe vide par défaut sous WAMP</pre>
     <p>Ouvrez votre navigateur web et accédez à :</p>
     <p><a href="http://localhost/suivi-assurance/" class="btn" target="_blank">Ouvrir l'application (http://localhost/suivi-assurance/)</a></p>
 
+    <h2><span class="step-number">7</span> Rapprochement des règlements : règle de calcul appliquée</h2>
+    <p>
+      Lors du rattachement d'un acte prescrit à une ligne de règlement (bouton <em>« Lier »</em> de l'import de décompte
+      et bouton <em>« Changer / Relier »</em> de l'onglet Règlements), l'application compare uniquement deux montants :
+    </p>
+    <ol>
+      <li>le <code class="inline">Montant_Reclame_Brut</code> lu dans le fichier importé (ou la valeur <code class="inline">montant_reclame</code> de la ligne de règlement en base) ;</li>
+      <li>le <strong>montant sans ticket modérateur</strong> de l'acte prescrit, calculé comme <code class="inline">total_prestation − ticket_moderateur</code> de la ligne de prestation
+        (à défaut, <code class="inline">montant_a_rembourser</code> est utilisé).</li>
+    </ol>
+    <p>
+      L'écart obtenu (<code class="inline">écart = Montant_Reclame_Brut − montant sans TM</code>) est affiché sur chaque acte candidat et pilote le tri :
+      <em>« Écart de montant ↑ »</em> classe les montants identiques en tête (tolérance d'arrondi de 2 Ar, proximité acceptée jusqu'à 15 %),
+      et le tri <em>« Pertinence »</em> l'utilise comme critère de départage après la date de soins.
+    </p>
+    <p>
+      <strong>Aucune modification de la base n'est nécessaire :</strong> les colonnes <code class="inline">lignes_paiement.montant_reclame</code>,
+      <code class="inline">lignes_prestation.total_prestation</code>, <code class="inline">lignes_prestation.ticket_moderateur</code> et
+      <code class="inline">lignes_prestation.montant_a_rembourser</code> existent déjà dans <code class="inline">schema.sql</code>.
+      Remplacez simplement <code class="inline">index.html</code> et le dossier <code class="inline">assets/</code> par la nouvelle version compilée.
+    </p>
+    <p>
+      <strong>Déliement :</strong> un bouton <em>« Délier »</em> est disponible sur chaque acte déjà rattaché (liste des résultats et tableau du décompte),
+      ainsi qu'un bouton de déliement global en pied de tableau et sur chaque ligne déjà reliée de l'onglet Règlements.
+      Délier ne supprime jamais le règlement : seul le lien vers la facture de soins est retiré, puis les totaux des prestations sont
+      recalculés côté <code class="inline">api.php</code> (<code class="inline">recalcPrestations</code>).
+    </p>
+
     <div style="margin-top:40px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
       <h3 style="margin-top:0; font-size: 1.1rem; color: #475569;">Structure des fichiers du déploiement :</h3>
       <div class="file-tree">
