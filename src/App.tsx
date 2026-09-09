@@ -6,6 +6,7 @@ import { Dashboard } from './components/Dashboard';
 import { PrestationsView } from './components/PrestationsView';
 import { PaiementsView } from './components/PaiementsView';
 import { RejetsView } from './components/RejetsView';
+import type { RejetDetail } from './components/RejetsView';
 import { HistoriqueView } from './components/HistoriqueView';
 import { SocietesView } from './components/SocietesView';
 import { PersonnesView } from './components/PersonnesView';
@@ -477,6 +478,122 @@ export function App() {
       setLastSyncTime(new Date());
     } catch (err: any) {
       alert(`Erreur de suppression du paiement : ${err.message || err}`);
+    }
+  };
+
+  // Suppression réelle d'un rejet : remet à zéro les montants exclus sur les
+  // règlements sources et/ou réinitialise le statut 'Rejeté' porté directement
+  // sur la prestation, puis recalcule l'ensemble des prestations.
+  const handleDeleteRejet = async (rejet: RejetDetail) => {
+    try {
+      // 1. Identifier les lignes de règlement portant l'exclusion.
+      //    Sources exactes collectées par la vue Rejets ; à défaut, on retombe
+      //    sur un appariement prestation + acte.
+      const sourceKeys = new Set(
+        (rejet.sources || []).map((s) => `${s.paiementId}|${s.lignePaiementId}`)
+      );
+
+      if (sourceKeys.size === 0) {
+        paiements.forEach((pm) => {
+          (pm.lignes || []).forEach((lp) => {
+            if (!(Number(lp.montantExclu || 0) > 0)) return;
+            const byPrestation = !!rejet.prestationId && lp.prestationId === rejet.prestationId;
+            const byFacture =
+              !!rejet.numeroFacture &&
+              !!lp.prestationNumero &&
+              lp.prestationNumero.trim().toLowerCase() === rejet.numeroFacture.trim().toLowerCase();
+            const byActe = (lp.codeActe || 'EXCLU') === rejet.codeActe;
+            if ((byPrestation || byFacture) && byActe) {
+              sourceKeys.add(`${pm.id}|${lp.id}`);
+            }
+          });
+        });
+      }
+
+      // 2. Remettre à zéro les montants exclus sur les lignes concernées
+      //    et recalculer les totaux des bordereaux modifiés.
+      const changedPaiements: Paiement[] = [];
+      const nextPaiements = paiements.map((pm) => {
+        let touched = false;
+        const nextLignes = (pm.lignes || []).map((lp) => {
+          if (Number(lp.montantExclu || 0) > 0 && sourceKeys.has(`${pm.id}|${lp.id}`)) {
+            touched = true;
+            return { ...lp, montantExclu: 0 };
+          }
+          return lp;
+        });
+        if (!touched) return pm;
+
+        const updated: Paiement = {
+          ...pm,
+          lignes: nextLignes,
+          totalExclu: nextLignes.reduce((s, l) => s + Number(l.montantExclu || 0), 0),
+        };
+        changedPaiements.push(updated);
+        return updated;
+      });
+
+      // 3. Nettoyer les traces de rejet portées directement sur la prestation
+      //    (statut 'Rejeté' saisi manuellement ou à l'import, montants exclus,
+      //    motifs). La réconciliation recalculera le reste à partir des
+      //    règlements mis à jour.
+      let basePrestations = prestations;
+      if (rejet.type !== 'exclusion_decompte' && rejet.prestationId) {
+        basePrestations = prestations.map((p) => {
+          if (p.id !== rejet.prestationId) return p;
+
+          if (rejet.type === 'prestation_complete') {
+            return {
+              ...p,
+              statut: (p.statut === 'Rejeté' ? 'En attente' : p.statut) as Prestation['statut'],
+              montantExclu: 0,
+              motifExclusion: undefined,
+              lignes: (p.lignes || []).map((l) =>
+                l.statut === 'Rejeté'
+                  ? { ...l, statut: 'En attente' as const, montantExclu: 0, motifExclusion: undefined }
+                  : l
+              ),
+            };
+          }
+
+          // Acte isolé : on ne réinitialise que la ligne concernée
+          const lignesNettoyees = (p.lignes || []).map((l) =>
+            l.statut === 'Rejeté' && (l.code === rejet.codeActe || (!l.code && rejet.codeActe === 'ACTE'))
+              ? { ...l, statut: 'En attente' as const, montantExclu: 0, motifExclusion: undefined }
+              : l
+          );
+          const encoreRejete = lignesNettoyees.some((l) => l.statut === 'Rejeté');
+          return {
+            ...p,
+            lignes: lignesNettoyees,
+            statut: (p.statut === 'Rejeté' && !encoreRejete ? 'En attente' : p.statut) as Prestation['statut'],
+            motifExclusion: encoreRejete ? p.motifExclusion : undefined,
+            montantExclu: encoreRejete ? p.montantExclu : 0,
+          };
+        });
+      }
+
+      // 4. Recalcul systématique des prestations à partir des règlements à jour.
+      const reconciled = reconcilePrestationsWithPaiements(basePrestations, nextPaiements);
+
+      if (storageMode === 'server') {
+        if (changedPaiements.length > 0) {
+          await saveWampDataBulk('paiements', changedPaiements);
+        }
+        if (reconciled.length > 0) {
+          await saveWampDataBulk('prestations', reconciled);
+        }
+      }
+
+      setPaiements(nextPaiements);
+      saveLocalTable('paiements', nextPaiements);
+
+      setPrestations(reconciled);
+      saveLocalTable('prestations', reconciled);
+
+      setLastSyncTime(new Date());
+    } catch (err: any) {
+      alert(`Erreur lors de la suppression du rejet : ${err.message || err}`);
     }
   };
 
@@ -1035,6 +1152,7 @@ export function App() {
             familles={familles}
             selectedSocieteId={selectedSocieteId}
             onSavePrestation={handleSavePrestation}
+            onDeleteRejet={handleDeleteRejet}
           />
         )}
 

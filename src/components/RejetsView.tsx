@@ -15,7 +15,8 @@ import {
   UserCheck,
   Receipt,
   RotateCcw,
-  EyeOff
+  EyeOff,
+  Trash2
 } from 'lucide-react';
 import { Prestation, Paiement, Societe, Personne, Famille } from '../types';
 import { formatMoney, formatDate } from '../utils/formatters';
@@ -45,6 +46,9 @@ export interface RejetDetail {
   motif: string;
   bordereauPaiement?: string;
   datePaiement?: string;
+  /** Sources techniques du rejet : lignes de règlement portant le montant exclu.
+   *  Utilisées pour la suppression réelle (remise à zéro des exclusions). */
+  sources?: { paiementId: string; lignePaiementId: string }[];
 }
 
 interface RejetsViewProps {
@@ -55,6 +59,9 @@ interface RejetsViewProps {
   familles: Famille[];
   selectedSocieteId: string;
   onSavePrestation?: (prestation: Prestation) => void;
+  /** Suppression réelle d'un rejet : remet à zéro les exclusions dans les
+   *  règlements et/ou le statut de la prestation, puis recalcule tout. */
+  onDeleteRejet?: (rejet: RejetDetail) => void;
 }
 
 export const RejetsView: React.FC<RejetsViewProps> = ({
@@ -65,6 +72,7 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
   familles,
   selectedSocieteId,
   onSavePrestation,
+  onDeleteRejet,
 }) => {
   // Mode de vue : 'bordereau' (Vue par Facture / Bordereau) ou 'detaillee' (Vue Détaillée Dossiers)
   const [viewMode, setViewMode] = useState<RejetViewMode>('bordereau');
@@ -126,6 +134,23 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
     });
   };
 
+  // Suppression réelle d'un rejet (avec confirmation)
+  const [rejetToDelete, setRejetToDelete] = useState<RejetDetail | null>(null);
+
+  const confirmDeleteRejet = () => {
+    if (!rejetToDelete) return;
+    // Nettoyage de la liste des rejets masqués si ce rejet y figurait
+    setDismissedIds(prev => {
+      const updated = prev.filter(item => item !== rejetToDelete.id);
+      try {
+        localStorage.setItem('suivi_rejets_dismissed_ids', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    onDeleteRejet?.(rejetToDelete);
+    setRejetToDelete(null);
+  };
+
   // 1. Extraction et compilation dynamique de TOUS les rejets SANS DOUBLONS
   const allRejets = useMemo<RejetDetail[]>(() => {
     const rejetsMap = new Map<string, RejetDetail>();
@@ -184,6 +209,10 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
                 ? `${existing.bordereauPaiement}, ${paie.numeroBordereau}` 
                 : paie.numeroBordereau;
             }
+            existing.sources = [
+              ...(existing.sources || []),
+              { paiementId: paie.id, lignePaiementId: l.id },
+            ];
             registerAliases(existingKey, aliases);
           } else {
             const canonicalKey = aliases[0] || `rejet_${paie.id}_${l.id}`;
@@ -206,6 +235,7 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
               motif: l.commentaire || paie.notes || 'Exclusion ou rejet notifié sur bordereau de règlement',
               bordereauPaiement: paie.numeroBordereau,
               datePaiement: paie.datePaiement,
+              sources: [{ paiementId: paie.id, lignePaiementId: l.id }],
             };
 
             rejetsMap.set(canonicalKey, item);
@@ -800,6 +830,7 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
           onSort={handleFactureSort}
           onDismissRejet={handleDismissRejet}
           onRestoreRejet={handleRestoreRejet}
+          onDeleteRejet={onDeleteRejet ? (r) => setRejetToDelete(r) : undefined}
           showDismissed={showDismissed}
         />
       ) : (
@@ -928,6 +959,15 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
                               Masquer
                             </button>
                           )}
+                          {onDeleteRejet && (
+                            <button
+                              onClick={() => setRejetToDelete(item)}
+                              className="px-2 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold text-[11px] transition-colors cursor-pointer shadow-2xs"
+                              title="Supprimer définitivement ce rejet : remet à zéro les montants exclus du règlement et recalcule la prestation"
+                            >
+                              Supprimer
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -959,6 +999,94 @@ export const RejetsView: React.FC<RejetsViewProps> = ({
                   {totalBrutConcerne > 0 ? ((totalMontantRejete / totalBrutConcerne) * 100).toFixed(1) : 0}%
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal : Suppression réelle d'un rejet */}
+      {rejetToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            {/* En-tête */}
+            <div className="bg-rose-50 border-b border-rose-200 px-5 py-4 flex items-start justify-between rounded-t-2xl">
+              <div className="flex items-center space-x-2">
+                <AlertTriangle className="w-5 h-5 text-rose-600" />
+                <h3 className="text-base font-bold text-rose-900">Supprimer définitivement ce rejet ?</h3>
+              </div>
+              <button
+                onClick={() => setRejetToDelete(null)}
+                className="text-rose-400 hover:text-rose-600 transition cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Corps */}
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Cette action annule le rejet dans les données réelles : les montants exclus seront remis à
+                zéro sur le(s) règlement(s) concerné(s) et/ou le statut de la prestation sera réinitialisé,
+                puis les prestations seront recalculées (montants payés, reste à recouvrer, statut).
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">N° Facture</span>
+                  <span className="font-mono font-bold text-indigo-700">{rejetToDelete.numeroFacture}</span>
+                </div>
+                <div className="bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Type de rejet</span>
+                  <span className="font-semibold text-slate-800">
+                    {rejetToDelete.type === 'prestation_complete'
+                      ? 'Facture intégrale rejetée'
+                      : rejetToDelete.type === 'acte_isole'
+                      ? 'Acte isolé rejeté'
+                      : 'Exclusion sur décompte'}
+                  </span>
+                </div>
+                <div className="bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Assuré / Patient</span>
+                  <span className="font-semibold text-slate-800">{rejetToDelete.nomAgent}</span>
+                  <span className="text-slate-400 font-mono text-[10px] block">({rejetToDelete.matricule})</span>
+                </div>
+                <div className="bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Acte concerné</span>
+                  <span className="font-semibold text-slate-800">
+                    <span className="font-mono text-indigo-600">{rejetToDelete.codeActe}</span> — {rejetToDelete.libelleActe}
+                  </span>
+                </div>
+                <div className="bg-rose-50 rounded-lg px-3 py-2 border border-rose-200">
+                  <span className="text-rose-500 block text-[10px] uppercase font-semibold">Montant rejeté</span>
+                  <span className="font-black text-rose-700 text-sm">{formatMoney(rejetToDelete.montantExcluRejete)}</span>
+                </div>
+                <div className="bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Bordereau règlement</span>
+                  <span className="font-mono font-semibold text-slate-700">{rejetToDelete.bordereauPaiement || '-'}</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-lg px-3 py-2 text-xs">
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold mb-0.5">Motif du rejet</span>
+                <span className="text-slate-700">{rejetToDelete.motif}</span>
+              </div>
+            </div>
+
+            {/* Pied : actions */}
+            <div className="px-5 pb-5 flex justify-end space-x-2">
+              <button
+                onClick={() => setRejetToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmDeleteRejet}
+                className="px-4 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 shadow-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Oui, supprimer ce rejet</span>
+              </button>
             </div>
           </div>
         </div>
