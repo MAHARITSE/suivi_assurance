@@ -9,6 +9,7 @@ import {
   Calendar,
   Users,
   RotateCcw,
+  Trash2,
   ArrowUpDown,
   ArrowUp,
   ArrowDown
@@ -51,6 +52,7 @@ interface FacturesRejetsGroupedTableProps {
   onSort: (field: RejetFactureSortField) => void;
   onDismissRejet: (id: string, numFacture: string) => void;
   onRestoreRejet: (id: string, numFacture: string) => void;
+  onDeleteRejet?: (rejet: RejetDetail) => void;
   showDismissed: boolean;
 }
 
@@ -63,6 +65,7 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
   onSort,
   onDismissRejet,
   onRestoreRejet,
+  onDeleteRejet,
   showDismissed
 }) => {
   const renderSortIcon = (field: RejetFactureSortField) => {
@@ -391,6 +394,16 @@ export const FacturesRejetsGroupedTable: React.FC<FacturesRejetsGroupedTableProp
                                           title="Masquer"
                                         >
                                           <XCircle className="w-3 h-3 inline" />
+                                        </button>
+                                      )}
+                                      {onDeleteRejet && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onDeleteRejet(r)}
+                                          className="px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 text-[10px] font-semibold transition cursor-pointer"
+                                          title="Supprimer définitivement ce rejet (remet à zéro les exclusions et recalcule la prestation)"
+                                        >
+                                          <Trash2 className="w-3 h-3 inline" />
                                         </button>
                                       )}
                                     </td>
