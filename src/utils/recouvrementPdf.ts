@@ -17,6 +17,7 @@ export interface RecouvrementItem {
   ticketModerateur: number;
   montantARembourser: number;
   totalPaye: number;
+  montantExclu?: number;
   resteARecouvrer: number;
   retardJours: number;
   retardMois: number;
@@ -30,6 +31,7 @@ export interface RecouvrementSummary {
   totalTicketModerateur: number;
   totalARembourser: number;
   totalPaye: number;
+  totalExclu?: number;
   dossiersCount: number;
   parSociete: Array<{
     societeNom: string;
@@ -37,6 +39,7 @@ export interface RecouvrementSummary {
     totalBrut: number;
     totalARembourser: number;
     totalPaye: number;
+    totalExclu?: number;
     resteARecouvrer: number;
     maxRetardJours: number;
   }>;
@@ -47,6 +50,7 @@ export interface RecouvrementSummary {
     totalBrut: number;
     totalARembourser: number;
     totalPaye: number;
+    totalExclu?: number;
     resteARecouvrer: number;
   }>;
 }
@@ -254,17 +258,27 @@ export function calculateRecouvrementData(
 
   const paiementsParPrestation: Record<string, number> = {};
   const paiementsParLigne: Record<string, number> = {};
+  const exclusParPrestation: Record<string, number> = {};
+  const exclusParLigne: Record<string, number> = {};
 
   paiements.forEach(p => {
     p.lignes.forEach(l => {
       const paye = Number(l.totalPaye || l.montantPaye || 0);
       const exclu = Number(l.montantExclu || 0);
-      if (paye > 0 || exclu > 0) {
+      if (paye > 0) {
         if (l.prestationId) {
           paiementsParPrestation[l.prestationId] = (paiementsParPrestation[l.prestationId] || 0) + paye;
         }
         if (l.lignePrestationId) {
           paiementsParLigne[l.lignePrestationId] = (paiementsParLigne[l.lignePrestationId] || 0) + paye;
+        }
+      }
+      if (exclu > 0) {
+        if (l.prestationId) {
+          exclusParPrestation[l.prestationId] = (exclusParPrestation[l.prestationId] || 0) + exclu;
+        }
+        if (l.lignePrestationId) {
+          exclusParLigne[l.lignePrestationId] = (exclusParLigne[l.lignePrestationId] || 0) + exclu;
         }
       }
     });
@@ -277,6 +291,7 @@ export function calculateRecouvrementData(
     totalBrut: number;
     totalARembourser: number;
     totalPaye: number;
+    totalExclu: number;
     resteARecouvrer: number;
     maxRetardJours: number;
   }> = {};
@@ -288,6 +303,7 @@ export function calculateRecouvrementData(
     totalBrut: number;
     totalARembourser: number;
     totalPaye: number;
+    totalExclu: number;
     resteARecouvrer: number;
   }> = {};
 
@@ -314,6 +330,7 @@ export function calculateRecouvrementData(
   let totalTicketModerateur = 0;
   let totalARembourser = 0;
   let totalPaye = 0;
+  let totalExclu = 0;
 
   prestations.forEach(p => {
     if (filtreSocieteId && filtreSocieteId !== 'ALL' && p.societeId !== filtreSocieteId) {
@@ -338,7 +355,15 @@ export function calculateRecouvrementData(
     });
     pPaye = Math.max(pPaye, linesPaye);
 
-    const reste = Math.max(0, pARemb - pPaye);
+    let pExclu = Math.max(Number(p.montantExclu || 0), exclusParPrestation[p.id] || 0);
+    let linesExclu = 0;
+    p.lignes.forEach(l => {
+      const le = Math.max(l.montantExclu || 0, exclusParLigne[l.id] || 0);
+      linesExclu += le;
+    });
+    pExclu = Math.max(pExclu, linesExclu);
+
+    const reste = Math.max(0, pARemb - pPaye - pExclu);
 
     if (reste <= 50) return;
 
@@ -358,6 +383,7 @@ export function calculateRecouvrementData(
     totalTicketModerateur += pTicket;
     totalARembourser += pARemb;
     totalPaye += pPaye;
+    totalExclu += pExclu;
 
     items.push({
       prestationId: p.id,
@@ -371,6 +397,7 @@ export function calculateRecouvrementData(
       ticketModerateur: pTicket,
       montantARembourser: pARemb,
       totalPaye: pPaye,
+      montantExclu: pExclu,
       resteARecouvrer: reste,
       retardJours,
       retardMois,
@@ -384,6 +411,7 @@ export function calculateRecouvrementData(
         totalBrut: 0,
         totalARembourser: 0,
         totalPaye: 0,
+        totalExclu: 0,
         resteARecouvrer: 0,
         maxRetardJours: 0,
       };
@@ -393,6 +421,7 @@ export function calculateRecouvrementData(
     sm.totalBrut += pTotal;
     sm.totalARembourser += pARemb;
     sm.totalPaye += pPaye;
+    sm.totalExclu += pExclu;
     sm.resteARecouvrer += reste;
     if (retardJours > sm.maxRetardJours) sm.maxRetardJours = retardJours;
 
@@ -405,6 +434,7 @@ export function calculateRecouvrementData(
         totalBrut: 0,
         totalARembourser: 0,
         totalPaye: 0,
+        totalExclu: 0,
         resteARecouvrer: 0,
       };
     }
@@ -413,13 +443,14 @@ export function calculateRecouvrementData(
     mm.totalBrut += pTotal;
     mm.totalARembourser += pARemb;
     mm.totalPaye += pPaye;
+    mm.totalExclu += pExclu;
     mm.resteARecouvrer += reste;
   });
 
   items.sort((a, b) => b.retardJours - a.retardJours);
 
   const parSociete = Object.values(socMap).sort((a, b) => b.resteARecouvrer - a.resteARecouvrer);
-  const parMois = Object.values(moisMap).sort((a, b) => b.moisKey.localeCompare(a.moisKey));
+  const parMois = Object.values(moisMap).sort((a, b) => a.moisKey.localeCompare(b.moisKey));
 
   return {
     items,
@@ -428,6 +459,7 @@ export function calculateRecouvrementData(
     totalTicketModerateur,
     totalARembourser,
     totalPaye,
+    totalExclu,
     dossiersCount: items.length,
     parSociete,
     parMois
@@ -522,13 +554,14 @@ export function generateRecouvrementPdf(
     doc.setFont(fontFam, 'bold');
     doc.text('1. Récapitulatif Mensuel des Impayés & Créances en Retard', 12, currentY);
 
-    const moisHeaders = ['Mois / Période', 'Factures', 'Total Facturé', 'Charge Assureur', 'Déjà Réglé', 'Solde Impayé'];
+    const moisHeaders = ['Mois / Période', 'Factures', 'Total Facturé', 'Charge Assureur', 'Déjà Réglé', 'Montant Exclu', 'Solde Impayé'];
     const moisRows = data.parMois.map(m => [
       m.moisLibelle,
       String(m.dossiersCount),
       formatMoney(m.totalBrut),
       formatMoney(m.totalARembourser),
       formatMoney(m.totalPaye),
+      formatMoney(m.totalExclu || 0),
       formatMoney(m.resteARecouvrer)
     ]);
 
@@ -538,6 +571,7 @@ export function generateRecouvrementPdf(
       formatMoney(data.totalBrut),
       formatMoney(data.totalARembourser),
       formatMoney(data.totalPaye),
+      formatMoney(data.totalExclu || 0),
       formatMoney(data.totalARecouvrer)
     ]);
 
@@ -555,12 +589,13 @@ export function generateRecouvrementPdf(
       },
       styles: { fontSize: 7, cellPadding: 1.6, textColor: [30, 41, 59] },
       columnStyles: {
-        0: { fontStyle: 'bold', minCellWidth: 45 },
-        1: { halign: 'center', cellWidth: 20 },
-        2: { halign: 'right', cellWidth: 40 },
-        3: { halign: 'right', cellWidth: 40 },
-        4: { halign: 'right', cellWidth: 40, textColor: [4, 120, 87] },
-        5: { halign: 'right', cellWidth: 48, fontStyle: 'bold', textColor: [185, 28, 28] },
+        0: { fontStyle: 'bold', minCellWidth: 40 },
+        1: { halign: 'center', cellWidth: 18 },
+        2: { halign: 'right', cellWidth: 35 },
+        3: { halign: 'right', cellWidth: 35 },
+        4: { halign: 'right', cellWidth: 35, textColor: [4, 120, 87] },
+        5: { halign: 'right', cellWidth: 35, textColor: [225, 29, 72] },
+        6: { halign: 'right', cellWidth: 40, fontStyle: 'bold', textColor: [185, 28, 28] },
       },
       didParseCell: (hookData) => {
         if (hookData.section === 'body' && hookData.row.index === moisRows.length - 1) {
@@ -648,6 +683,7 @@ export function generateRecouvrementPdf(
     'Ticket Mod.',
     'Charge Assur.',
     'Déjà Payé',
+    'Montant Exclu',
     'Reste Dû',
     'Retard'
   ];
@@ -663,6 +699,7 @@ export function generateRecouvrementPdf(
       formatMoney(item.ticketModerateur),
       formatMoney(item.montantARembourser),
       formatMoney(item.totalPaye),
+      formatMoney(item.montantExclu || 0),
       formatMoney(item.resteARecouvrer),
       `${item.retardJours} j`
     ];
@@ -676,6 +713,7 @@ export function generateRecouvrementPdf(
     formatMoney(data.totalTicketModerateur),
     formatMoney(data.totalARembourser),
     formatMoney(data.totalPaye),
+    formatMoney(data.totalExclu || 0),
     formatMoney(data.totalARecouvrer),
     ''
   ]);
@@ -694,15 +732,16 @@ export function generateRecouvrementPdf(
     },
     styles: { fontSize: 7, cellPadding: 1.5, textColor: [30, 41, 59] },
     columnStyles: {
-      0: { cellWidth: 32 },
-      1: { cellWidth: 60 },
-      2: { cellWidth: 40 },
-      3: { halign: 'right', cellWidth: 26 },
-      4: { halign: 'right', cellWidth: 24, textColor: [180, 83, 9] },
-      5: { halign: 'right', cellWidth: 26 },
-      6: { halign: 'right', cellWidth: 26, textColor: [4, 120, 87] },
-      7: { halign: 'right', cellWidth: 28, fontStyle: 'bold', textColor: [185, 28, 28] },
-      8: { halign: 'center', cellWidth: 18, textColor: [153, 27, 27] }
+      0: { cellWidth: 30 },
+      1: { cellWidth: 54 },
+      2: { cellWidth: 36 },
+      3: { halign: 'right', cellWidth: 24 },
+      4: { halign: 'right', cellWidth: 22, textColor: [180, 83, 9] },
+      5: { halign: 'right', cellWidth: 24 },
+      6: { halign: 'right', cellWidth: 24, textColor: [4, 120, 87] },
+      7: { halign: 'right', cellWidth: 24, textColor: [225, 29, 72] },
+      8: { halign: 'right', cellWidth: 25, fontStyle: 'bold', textColor: [185, 28, 28] },
+      9: { halign: 'center', cellWidth: 16, textColor: [153, 27, 27] }
     },
     didParseCell: (hookData) => {
       if (hookData.section === 'body' && hookData.row.index === detailRows.length - 1) {
@@ -826,16 +865,22 @@ export function generateSelectedPrestationsPdf(
     ''
   );
 
-  // Calculs paiements
+  // Calculs paiements et exclusions
   const paiementsParPrestation: Record<string, number> = {};
   const paiementsParLigne: Record<string, number> = {};
+  const exclusParPrestation: Record<string, number> = {};
+  const exclusParLigne: Record<string, number> = {};
   paiements.forEach(p => {
     p.lignes.forEach(l => {
       const paye = Number(l.totalPaye || l.montantPaye || 0);
       const exclu = Number(l.montantExclu || 0);
-      if (paye > 0 || exclu > 0) {
+      if (paye > 0) {
         if (l.prestationId) paiementsParPrestation[l.prestationId] = (paiementsParPrestation[l.prestationId] || 0) + paye;
         if (l.lignePrestationId) paiementsParLigne[l.lignePrestationId] = (paiementsParLigne[l.lignePrestationId] || 0) + paye;
+      }
+      if (exclu > 0) {
+        if (l.prestationId) exclusParPrestation[l.prestationId] = (exclusParPrestation[l.prestationId] || 0) + exclu;
+        if (l.lignePrestationId) exclusParLigne[l.lignePrestationId] = (exclusParLigne[l.lignePrestationId] || 0) + exclu;
       }
     });
   });
@@ -844,6 +889,7 @@ export function generateSelectedPrestationsPdf(
   let totalTicket = 0;
   let totalRemb = 0;
   let totalPayeAll = 0;
+  let totalExcluAll = 0;
   let totalResteAll = 0;
 
   const moisMap: Record<string, {
@@ -854,6 +900,7 @@ export function generateSelectedPrestationsPdf(
     ticket: number;
     totalARembourser: number;
     totalPaye: number;
+    totalExclu: number;
     resteARecouvrer: number;
   }> = {};
 
@@ -877,7 +924,24 @@ export function generateSelectedPrestationsPdf(
 
   const detailRows: any[] = [];
 
-  prestations.forEach(p => {
+  // Tri chronologique croissant des factures & actes pour la liste nominative détaillée
+  const sortedPrestations = [...prestations].sort((a, b) => {
+    const dateA = a.date || '';
+    const dateB = b.date || '';
+    const dateComp = dateA.localeCompare(dateB);
+    if (dateComp !== 0) return dateComp;
+
+    const numA = a.numeroFacture || '';
+    const numB = b.numeroFacture || '';
+    const numComp = numA.localeCompare(numB, undefined, { numeric: true });
+    if (numComp !== 0) return numComp;
+
+    const nomA = (a.nomAgent || '').trim();
+    const nomB = (b.nomAgent || '').trim();
+    return nomA.localeCompare(nomB, 'fr', { sensitivity: 'base' });
+  });
+
+  sortedPrestations.forEach(p => {
     const pers = personnes.find(pe => pe.id === p.personneId);
     const nomPatient = (p.nomAgent || pers?.nomPrenom || 'Agent').trim();
     const matricule = (p.matricule || pers?.matricule || '').trim();
@@ -894,12 +958,22 @@ export function generateSelectedPrestationsPdf(
       linesPaye += lp;
     });
     prestPaye = Math.max(prestPaye, linesPaye);
-    const prestReste = Math.max(0, charge - prestPaye);
+
+    let prestExclu = Math.max(Number(p.montantExclu || 0), exclusParPrestation[p.id] || 0);
+    let linesExclu = 0;
+    p.lignes?.forEach(l => {
+      const le = Math.max(l.montantExclu || 0, exclusParLigne[l.id] || 0);
+      linesExclu += le;
+    });
+    prestExclu = Math.max(prestExclu, linesExclu);
+
+    const prestReste = Math.max(0, charge - prestPaye - prestExclu);
 
     totalFacture += montantBrut;
     totalTicket += ticket;
     totalRemb += charge;
     totalPayeAll += prestPaye;
+    totalExcluAll += prestExclu;
     totalResteAll += prestReste;
 
     // Regroupement Mois
@@ -913,6 +987,7 @@ export function generateSelectedPrestationsPdf(
         ticket: 0,
         totalARembourser: 0,
         totalPaye: 0,
+        totalExclu: 0,
         resteARecouvrer: 0,
       };
     }
@@ -922,6 +997,7 @@ export function generateSelectedPrestationsPdf(
     mm.ticket += ticket;
     mm.totalARembourser += charge;
     mm.totalPaye += prestPaye;
+    mm.totalExclu += prestExclu;
     mm.resteARecouvrer += prestReste;
 
     // Formatage demandé :
@@ -951,6 +1027,7 @@ export function generateSelectedPrestationsPdf(
       { content: formatMoney(ticket), styles: { halign: 'right', textColor: [180, 83, 9], fontStyle: 'bold' } },
       { content: formatMoney(charge), styles: { halign: 'right', fontStyle: 'bold' } },
       { content: formatMoney(prestPaye), styles: { halign: 'right', textColor: [4, 120, 87], fontStyle: 'bold' } },
+      { content: formatMoney(prestExclu), styles: { halign: 'right', textColor: [225, 29, 72], fontStyle: 'bold' } },
       { content: formatMoney(prestReste), styles: { halign: 'right', fontStyle: 'bold', textColor: [185, 28, 28] } },
     ]);
 
@@ -960,7 +1037,8 @@ export function generateSelectedPrestationsPdf(
       const lTicket = l.ticketModerateur ?? Math.round((p.ticketModerateur || 0) / (p.lignes.length || 1));
       const lCharge = l.montantARembourser ?? Math.max(0, lBrut - lTicket);
       const lPaye = Math.max(l.totalPaye || 0, paiementsParLigne[l.id] || 0);
-      const lReste = Math.max(0, lCharge - lPaye);
+      const lExclu = Math.max(l.montantExclu || 0, exclusParLigne[l.id] || 0);
+      const lReste = Math.max(0, lCharge - lPaye - lExclu);
       const fullActeName = getFullActeLabel(l.code, l.libelle, options?.familles);
 
       detailRows.push([
@@ -969,6 +1047,7 @@ export function generateSelectedPrestationsPdf(
         { content: formatMoney(lTicket), styles: { halign: 'right', textColor: [100, 116, 139] } },
         { content: formatMoney(lCharge), styles: { halign: 'right', textColor: [100, 116, 139] } },
         { content: formatMoney(lPaye), styles: { halign: 'right', textColor: [100, 116, 139] } },
+        { content: formatMoney(lExclu), styles: { halign: 'right', textColor: [100, 116, 139] } },
         { content: formatMoney(lReste), styles: { halign: 'right', textColor: [100, 116, 139] } }
       ]);
     });
@@ -981,11 +1060,12 @@ export function generateSelectedPrestationsPdf(
     { content: formatMoney(totalTicket), styles: { fontStyle: 'bold', halign: 'right', textColor: [180, 83, 9], fillColor: [254, 242, 242] } },
     { content: formatMoney(totalRemb), styles: { fontStyle: 'bold', halign: 'right', fillColor: [254, 242, 242] } },
     { content: formatMoney(totalPayeAll), styles: { fontStyle: 'bold', halign: 'right', textColor: [4, 120, 87], fillColor: [254, 242, 242] } },
+    { content: formatMoney(totalExcluAll), styles: { fontStyle: 'bold', halign: 'right', textColor: [225, 29, 72], fillColor: [254, 242, 242] } },
     { content: formatMoney(totalResteAll), styles: { fontStyle: 'bold', halign: 'right', textColor: [185, 28, 28], fillColor: [254, 242, 242] } },
   ]);
 
-  // 1. Récapitulatif mensuel en Portrait
-  const parMois = Object.values(moisMap).sort((a, b) => b.moisKey.localeCompare(a.moisKey));
+  // 1. Récapitulatif mensuel en Portrait (ordre chronologique croissant)
+  const parMois = Object.values(moisMap).sort((a, b) => a.moisKey.localeCompare(b.moisKey));
   if (parMois.length > 0) {
     doc.setTextColor(palette.primary[0], palette.primary[1], palette.primary[2]);
     doc.setFontSize(9);
@@ -999,6 +1079,7 @@ export function generateSelectedPrestationsPdf(
       'Ticket Mod.',
       'Charge Assur.',
       'Déjà Réglé',
+      'Montant Exclu',
       'Reste Dû'
     ];
 
@@ -1009,6 +1090,7 @@ export function generateSelectedPrestationsPdf(
       formatMoney(m.ticket),
       formatMoney(m.totalARembourser),
       formatMoney(m.totalPaye),
+      formatMoney(m.totalExclu),
       formatMoney(m.resteARecouvrer)
     ]);
 
@@ -1019,6 +1101,7 @@ export function generateSelectedPrestationsPdf(
       formatMoney(totalTicket),
       formatMoney(totalRemb),
       formatMoney(totalPayeAll),
+      formatMoney(totalExcluAll),
       formatMoney(totalResteAll)
     ]);
 
@@ -1040,13 +1123,14 @@ export function generateSelectedPrestationsPdf(
         textColor: [30, 41, 59],
       },
       columnStyles: {
-        0: { fontStyle: 'bold', cellWidth: 42 },
-        1: { halign: 'center', cellWidth: 14 },
-        2: { halign: 'right', cellWidth: 26 },
-        3: { halign: 'right', cellWidth: 24 },
-        4: { halign: 'right', cellWidth: 26 },
-        5: { halign: 'right', cellWidth: 26, textColor: [4, 120, 87] },
-        6: { halign: 'right', cellWidth: 28, fontStyle: 'bold', textColor: [185, 28, 28] },
+        0: { fontStyle: 'bold', cellWidth: 38 },
+        1: { halign: 'center', cellWidth: 12 },
+        2: { halign: 'right', cellWidth: 23 },
+        3: { halign: 'right', cellWidth: 21 },
+        4: { halign: 'right', cellWidth: 23 },
+        5: { halign: 'right', cellWidth: 23, textColor: [4, 120, 87] },
+        6: { halign: 'right', cellWidth: 23, textColor: [225, 29, 72] },
+        7: { halign: 'right', cellWidth: 23, fontStyle: 'bold', textColor: [185, 28, 28] },
       },
       didParseCell: (hookData) => {
         if (hookData.section === 'body' && hookData.row.index === moisRows.length - 1) {
@@ -1062,11 +1146,12 @@ export function generateSelectedPrestationsPdf(
   // 2. Tableau Nominatif Détaillé en Portrait
   // Colonnes demandées :
   // - Date & Matricule
-  // - Patient / Assuré (Sous Société)
+  // - Patient / Assuré (Sous Société) & Actes
   // - Montant Brut
   // - Ticket Mod.
   // - Charge Assur.
   // - Déjà Payé
+  // - Montant Exclu
   // - Reste Dû
   if (currentY > 210) {
     doc.addPage();
@@ -1085,6 +1170,7 @@ export function generateSelectedPrestationsPdf(
     { content: 'Ticket Mod.', styles: { halign: 'right' } },
     { content: 'Charge Assur.', styles: { halign: 'right' } },
     { content: 'Déjà Payé', styles: { halign: 'right' } },
+    { content: 'Montant Exclu', styles: { halign: 'right' } },
     { content: 'Reste Dû', styles: { halign: 'right' } }
   ];
 
@@ -1105,13 +1191,14 @@ export function generateSelectedPrestationsPdf(
       textColor: [30, 41, 59],
     },
     columnStyles: {
-      0: { cellWidth: 30, halign: 'center', valign: 'middle' },
-      1: { cellWidth: 52 },
-      2: { halign: 'right', cellWidth: 21 },
-      3: { halign: 'right', cellWidth: 19, textColor: [180, 83, 9] },
-      4: { halign: 'right', cellWidth: 21 },
-      5: { halign: 'right', cellWidth: 21, textColor: [4, 120, 87] },
-      6: { halign: 'right', cellWidth: 22 }
+      0: { cellWidth: 28, halign: 'center', valign: 'middle' },
+      1: { cellWidth: 46 },
+      2: { halign: 'right', cellWidth: 19 },
+      3: { halign: 'right', cellWidth: 18, textColor: [180, 83, 9] },
+      4: { halign: 'right', cellWidth: 19 },
+      5: { halign: 'right', cellWidth: 19, textColor: [4, 120, 87] },
+      6: { halign: 'right', cellWidth: 18, textColor: [225, 29, 72] },
+      7: { halign: 'right', cellWidth: 19, fontStyle: 'bold', textColor: [185, 28, 28] }
     },
     didParseCell: (hookData) => {
       // Style des lignes d'actes indentées
